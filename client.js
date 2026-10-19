@@ -175,6 +175,10 @@ window.__ModuleLoader__.load({
       'refresh.5m': '5 分钟',
       'column.model': '模型',
       'column.provider': '供应商',
+      'column.providerKind': '供应商类别',
+      'providerKind.apikey': '官方 API Key',
+      'providerKind.balance': '余额',
+      'providerKind.unknown': '其他',
       'column.date': '日期',
       'column.session': '会话',
       'column.lastUsed': '最近使用',
@@ -319,6 +323,10 @@ window.__ModuleLoader__.load({
       'refresh.5m': '5 min',
       'column.model': 'Model',
       'column.provider': 'Provider',
+      'column.providerKind': 'Provider type',
+      'providerKind.apikey': 'Official API Key',
+      'providerKind.balance': 'Balance',
+      'providerKind.unknown': 'Other',
       'column.date': 'Date',
       'column.session': 'Session',
       'column.lastUsed': 'Last used',
@@ -2395,18 +2403,42 @@ window.__ModuleLoader__.load({
 
       const providerRows = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(facetOf('provider'))
-          .map(([key, counters]) => ({
-            key,
-            provider: key,
-            calls: formatNumber(counters.calls),
-            input: formatNumber(counters.inputTokens),
-            output: formatNumber(counters.outputTokens),
-            total: formatNumber(counters.totalTokens),
-            sortKey: counters.totalTokens ?? 0,
+        // 供应商列固化成三类：官方 API Key / 余额 / 其他。
+        // 同类别的多个路由合并成一行——用户要的是「两类」，
+        // 不是逐个中转站。具体路由名放 tooltip，信息不丢。
+        const kinds = data?.providerKinds ?? {}
+        const merged = new Map()
+        for (const [name, counters] of Object.entries(facetOf('provider'))) {
+          const kind = kinds[name] ?? 'unknown'
+          const existing = merged.get(kind) ?? {
+            key: kind,
+            kind,
+            routes: [],
+            calls: 0,
+            input: 0,
+            output: 0,
+            total: 0,
+          }
+          existing.routes.push(name)
+          existing.calls += counters.calls ?? 0
+          existing.input += counters.inputTokens ?? 0
+          existing.output += counters.outputTokens ?? 0
+          existing.total += counters.totalTokens ?? 0
+          merged.set(kind, existing)
+        }
+        return [...merged.values()]
+          .map((row) => ({
+            key: row.kind,
+            provider: t(`providerKind.${row.kind}`),
+            routeHint: row.routes.join(', '),
+            calls: formatNumber(row.calls),
+            input: formatNumber(row.input),
+            output: formatNumber(row.output),
+            total: formatNumber(row.total),
+            sortKey: row.total,
           }))
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data, facetOf])
+      }, [data, facetOf, t])
 
       const dayRowsAll = useMemo(() => {
         if (data === undefined) return []
@@ -2769,7 +2801,7 @@ window.__ModuleLoader__.load({
       ]
 
       const providerColumns = [
-        { key: 'provider', label: t('column.provider'), main: true },
+        { key: 'provider', label: t('column.providerKind'), main: true },
         { key: 'calls', label: t('field.calls') },
         { key: 'input', label: t('field.input') },
         { key: 'output', label: t('field.output') },

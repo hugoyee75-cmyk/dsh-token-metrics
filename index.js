@@ -93,6 +93,7 @@ const DEFAULTS = {
   maxSessions: 500,
   /** 趋势图最多画多少条模型曲线（超出部分聚合为「其他」）。 */
   maxTrendSeries: 6,
+
   /** 去重表上限。 */
   maxSeenEntries: 200_000,
   /** 是否在页面展示「按会话」明细；默认关闭，会话维度对总量统计意义不大。 */
@@ -126,6 +127,7 @@ function resolveConfig(raw) {
     retentionDays: number(source.retentionDays, DEFAULTS.retentionDays, 0, 3650),
     maxSessions: number(source.maxSessions, DEFAULTS.maxSessions, 0, 5000),
     maxTrendSeries: number(source.maxTrendSeries, DEFAULTS.maxTrendSeries, 1, 20),
+
     maxSeenEntries: number(source.maxSeenEntries, DEFAULTS.maxSeenEntries, 1000, 2_000_000),
     showSessions: source.showSessions === true,
     trackFailedAttempts: source.trackFailedAttempts === true,
@@ -925,6 +927,29 @@ class TokenUsageTracker {
         return { days: dayList, series }
       })(),
       byProvider: this.store.byProvider,
+      /**
+       * 按认证类别聚合：官方 API Key / 余额 / 其他。
+       *
+       * 用户要求供应商维度固化成这两类——用官方 key 的显示「官方 API Key」，
+       * 走余额/账号授权的显示「余额」。判不出来的一律归「其他」，
+       * 不隐藏数据。
+       */
+      byProviderKind: (() => {
+        const kinds = { apikey: emptyCounters(), balance: emptyCounters(), unknown: emptyCounters() }
+        for (const [providerName, counters] of Object.entries(this.store.byProvider)) {
+          // 兼容旧实例：providerKinds 是后加的字段，缺了就视为未知。
+          const kind = this.providerKinds?.get?.(providerName) ?? 'unknown'
+          mergeCounters(kinds[kind] ?? kinds.unknown, counters)
+        }
+        // 只返回有数据的类别，避免页面出现全 0 的空行
+        return Object.fromEntries(
+          Object.entries(kinds)
+            .filter(([, counters]) => counters.calls > 0)
+            .map(([kind, counters]) => [kind, { ...counters, cacheHitRate: cacheHitRate(counters) }]),
+        )
+      })(),
+      /** 各 provider 路由名的判定结果，供明细表把供应商列换成类别。 */
+      providerKinds: Object.fromEntries(this.providerKinds ?? []),
       byModel: this.store.byModel,
       /**
        * 按模型分组的全维度明细（前端筛选用）。
@@ -1678,6 +1703,45 @@ export function apply(ctx, rawConfig) {
       }, 'token-metrics: 更新检查')
     }
   }
+
+  // —— provider 认证类别：官方 API Key / 余额 ——
+  //
+  // DSH 的 LlmConfigurableProvider 带 `nativeAuth`：oauth=true 表示走账号
+  // 授权（余额/订阅），false 表示用环境变量里的 API Key。这正是用户要区分的
+  // 两类。但该字段只有插件自己声明时才存在，所以必须容错：取不到就归「其他」。
+  const providerKinds = new Map()
+
+  const resolveProviderKinds = () => {
+    try {
+      const llm = ctx.get('llm')
+      if (llm !== undefined) {
+        const providers = llm.listConfigurableProviders?.() ?? []
+        for (const entry of providers) {
+          if (entry?.provider === undefined) continue
+          const oauth = entry.nativeAuth?.oauth
+          providerKinds.set(entry.provider, oauth === true
+            ? 'balance'
+            : oauth === false ? 'apikey' : 'unknown')
+        }
+      }
+    } catch {
+      // 服务不可用就保持已有映射，下一次再试
+    }
+  }
+  const syncProviderKinds = () => {
+    resolveProviderKinds()
+    // snapshot 直接读 tracker 的这份映射（缓存随 storeRevision 失效）。
+    tracker.providerKinds = providerKinds
+    tracker.cachedSnapshot = undefined
+    tracker.storeRevision += 1
+  }
+  syncProviderKinds()
+  // 插件可能晚于本插件注册 provider，定期刷新一次即可，开销可忽略。
+  ctx.effect(() => {
+    const timer = setInterval(syncProviderKinds, 60_000)
+    timer?.unref?.()
+    return () => clearInterval(timer)
+  }, 'token-metrics: provider 类别')
 
   // —— 对 Client 暴露只读快照 ——
   // 用插件自己的同源 HTTP 路由，而不是类型化 Remote：宿主每次刷新都能拿到

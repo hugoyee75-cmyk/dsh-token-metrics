@@ -134,7 +134,12 @@ globalThis.fetch = async () => ({
         '2026-10-18': { calls: 3, inputTokens: 700, outputTokens: 150, totalTokens: 850 },
         '2026-10-19': { calls: 3, inputTokens: 800, outputTokens: 200, totalTokens: 1100 },
       },
-      byProvider: { workbuddy: { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500 } },
+      byProvider: {
+        'official-route': { calls: 5, inputTokens: 1000, outputTokens: 100, totalTokens: 1100 },
+        'balance-route': { calls: 4, inputTokens: 800, outputTokens: 80, totalTokens: 880 },
+        'mystery-route': { calls: 3, inputTokens: 600, outputTokens: 60, totalTokens: 660 },
+      },
+      providerKinds: { 'official-route': 'apikey', 'balance-route': 'balance' },
       byModel: { 'workbuddy/deepseek-v4.1-flash': { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500 } },
       byModelName: {
         'deepseek-v4.1-flash': { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheHitRate: 0.3 },
@@ -1079,6 +1084,40 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
     check('趋势图仍可渲染', hasCanvas,
       `byDay=${Object.keys(dataState?.data?.byDay ?? {}).length} byModelDay=${Object.keys(dataState?.data?.byModelDay ?? {}).join(',')}`)
   }
+}
+
+// —— 供应商列固化成三类 ——
+// 用户要求：用官方 key 的显示「官方 API Key」，走余额的显示「余额」，
+// 判不出来的归「其他」但不隐藏。
+{
+  // 前面的测试会改动共享的 hookState（模型筛选等），这里彻底重置，
+  // 让面板从干净状态重新加载数据。
+  hookState.length = 0
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
+  // 切到「供应商」视图
+  let tab
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((c) => c === '供应商')) tab = node
+  })
+  tab?.props?.onClick?.()
+  resetHooks()
+  const providerTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  const cells = []
+  walkTree(providerTree, (node) => {
+    if (node?.props?.className === 'tu-cell-main') {
+      for (const child of node.children ?? []) if (typeof child === 'string') cells.push(child)
+    }
+  })
+  check('显示官方 API Key 类别', cells.includes('官方 API Key'), cells.join('|'))
+  check('显示余额类别', cells.includes('余额'), cells.join('|'))
+  check('无法判定的归为其他', cells.includes('其他'), cells.join('|'))
+  check('三个类别各一行', cells.length, 3)
 }
 
 // —— 日期视图：范围选择 + 分页 ——

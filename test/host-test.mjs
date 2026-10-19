@@ -823,6 +823,58 @@ check('重算后迁移标记已清除', repop.store.needsRebuild, false)
 check('重算后总量正确', repop.store.total.calls, 2)
 rmSync(rebuildHome, { recursive: true, force: true })
 
+// —— provider 认证类别：官方 API Key / 余额 / 其他 ——
+// 用户要求「供应商」维度固化成这两类：用官方 key 的显示官方 API Key，
+// 走余额/账号授权的显示余额；判不出来的归「其他」但不隐藏。
+{
+  const kindHome = freshEnvironment('dsh-token-usage-kind-')
+  process.env.DSH_TOKEN_USAGE_TEST_HOOK = '1'
+  const kindModule = await import('../index.js?kind=1')
+  const kindListeners = new Map()
+  kindModule.apply({
+    logger: { info: () => {}, warn: () => {} },
+    on(n, l) { kindListeners.set(n, l); return () => {} },
+    effect(fn) { fn(); return () => {} },
+    inject() { return () => {} },
+    get() { return undefined },
+  })
+  const kindTracker = globalThis[Symbol.for('dsh-token-metrics:tracker')]
+  const emitKind = kindListeners.get('session/event')
+  const usageKind = { inputTokens: 100, outputTokens: 10, totalTokens: 110 }
+
+  // 三个 provider：分别模拟官方 key、余额授权、无法判定
+  for (const provider of ['official-key', 'balance-route', 'mystery-route']) {
+    emitKind({ id: `s-${provider}`, header: { cwd: '/p' } }, {
+      type: 'assistant/message', seq: 1, time: Date.now(),
+      data: { turn: 1, step: 1, message: { source: { provider, model: 'm' } }, usage: usageKind },
+    })
+  }
+
+  // 手动注入判定结果（真实环境由 llm.listConfigurableProviders 填充）
+  kindTracker.providerKinds = new Map([
+    ['official-key', 'apikey'],
+    ['balance-route', 'balance'],
+    // mystery-route 不在映射里 -> unknown
+  ])
+  kindTracker.cachedSnapshot = undefined
+  kindTracker.storeRevision += 1
+
+  const kindSnap = kindTracker.snapshot()
+  check('按类别聚合存在官方 key', kindSnap.byProviderKind.apikey?.calls, 1)
+  check('按类别聚合存在余额', kindSnap.byProviderKind.balance?.calls, 1)
+  check('无法判定的归为其他', kindSnap.byProviderKind.unknown?.calls, 1)
+  check('类别合计等于总调用', Object.values(kindSnap.byProviderKind)
+    .reduce((sum, c) => sum + c.calls, 0), kindSnap.totals.all.calls)
+  // 判定结果也透出，前端明细表据此替换供应商列
+  check('透出 provider 判定结果', kindSnap.providerKinds['official-key'], 'apikey')
+  check('未判定的 provider 不在映射里', kindSnap.providerKinds['mystery-route'], undefined)
+
+  // 没有数据的类别不应出现在聚合里（避免页面出现全 0 空行）
+  const emptyKind = Object.values(kindSnap.byProviderKind).every((c) => c.calls > 0)
+  check('不返回空类别', emptyKind, true)
+  rmSync(kindHome, { recursive: true, force: true })
+}
+
 // —— 回扫进度：首次安装扫描历史时前端要能显示提示 ——
 // 用户首次打开插件时，Host 正在扫历史会话；没有进度提示就只能对着空统计发呆。
 {
