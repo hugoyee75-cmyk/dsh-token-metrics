@@ -125,6 +125,8 @@ window.__ModuleLoader__.load({
       'account.current': '当前登录',
       'account.none': '未登录',
       'account.unknown': '未知（历史数据无账号信息）',
+      'account.currentNoName': '当前登录账号',
+      'account.otherAccount': '其他账号（{id}）',
       'account.balance': '余额',
       'account.usagePage': '查看官方用量',
       'account.topUp': '充值',
@@ -276,6 +278,8 @@ window.__ModuleLoader__.load({
       'account.current': 'Signed in',
       'account.none': 'Signed out',
       'account.unknown': 'Unknown (history has no account info)',
+      'account.currentNoName': 'Current account',
+      'account.otherAccount': 'Other account ({id})',
       'account.balance': 'Balance',
       'account.usagePage': 'Official usage',
       'account.topUp': 'Top up',
@@ -2425,34 +2429,61 @@ window.__ModuleLoader__.load({
 
       const providerRows = useMemo(() => {
         if (data === undefined) return []
-        // 供应商列固化成三类：官方 API Key / 余额 / 其他。
-        // 同类别的多个路由合并成一行——用户要的是「两类」，
-        // 不是逐个中转站。具体路由名放 tooltip，信息不丢。
+        // 供应商列按**认证类别**归并，但只归并能判定的类别。
+        //
+        // 早先的实现把判定不出的也合并成一行「其他」，结果把 trae / qoder /
+        // workbuddy 这些**已知的路由名**全吞掉了——表格里明明有名字却只剩
+        // 「其他」，信息净损失。现在的规则：
+        //   - 判定为 apikey / balance 的路由 -> 合并成对应类别一行
+        //   - 判定不出的路由 -> **各自保留原路由名**，不做合并
         const kinds = data?.providerKinds ?? {}
-        const merged = new Map()
+        const rows = []
+        const knownKinds = new Map()
         for (const [name, counters] of Object.entries(facetOf('provider'))) {
-          const kind = kinds[name] ?? 'unknown'
-          const existing = merged.get(kind) ?? {
-            key: kind,
-            kind,
-            routes: [],
-            calls: 0,
-            input: 0,
-            output: 0,
-            total: 0,
+          const kind = kinds[name]
+          if (kind === 'apikey' || kind === 'balance') {
+            const existing = knownKinds.get(kind) ?? {
+              key: kind,
+              routes: [],
+              calls: 0,
+              input: 0,
+              output: 0,
+              total: 0,
+            }
+            existing.routes.push(name)
+            existing.calls += counters.calls ?? 0
+            existing.input += counters.inputTokens ?? 0
+            existing.output += counters.outputTokens ?? 0
+            existing.total += counters.totalTokens ?? 0
+            knownKinds.set(kind, existing)
+            continue
           }
-          existing.routes.push(name)
-          existing.calls += counters.calls ?? 0
-          existing.input += counters.inputTokens ?? 0
-          existing.output += counters.outputTokens ?? 0
-          existing.total += counters.totalTokens ?? 0
-          merged.set(kind, existing)
+          // 判定不出：保留原路由名，不合并
+          rows.push({
+            key: `route:${name}`,
+            provider: name,
+            routeHint: '',
+            calls: counters.calls ?? 0,
+            input: counters.inputTokens ?? 0,
+            output: counters.outputTokens ?? 0,
+            total: counters.totalTokens ?? 0,
+          })
         }
-        return [...merged.values()]
-          .map((row) => ({
-            key: row.kind,
-            provider: t(`providerKind.${row.kind}`),
+        // 已判定的类别各自一行
+        for (const [kind, row] of knownKinds) {
+          rows.push({
+            key: kind,
+            provider: t(`providerKind.${kind}`),
             routeHint: row.routes.join(', '),
+            calls: row.calls,
+            input: row.input,
+            output: row.output,
+            total: row.total,
+          })
+        }
+        return rows
+          .map((row) => ({
+            ...row,
             calls: formatNumber(row.calls),
             input: formatNumber(row.input),
             output: formatNumber(row.output),
@@ -2550,17 +2581,36 @@ window.__ModuleLoader__.load({
       // 账号分段。
       const accountRows = useMemo(() => {
         if (data === undefined) return []
+        // 账号 id 是平台返回的 UUID，直接展示没有意义。当前登录账号有昵称时
+        // 用它，否则退到一个可读的短标识；历史数据没有归属就标注清楚。
+        const currentId = data?.currentAccount?.id
+        const currentName = data?.currentAccount?.name
         return Object.entries(facetOf('account'))
-          .map(([id, entry]) => ({
-            key: id,
-            account: id === 'unknown' ? t('account.unknown') : id,
-            calls: formatNumber(entry.calls ?? 0),
-            input: formatNumber(entry.inputTokens ?? 0),
-            output: formatNumber(entry.outputTokens ?? 0),
-            total: formatNumber(entry.totalTokens ?? 0),
-            firstSeen: formatTime(entry.firstAt, locale),
-            sortKey: entry.totalTokens ?? 0,
-          }))
+          .map(([id, entry]) => {
+            let account
+            if (id === 'unknown') {
+              account = t('account.unknown')
+            } else if (currentId !== undefined && id === currentId && currentName) {
+              // 就是当前登录账号 -> 显示昵称
+              account = currentName
+            } else if (currentId !== undefined && id === currentId) {
+              // 是当前账号但没有昵称 -> 明确标注
+              account = t('account.currentNoName')
+            } else {
+              // 别的账号（历史登录）-> 用短 id 便于区分，而不是整串 UUID
+              account = t('account.otherAccount').replace('{id}', id.slice(0, 8))
+            }
+            return {
+              key: id,
+              account,
+              calls: formatNumber(entry.calls ?? 0),
+              input: formatNumber(entry.inputTokens ?? 0),
+              output: formatNumber(entry.outputTokens ?? 0),
+              total: formatNumber(entry.totalTokens ?? 0),
+              firstSeen: formatTime(entry.firstAt, locale),
+              sortKey: entry.totalTokens ?? 0,
+            }
+          })
           .sort((a, b) => b.sortKey - a.sortKey)
       }, [data, locale, t, facetOf])
 

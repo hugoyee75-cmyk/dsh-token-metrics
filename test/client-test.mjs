@@ -192,10 +192,12 @@ globalThis.fetch = async () => ({
       },
       accounts: {
         unknown: { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500, firstAt: Date.now() - 86400000, lastAt: Date.now() },
+        'e5a73acb-aba6-4126-b58a-a3e4bcccb2f6': { calls: 7, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, firstAt: Date.now(), lastAt: Date.now() },
+        'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee': { calls: 2, inputTokens: 400, outputTokens: 100, totalTokens: 500, firstAt: Date.now(), lastAt: Date.now() },
       },
       failedAttempts: null,
       currentAccount: {
-        id: 'u-123', name: '测试账号',
+        id: 'e5a73acb-aba6-4126-b58a-a3e4bcccb2f6', name: '测试账号',
         balance: [{ currency: 'CNY', balance: '12.34' }],
         bonus: [], usageUrl: 'https://platform.example/usage', topUpUrl: 'https://platform.example/topup',
         refreshedAt: Date.now(),
@@ -1086,6 +1088,39 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   }
 }
 
+// —— 账号列：显示昵称而不是 UUID ——
+{
+  hookState.length = 0
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
+  // 切到「账号」视图
+  let tab
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((c) => c === '账号')) tab = node
+  })
+  tab?.props?.onClick?.()
+  resetHooks()
+  const accountTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  const cells = []
+  walkTree(accountTree, (node) => {
+    if (node?.props?.className === 'tu-cell-main') {
+      for (const child of node.children ?? []) if (typeof child === 'string') cells.push(child)
+    }
+  })
+  // 当前登录账号显示昵称，不是 UUID
+  check('当前账号显示昵称', cells.includes('测试账号'), cells.join('|'))
+  check('不显示原始 UUID', cells.some((c) => c.includes('e5a73acb-aba6')) === false, cells.join('|'))
+  // 历史数据没有归属时明确标注
+  check('历史数据标注未知', cells.some((c) => c.includes('未知')), cells.join('|'))
+  // 其他账号用短 id 而非整串
+  check('其他账号用短标识', cells.some((c) => c.includes('其他账号')), cells.join('|'))
+}
+
 // —— 需重装时的弹窗：给出可操作路径，而不是让用户反复重试 ——
 {
   const reinstallFetch = async (url) => {
@@ -1187,8 +1222,10 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   })
   check('显示官方 API Key 类别', cells.includes('官方 API Key'), cells.join('|'))
   check('显示余额类别', cells.includes('余额'), cells.join('|'))
-  check('无法判定的归为其他', cells.includes('其他'), cells.join('|'))
-  check('三个类别各一行', cells.length, 3)
+  // 判定不出的路由**保留原名**，不合并成「其他」——否则 tray/qoder 这类
+  // 已知名字会被吞掉，表格里只剩一行「其他」，信息净损失。
+  check('判定不出的保留原路由名', cells.includes('mystery-route'), cells.join('|'))
+  check('不显示空泛的「其他」行', cells.includes('其他') === false, cells.join('|'))
 }
 
 // —— 日期视图：范围选择 + 分页 ——
