@@ -3,7 +3,9 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.3.0] - 2026-10-19
+## [0.2.1] - 2026-10-19
+
+补丁版本：修复筛选联动失效，并补齐相关交互。
 
 ### 新增
 
@@ -24,7 +26,7 @@
 
 - `byModelFacets` 为新增结构。插件启动时自动检测旧数据并重建一次，无需手动操作
 
-[0.3.0]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.0
+[0.2.1]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.2.1
 
 ## [0.2.0] - 2026-10-19
 
