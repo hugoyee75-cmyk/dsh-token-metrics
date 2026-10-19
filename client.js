@@ -103,6 +103,7 @@ window.__ModuleLoader__.load({
       'chart.mode.cache': '命中率',
       'chart.mode.compose': '构成',
       'chart.mode.model': '按模型',
+      'chart.modelDisabled': '先在「模型」下拉里选择一个或多个模型，再切到「按模型」查看各模型曲线',
       'chart.groupRest': '其他',
       'chart.pie.share': '占比',
       'chart.tip.total': '总量',
@@ -277,6 +278,7 @@ window.__ModuleLoader__.load({
       'chart.mode.cache': 'Hit rate',
       'chart.mode.compose': 'Composition',
       'chart.mode.model': 'By model',
+      'chart.modelDisabled': 'Pick one or more models in the filter first, then switch to "By model"',
       'chart.groupRest': 'Other',
       'chart.pie.share': 'Share',
       'chart.tip.total': 'Total',
@@ -1202,8 +1204,11 @@ window.__ModuleLoader__.load({
   display: grid;
   align-content: center;
   grid-template-columns: 116px minmax(0, 1fr);
-  align-items: center;
+  /* 图例可滚动时，顶部对齐比垂直居中更稳——居中会让滚动区上下都留白 */
+  align-items: start;
   gap: 16px;
+  /* 兜底：无论图例多长，容器都不超过这个高度 */
+  max-height: 190px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 11px;
   background: var(--dsw-alias-bg-layer-1);
@@ -1257,6 +1262,24 @@ window.__ModuleLoader__.load({
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* 模型多时图例会撑高卡片并顶出容器。给它自己的滚动区，
+     而不是让整个卡片跟着变高——卡片高度由圆环决定。 */
+  max-height: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 滚动条不挤占内容宽度；Firefox 与 WebKit 各写一条 */
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.tu-pie-legend::-webkit-scrollbar {
+  width: 6px;
+}
+.tu-pie-legend::-webkit-scrollbar-thumb {
+  background: var(--dsw-alias-border-l2);
+  border-radius: 999px;
+}
+.tu-pie-legend::-webkit-scrollbar-track {
+  background: transparent;
 }
 .tu-pie-legend-item {
   display: grid;
@@ -2273,6 +2296,12 @@ window.__ModuleLoader__.load({
         return Object.keys(data.byModelName)
       }, [data])
 
+      // 清空模型选择后，「按模型」不再有意义，自动退回总量视图，
+      // 避免停在一个空图表上。
+      useEffect(() => {
+        if (chartMode === 'model' && selectedModels.length === 0) setChartMode('total')
+      }, [chartMode, selectedModels])
+
       const chartModes = [
         { id: 'total', labelKey: 'chart.mode.total' },
         { id: 'cache', labelKey: 'chart.mode.cache' },
@@ -3182,14 +3211,20 @@ window.__ModuleLoader__.load({
             h('div', { className: 'tu-section-head' },
               h('h2', { className: 'tu-section-title' }, t('chart.title')),
               h('div', { className: 'tu-tabs tu-tabs-sm' },
-                chartModes.map((option) => h('button', {
-                  key: option.id,
-                  type: 'button',
-                  className: 'tu-tab',
-                  'data-active': chartMode === option.id ? 'true' : 'false',
-                  onClick: () => setChartMode(option.id),
-                }, t(option.labelKey)),
-                ),
+                chartModes.map((option) => {
+                  // 「按模型」需要先选定模型：未选时没有可画的曲线，
+                  // 与其让用户切过去看一句「暂无数据」，不如直接禁用并说明。
+                  const disabled = option.id === 'model' && selectedModels.length === 0
+                  return h('button', {
+                    key: option.id,
+                    type: 'button',
+                    className: 'tu-tab',
+                    disabled,
+                    title: disabled ? t('chart.modelDisabled') : undefined,
+                    'data-active': chartMode === option.id ? 'true' : 'false',
+                    onClick: () => { if (!disabled) setChartMode(option.id) },
+                  }, t(option.labelKey))
+                }),
               ),
             ),
             h(TrendChart, {

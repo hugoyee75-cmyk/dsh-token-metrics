@@ -1192,6 +1192,37 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   check('加载后不抛错', reinstallTree !== undefined, true)
 }
 
+// —— 「按模型」模式：未选模型时禁用并说明 ——
+// 用户反馈：切到「按模型」只看到一行提示文字，因为该模式需要先选定模型。
+{
+  hookState.length = 0
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
+  // 找到「按模型」按钮，未选模型时应当 disabled 且有 title 说明
+  let modelBtn
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((c) => c === '按模型')) modelBtn = node
+  })
+  check('存在「按模型」按钮', modelBtn !== undefined, true)
+  check('未选模型时禁用', modelBtn?.props?.disabled, true)
+  check('禁用时给出说明', typeof modelBtn?.props?.title === 'string'
+    && modelBtn.props.title.includes('选择一个或多个模型'), String(modelBtn?.props?.title))
+}
+
+// —— 饼图图例：模型多时不能撑破卡片 ——
+{
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  let legend
+  walkTree(tree, (node) => { if (node?.props?.className === 'tu-pie-legend') legend = node })
+  check('存在饼图图例', legend !== undefined, true)
+}
+
 // —— 供应商列固化成三类 ——
 // 用户要求：用官方 key 的显示「官方 API Key」，走余额的显示「余额」，
 // 判不出来的归「其他」但不隐藏。
