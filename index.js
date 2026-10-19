@@ -39,6 +39,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { PluginUpdater, parseRepository } from './src/updater.js'
 import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
+import { BalanceBook, probeBalance, normalizeBaseUrl } from './src/balance.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
@@ -494,6 +495,16 @@ class TokenUsageTracker {
       dataDir: dataDir(this.home),
       log: (message) => logger?.info?.(message),
     }).load()
+    /**
+     * 第三方余额与订阅额度。
+     *
+     * 只存站点配置与最近探测结果，密钥交给 DSH 的凭据服务托管——
+     * 凭据绝不能落到插件的统计数据文件里。
+     */
+    this.balanceBook = new BalanceBook({
+      dataDir: dataDir(this.home),
+      log: (message) => logger?.info?.(message),
+    }).loadFrom(join(dataDir(this.home), 'balance.json'))
     // 让落盘文件也带上 buildId，便于排查「哪一版代码写的数据」。
     this.store = loadStore(logger, this.home)
     this.store.buildId = buildId
@@ -1082,6 +1093,11 @@ class TokenUsageTracker {
       bySession: this.config.showSessions
         ? Object.fromEntries(sessions.map((session) => [session.id, session]))
         : {},
+      /**
+       * 第三方余额与订阅额度。只含站点配置与最近探测结果，绝不含密钥。
+       * 页面据此渲染进度条与「已用 / 总额度」。
+       */
+      balance: this.balanceBook?.status?.() ?? { sites: [] },
       sessionCount: Object.keys(this.store.bySession).length,
       scannedCount: Object.keys(this.store.scanned).length,
       // 回扫进度：首次安装扫历史会话时前端显示进度提示。
@@ -1945,6 +1961,90 @@ export function apply(ctx, rawConfig) {
 
             // 强制重建：丢弃内存与磁盘的聚合结果，从会话日志重新算一遍。
             // 用户手动修数据、或升级后想确保口径一致时使用。
+            // —— 余额：列表 / 配置 / 删除 / 探测 ——
+            if (url.pathname === '/api/dsh-token-metrics/balance') {
+              if (!isGet) {
+                sendJson(res, 405, { error: 'method not allowed' })
+                return
+              }
+              sendJson(res, 200, {
+                ...tracker.balanceBook.status(),
+                // 余额接口本身不知道 provider 的 baseURL，这里把 DSH 里
+                // 已配置的 provider 一并给出，供页面「一键采纳」。
+                discovered: discoverProviderEndpoints(ctx),
+              })
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/balance/site') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const site = tracker.balanceBook.upsertSite(body ?? {})
+                if (site === undefined) {
+                  sendJson(res, 400, { error: '缺少 id' })
+                  return
+                }
+                tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                sendJson(res, 200, { ok: true, ...tracker.balanceBook.status() })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/balance/remove') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const removed = tracker.balanceBook.removeSite(String(body.id ?? ''))
+                tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                sendJson(res, 200, { ok: true, removed, ...tracker.balanceBook.status() })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/balance/probe') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const id = String(body.id ?? '')
+                const site = tracker.balanceBook.sites.find((entry) => entry.id === id)
+                if (site === undefined) {
+                  sendJson(res, 404, { error: '没有这个站点' })
+                  return
+                }
+                // 密钥从凭据服务取，页面不传、也不回显。
+                const apiKey = await resolveSiteKey(ctx, site)
+                const result = await probeBalance({
+                  baseUrl: site.baseUrl,
+                  apiKey,
+                  fetchImpl: globalThis.fetch,
+                })
+                tracker.balanceBook.recordResult(id, result)
+                tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                sendJson(res, 200, {
+                  ok: result.ok,
+                  result,
+                  ...tracker.balanceBook.status(),
+                })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
             // —— 成本核算：手工补价 / 供应商倍率 / 刷新价目表 ——
             if (url.pathname === '/api/dsh-token-metrics/pricing/override') {
               if (req.method !== 'POST') {
@@ -2062,6 +2162,89 @@ export function apply(ctx, rawConfig) {
   // 进程退出监听只装一次：热重载会多次 apply，每次都装会触发
   // MaxListenersExceededWarning，而且旧实例的监听器还会拖住已废弃的 tracker。
   ctx.effect(() => installExitFlush(tracker), 'token-metrics: 落盘')
+}
+
+/**
+ * 从 DSH 的配置里找出各 provider 的站点地址。
+ *
+ * 余额接口挂在站点根路径下，而 DSH 配置里保存的是 `baseURL`（常常带 `/v1`）。
+ * 这里把能拿到的都列出来，页面据此给出「一键采纳」，省得用户手抄地址。
+ *
+ * 只用公开配置，不碰任何密钥。
+ */
+function discoverProviderEndpoints(ctx) {
+  const out = []
+  const seen = new Set()
+  try {
+    const editor = ctx.get('configEditor')
+    if (editor === undefined) return out
+    const rows = editor.configuration()
+    for (const row of rows) {
+      const id = row?.entry?.options?.id ?? ''
+      // 配置有两层：用户 override 与继承值。两者都要看，否则会漏掉
+      // 写在 profile 里的 providers（实测就是这种情况）。
+      for (const layer of [row?.override, row?.inherited]) {
+        if (layer === null || typeof layer !== 'object') continue
+        const providers = layer.providers
+        if (providers !== null && typeof providers === 'object') {
+          for (const [name, entry] of Object.entries(providers)) {
+            const base = entry?.baseURL ?? entry?.baseUrl ?? entry?.base_url
+            if (typeof base !== 'string' || base === '') continue
+            if (seen.has(name)) continue
+            seen.add(name)
+            out.push({
+              id: name,
+              label: String(entry?.displayName ?? entry?.display_name ?? name),
+              baseUrl: normalizeBaseUrl(base),
+              configRow: id,
+            })
+          }
+        }
+        // 单 provider 形态：baseURL 直接挂在配置顶层
+        const direct = layer.baseURL ?? layer.baseUrl ?? layer.base_url
+        if (typeof direct === 'string' && direct !== '' && id !== '' && !seen.has(id)) {
+          seen.add(id)
+          out.push({
+            id,
+            label: String(layer.displayName ?? id),
+            baseUrl: normalizeBaseUrl(direct),
+            configRow: id,
+          })
+        }
+      }
+    }
+  } catch {
+    // configEditor 不可用就返回空列表，页面仍然支持手工填写
+  }
+  return out
+}
+
+/**
+ * 取某个站点要用的访问令牌。
+ *
+ * 优先级：
+ *  1. 凭据服务里以 `keyRef` 存的记录（插件自己写入的）
+ *  2. 环境变量（用户可能已经在 shell 里导出过）
+ *
+ * 找不到就返回空串，让探测报「没有可用的访问令牌」而不是崩掉。
+ */
+async function resolveSiteKey(ctx, site) {
+  try {
+    const credentials = ctx.get('credentials')
+    if (credentials !== undefined && site.keyRef) {
+      const info = await credentials.describe?.({ name: site.keyRef })
+      if (info?.configured === true) {
+        const resolved = await credentials.resolve?.({ name: site.keyRef })
+        if (typeof resolved?.value === 'string' && resolved.value !== '') return resolved.value
+      }
+    }
+  } catch { /* 凭据服务不可用则继续尝试环境变量 */ }
+  const envName = site.keyEnv
+  if (typeof envName === 'string' && envName !== '') {
+    const value = process.env[envName]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return ''
 }
 
 /**

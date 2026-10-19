@@ -35,7 +35,7 @@
     }
   },
   "scripts": {
-    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/metadata-test.mjs",
+    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/balance-test.mjs && node test/metadata-test.mjs",
     "test:host": "node test/host-test.mjs",
     "test:client": "node test/client-test.mjs",
     "test:update": "node test/update-test.mjs",
@@ -43,7 +43,8 @@
     "verify": "node test/verify-against-logs.mjs",
     "check": "node --check index.js && node --check client.js && node --check src/reload.js && node --check src/updater.js && npm test",
     "prepack": "npm run check",
-    "test:pricing": "node test/pricing-test.mjs"
+    "test:pricing": "node test/pricing-test.mjs",
+    "test:balance": "node test/balance-test.mjs"
   },
   "license": "MIT",
   "repository": {

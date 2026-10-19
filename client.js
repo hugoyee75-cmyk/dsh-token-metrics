@@ -45,6 +45,10 @@ window.__ModuleLoader__.load({
   const PRICING_OVERRIDE_ROUTE = '/api/dsh-token-metrics/pricing/override'
   const PRICING_MULTIPLIER_ROUTE = '/api/dsh-token-metrics/pricing/multiplier'
   const PRICING_REFRESH_ROUTE = '/api/dsh-token-metrics/pricing/refresh'
+  const BALANCE_ROUTE = '/api/dsh-token-metrics/balance'
+  const BALANCE_SITE_ROUTE = '/api/dsh-token-metrics/balance/site'
+  const BALANCE_REMOVE_ROUTE = '/api/dsh-token-metrics/balance/remove'
+  const BALANCE_PROBE_ROUTE = '/api/dsh-token-metrics/balance/probe'
 
     const name = 'dsh-token-metrics-client'
     // 只声明真正使用的服务：slots 承载两个注册，locale 提供文案。
@@ -67,6 +71,28 @@ window.__ModuleLoader__.load({
       'filter.clear': '清除选择',
       'field.total': '总量',
       'field.cost': '总成本',
+      'balance.title': '供应商余额',
+      'balance.add': '添加站点',
+      'balance.empty': '还没有配置任何站点。可以从下面自动发现的地址一键添加，或手动填写。',
+      'balance.discovered': '自动发现的站点',
+      'balance.adopt': '添加',
+      'balance.probe': '查询余额',
+      'balance.probing': '查询中…',
+      'balance.remove': '移除',
+      'balance.remaining': '剩余',
+      'balance.used': '已用',
+      'balance.limit': '总额度',
+      'balance.noData': '尚未查询',
+      'balance.lastChecked': '查询于',
+      'balance.manual': '手动配置',
+      'balance.name': '名称',
+      'balance.baseUrl': '站点地址',
+      'balance.keyEnv': '密钥环境变量',
+      'balance.keyHint': '插件不会保存密钥。请在环境变量或 DSH 凭据里配置，这里只填变量名。',
+      'balance.save': '保存',
+      'balance.cancel': '取消',
+      'balance.error': '查询失败',
+      'balance.kind': '类型',
       'currency.usd': 'USD',
       'currency.cny': 'RMB',
       'currency.toggleTitle': '点击换算为人民币 / 美元',
@@ -242,6 +268,28 @@ window.__ModuleLoader__.load({
       'filter.clear': 'Clear',
       'field.total': 'Total',
       'field.cost': 'Cost',
+      'balance.title': 'Provider balance',
+      'balance.add': 'Add site',
+      'balance.empty': 'No sites configured yet. Add one from the discovered endpoints below, or fill it in manually.',
+      'balance.discovered': 'Discovered endpoints',
+      'balance.adopt': 'Add',
+      'balance.probe': 'Check balance',
+      'balance.probing': 'Checking…',
+      'balance.remove': 'Remove',
+      'balance.remaining': 'Remaining',
+      'balance.used': 'Used',
+      'balance.limit': 'Limit',
+      'balance.noData': 'Not checked yet',
+      'balance.lastChecked': 'Checked',
+      'balance.manual': 'Manual setup',
+      'balance.name': 'Name',
+      'balance.baseUrl': 'Base URL',
+      'balance.keyEnv': 'Key env var',
+      'balance.keyHint': 'Keys are never stored by this plugin. Configure them in the environment or DSH credentials; enter only the variable name here.',
+      'balance.save': 'Save',
+      'balance.cancel': 'Cancel',
+      'balance.error': 'Check failed',
+      'balance.kind': 'Type',
       'currency.usd': 'USD',
       'currency.cny': 'RMB',
       'currency.toggleTitle': 'Click to switch between USD and RMB',
@@ -685,6 +733,120 @@ window.__ModuleLoader__.load({
 @media (prefers-reduced-motion: reduce) {
   .tu-spinner { animation: none; }
   .tu-scan-fill[data-indeterminate='true'] { animation: none; width: 100%; }
+}
+.tu-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.tu-balance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tu-balance-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-balance-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  margin-bottom: 8px;
+}
+.tu-balance-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.tu-balsite {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 13px 15px;
+  min-width: 0;
+}
+.tu-balsite-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tu-balsite-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tu-balsite-url {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.tu-balsite-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+/* 余额进度条：按「已用 / 总额度」画，剩得少就变色提醒 */
+.tu-balbar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+  margin-bottom: 9px;
+}
+.tu-balbar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+.tu-balbar-fill[data-level='ok'] { background: var(--dsw-alias-state-success-primary); }
+.tu-balbar-fill[data-level='warn'] { background: var(--dsw-alias-state-warn-primary); }
+.tu-balbar-fill[data-level='danger'] { background: var(--dsw-alias-state-error-primary); }
+.tu-balmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.tu-balmeta-time { margin-left: auto; }
+.tu-balerror {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-state-error-primary);
+}
+.tu-balance-discovered,
+.tu-balform {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 13px 15px;
+}
+.tu-baldiscover {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-baldiscover:first-of-type { border-top: none; }
+.tu-baldiscover-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tu-balform-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0 12px;
 }
 .tu-card-cost {
   cursor: pointer;
@@ -2156,6 +2318,73 @@ window.__ModuleLoader__.load({
     //#endregion
 
     /**
+     * 供应商余额卡片。
+     *
+     * 展示剩余额度与进度条：中转站的余额通常有总额度，用量占比一眼可见；
+     * 只知道剩余金额时退化为纯数字。
+     */
+    function BalanceCard({ site, t, locale, onProbe, onRemove, probing }) {
+      const balance = site.lastBalance
+      const hasLimit = typeof balance?.limitUsd === 'number' && balance.limitUsd > 0
+      const remaining = typeof balance?.usd === 'number' ? balance.usd : undefined
+      // 进度条按「已用 / 总额度」画；没有总额度就不画假进度。
+      const usedRatio = hasLimit && typeof remaining === 'number'
+        ? Math.max(0, Math.min(1, 1 - remaining / balance.limitUsd))
+        : undefined
+
+      const money = (value) => (typeof value === 'number'
+        ? `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}`
+        : '—')
+
+      return h('div', { className: 'tu-balsite' },
+        h('div', { className: 'tu-balsite-head' },
+          h('div', null,
+            h('div', { className: 'tu-balsite-name' }, site.label || site.id),
+            h('div', { className: 'tu-balsite-url' }, site.baseUrl),
+          ),
+          h('div', { className: 'tu-balsite-actions' },
+            h('button', {
+              type: 'button', className: 'tu-button',
+              disabled: probing,
+              onClick: () => onProbe(site.id),
+            }, probing ? t('balance.probing') : t('balance.probe')),
+            h('button', {
+              type: 'button', className: 'tu-button',
+              onClick: () => onRemove(site.id),
+            }, t('balance.remove')),
+          ),
+        ),
+
+        hasLimit && usedRatio !== undefined
+          ? h('div', { className: 'tu-balbar' },
+            h('div', {
+              className: 'tu-balbar-fill',
+              // 剩余不足 20% 标黄，不足 5% 标红，让用户一眼看出该充值了。
+              'data-level': usedRatio > 0.95 ? 'danger' : usedRatio > 0.8 ? 'warn' : 'ok',
+              style: { width: `${Math.round(usedRatio * 100)}%` },
+            }),
+          )
+          : null,
+
+        h('div', { className: 'tu-balmeta' },
+          h('span', null, `${t('balance.remaining')} ${money(remaining)}`),
+          hasLimit ? h('span', null, `${t('balance.limit')} ${money(balance.limitUsd)}`) : null,
+          typeof balance?.usedUsd === 'number'
+            ? h('span', null, `${t('balance.used')} ${money(balance.usedUsd)}`)
+            : null,
+          site.lastCheckedAt > 0
+            ? h('span', { className: 'tu-balmeta-time' },
+              `${t('balance.lastChecked')} ${formatTime(site.lastCheckedAt, locale)}`)
+            : h('span', { className: 'tu-balmeta-time' }, t('balance.noData')),
+        ),
+
+        site.error === ''
+          ? null
+          : h('div', { className: 'tu-balerror' }, `${t('balance.error')}：${site.error}`),
+      )
+    }
+
+    /**
      * 历史扫描进度条。
      *
      * 首次安装要把已有会话日志全部补算一遍，耗时随会话数增长。这里给出
@@ -2277,6 +2506,10 @@ window.__ModuleLoader__.load({
       const [currency, setCurrency] = useState('usd')
       // 补价弹窗：{ model, input, output } 或 null
       const [priceDialog, setPriceDialog] = useState(null)
+      // 余额页：站点列表、探测中标记、手动配置表单
+      const [balanceState, setBalanceState] = useState({ sites: [], discovered: [] })
+      const [balanceProbing, setBalanceProbing] = useState('')
+      const [balanceForm, setBalanceForm] = useState(null)
       const PAGE_SIZE = 20
       const toggleModel = (name) => {
         setSelectedModels((current) => (current.includes(name)
@@ -2343,6 +2576,73 @@ window.__ModuleLoader__.load({
         return () => { disposed = true }
       }, [])
 
+      /** 读取余额站点列表与自动发现的端点。 */
+      const loadBalance = useCallback(async () => {
+        try {
+          const response = await fetch(BALANCE_ROUTE, {
+            headers: { accept: 'application/json' }, credentials: 'same-origin',
+            cache: 'no-store',
+          })
+          if (!response.ok) return
+          const body = await response.json()
+          setBalanceState({
+            sites: Array.isArray(body.sites) ? body.sites : [],
+            discovered: Array.isArray(body.discovered) ? body.discovered : [],
+          })
+        } catch { /* 余额是辅助信息，加载失败不该影响主页面 */ }
+      }, [])
+
+      /** 查询某个站点的余额。 */
+      const probeSite = useCallback(async (id) => {
+        setBalanceProbing(id)
+        try {
+          const response = await fetch(BALANCE_PROBE_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ id }),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (Array.isArray(body.sites)) {
+            setBalanceState((previous) => ({ ...previous, sites: body.sites }))
+          }
+        } catch { /* 结果已记录在站点上，下次刷新可见 */ }
+        finally { setBalanceProbing('') }
+      }, [])
+
+      /** 保存站点配置。 */
+      const saveSite = useCallback(async (input) => {
+        try {
+          const response = await fetch(BALANCE_SITE_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(input),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (Array.isArray(body.sites)) {
+            setBalanceState((previous) => ({ ...previous, sites: body.sites }))
+          }
+          setBalanceForm(null)
+        } catch { /* 静默：用户可重试 */ }
+      }, [])
+
+      /** 移除站点。 */
+      const removeSite = useCallback(async (id) => {
+        try {
+          const response = await fetch(BALANCE_REMOVE_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ id }),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (Array.isArray(body.sites)) {
+            setBalanceState((previous) => ({ ...previous, sites: body.sites }))
+          }
+        } catch { /* 同上 */ }
+      }, [])
+
       /** 保存手工补价（价格为 null 时删除，恢复自动匹配）。 */
       const savePriceOverride = useCallback(async (model, input, output) => {
         try {
@@ -2377,6 +2677,11 @@ window.__ModuleLoader__.load({
           setTimeout(() => { void refresh() }, 4000)
         } catch { /* 忽略：轮询会补上 */ }
       }, [refresh])
+
+      // 进入余额视图时才加载（避免每次打开面板都多一个请求）。
+      useEffect(() => {
+        if (tableView === 'balance') void loadBalance()
+      }, [tableView, loadBalance])
 
       const checkUpdate = useCallback(async () => {
         setUpdateState((previous) => ({ ...previous, busy: 'check', error: '' }))
@@ -3256,11 +3561,119 @@ window.__ModuleLoader__.load({
         { id: 'provider', labelKey: 'table.provider', columns: providerColumns, rows: providerRows },
         { id: 'account', labelKey: 'table.account', columns: accountColumns, rows: accountRows },
         { id: 'day', labelKey: 'table.day', columns: dayColumns, rows: dayRows },
+        // 余额不是「用量表」，用单独分支渲染（见下方 balanceView）
+        { id: 'balance', labelKey: 'balance.title', columns: [], rows: [] },
       ]
       if (data?.config?.showSessions === true) {
         tableViews.push({ id: 'session', labelKey: 'column.session', columns: sessionColumns, rows: sessionRows })
       }
       const activeView = tableViews.find((view) => view.id === tableView) ?? tableViews[0]
+
+      // 余额页：站点卡片 + 自动发现的端点 + 手动配置表单。
+      // 它不是用量表，因此不走 UsageTable，而是自成一栏。
+      const balanceView = (() => {
+        const sites = balanceState.sites ?? []
+        const discovered = (balanceState.discovered ?? [])
+          // 已经添加过的地址不再重复列出
+          .filter((entry) => !sites.some((site) => site.id === entry.id))
+        return h('div', { className: 'tu-balance' },
+          h('div', { className: 'tu-balance-head' },
+            h('div', { className: 'tu-balance-title' }, t('balance.title')),
+            h('button', {
+              type: 'button', className: 'tu-button',
+              onClick: () => setBalanceForm({ id: '', label: '', baseUrl: '', keyEnv: '' }),
+            }, t('balance.add')),
+          ),
+
+          sites.length === 0
+            ? h('p', { className: 'tu-hint' }, t('balance.empty'))
+            : h('div', { className: 'tu-balance-list' },
+              ...sites.map((site) => h(BalanceCard, {
+                key: site.id,
+                site,
+                t,
+                locale,
+                probing: balanceProbing === site.id,
+                onProbe: probeSite,
+                onRemove: removeSite,
+              }))),
+
+          discovered.length === 0
+            ? null
+            : h('div', { className: 'tu-balance-discovered' },
+              h('div', { className: 'tu-balance-subtitle' }, t('balance.discovered')),
+              ...discovered.map((entry) => h('div', { key: entry.id, className: 'tu-baldiscover' },
+                h('div', null,
+                  h('div', { className: 'tu-baldiscover-name' }, entry.label),
+                  h('div', { className: 'tu-balsite-url' }, entry.baseUrl),
+                ),
+                h('button', {
+                  type: 'button', className: 'tu-button',
+                  onClick: () => saveSite({
+                    id: entry.id, label: entry.label, baseUrl: entry.baseUrl,
+                  }),
+                }, t('balance.adopt')),
+              )),
+            ),
+
+          balanceForm === null
+            ? null
+            : h('div', { className: 'tu-balform' },
+              h('div', { className: 'tu-balance-subtitle' }, t('balance.manual')),
+              h('p', { className: 'tu-hint' }, t('balance.keyHint')),
+              h('div', { className: 'tu-balform-fields' },
+                h('label', { className: 'tu-pricefield' },
+                  h('span', null, t('balance.name')),
+                  h('input', {
+                    type: 'text', className: 'tu-priceinput',
+                    value: balanceForm.label,
+                    onChange: (event) => setBalanceForm((current) => (
+                      current === null ? null : { ...current, label: event.target.value })),
+                  }),
+                ),
+                h('label', { className: 'tu-pricefield' },
+                  h('span', null, t('balance.baseUrl')),
+                  h('input', {
+                    type: 'url', className: 'tu-priceinput', placeholder: 'https://relay.example.com',
+                    value: balanceForm.baseUrl,
+                    onChange: (event) => setBalanceForm((current) => (
+                      current === null ? null : { ...current, baseUrl: event.target.value })),
+                  }),
+                ),
+                h('label', { className: 'tu-pricefield' },
+                  h('span', null, t('balance.keyEnv')),
+                  h('input', {
+                    type: 'text', className: 'tu-priceinput', placeholder: 'RELAY_API_KEY',
+                    value: balanceForm.keyEnv,
+                    onChange: (event) => setBalanceForm((current) => (
+                      current === null ? null : { ...current, keyEnv: event.target.value })),
+                  }),
+                ),
+              ),
+              h('div', { className: 'tu-modal-actions' },
+                h('button', {
+                  type: 'button', className: 'tu-button',
+                  onClick: () => setBalanceForm(null),
+                }, t('balance.cancel')),
+                h('button', {
+                  type: 'button', className: 'tu-button tu-button-primary',
+                  onClick: () => {
+                    // id 用名称为准，保证同一站点不会重复添加
+                    const id = (balanceForm.label || balanceForm.baseUrl)
+                      .trim().replace(/\s+/g, '-').toLowerCase()
+                    if (id === '') return
+                    void saveSite({
+                      id,
+                      label: balanceForm.label || id,
+                      baseUrl: balanceForm.baseUrl,
+                      keyEnv: balanceForm.keyEnv,
+                    })
+                  },
+                }, t('balance.save')),
+              ),
+            ),
+        )
+      })()
 
       const emptyView = h('div', { className: 'tu-empty' }, t('empty'))
       const sections = empty
@@ -3312,11 +3725,14 @@ window.__ModuleLoader__.load({
                 `${formatNumber(dayRowsFiltered.length)} ${t('pager.rows')}`),
             )
             : null,
-          h(UsageTable, {
-            columns: activeView.columns,
-            rows: activeView.rows,
-            emptyText: t('empty'),
-          }),
+          // 余额视图不是用量表，单独渲染
+          activeView.id === 'balance'
+            ? balanceView
+            : h(UsageTable, {
+              columns: activeView.columns,
+              rows: activeView.rows,
+              emptyText: t('empty'),
+            }),
           // 只有日期视图需要分页。
           activeView.id === 'day' && pageCount > 1
             ? h('div', { className: 'tu-pager' },
