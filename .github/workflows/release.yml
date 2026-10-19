@@ -32,10 +32,40 @@ jobs:
           fi
           echo "releasing v$version"
 
+      # 从 CHANGELOG.md 抽出当前版本的段落作为 release 说明。
+      # 只用 --generate-notes 的话正文只有一行 Full Changelog 链接，
+      # 插件更新弹窗里的「更新说明」就成了空白——这正是 v0.2.1 的问题。
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          # 取 "## [x.y.z]" 到下一个 "## [" 之间的内容
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          if [ ! -s /tmp/notes.md ]; then
+            echo "::warning::CHANGELOG 中未找到 $version 的段落，回退到自动生成"
+            echo "fallback=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "fallback=0" >> "$GITHUB_OUTPUT"
+            echo "--- 提取到的说明 ---"
+            cat /tmp/notes.md
+          fi
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          if [ "${{ steps.notes.outputs.fallback }}" = "1" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          else
+            # 正文用 CHANGELOG 段落（更新摘要），并保留自动生成的 commit 链接
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file /tmp/notes.md \
+              --generate-notes
+          fi
