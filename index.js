@@ -51,7 +51,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.2.0'
+export const version = '0.3.0'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -307,6 +307,17 @@ function emptyStore(buildId) {
     byDayModel: {},
     /** 按天 × 模型名（跨 provider 合并），趋势图按模型筛选时用它。 */
     byDayModelName: {},
+    /**
+     * 按模型名分组的全维度明细。
+     *
+     * 结构：`modelName -> { provider: {k: counters}, project: {...},
+     *                       origin: {...}, account: {...}, day: {...} }`
+     *
+     * 前端按模型筛选时，明细表与占比图都需要「只属于该模型」的各维度数据。
+     * 若不为每个维度各开一套全局桶，筛选后就没有可用的数据源——这正是
+     * 「只有卡片刷新、图表和明细不动」的根因。
+     */
+    byModelFacets: {},
     /** sessionId -> { counters, provider, model, title, parentSession, firstAt, lastAt } */
     bySession: {},
     /** 工作区目录 -> counters。用于回答「这个项目花了多少 token」。 */
@@ -361,6 +372,7 @@ function loadStore(logger, home) {
       byModelName: parsed.byModelName ?? {},
       byDayModel: parsed.byDayModel ?? {},
       byDayModelName: parsed.byDayModelName ?? {},
+      byModelFacets: parsed.byModelFacets ?? {},
       bySession: parsed.bySession ?? {},
       seen: parsed.seen ?? {},
       failedSeen: parsed.failedSeen ?? {},
@@ -374,9 +386,14 @@ function loadStore(logger, home) {
     const dayKeys = Object.keys(store.byDay ?? {})
     const dayModelKeys = new Set(Object.keys(store.byDayModel ?? {}))
     const dayModelNameKeys = new Set(Object.keys(store.byDayModelName ?? {}))
-    if (dayKeys.length > 0
-      && (dayKeys.some((day) => !dayModelKeys.has(day))
-        || dayKeys.some((day) => !dayModelNameKeys.has(day)))) {
+    // byModelFacets 是后加的结构：老文件没有它，筛选功能会拿不到数据。
+    const modelNameKeys = Object.keys(store.byModelName ?? {})
+    const missingFacets = modelNameKeys.length > 0
+      && Object.keys(store.byModelFacets ?? {}).length === 0
+    if (missingFacets
+      || (dayKeys.length > 0
+        && (dayKeys.some((day) => !dayModelKeys.has(day))
+          || dayKeys.some((day) => !dayModelNameKeys.has(day))))) {
       store.needsRebuild = true
       logger?.info?.(
         `token-metrics: 「按天×模型」数据不完整（${dayModelKeys.size}/${dayKeys.length} 天），`
@@ -435,6 +452,12 @@ function pruneStore(store, retentionDays, maxSeenEntries) {
   }
   for (const day of Object.keys(store.byDayModelName ?? {})) {
     if (day < cutoffDay) delete store.byDayModelName[day]
+  }
+  // 按模型明细里的 day 桶与主 day 桶同生命周期。
+  for (const facets of Object.values(store.byModelFacets ?? {})) {
+    for (const day of Object.keys(facets?.day ?? {})) {
+      if (day < cutoffDay) delete facets.day[day]
+    }
   }
   // 去重表**不能**按事件时间裁剪：回扫历史会话时写入的是当年的时间戳，
   // 按时间裁会立刻删掉刚建立的键，下一次回扫就重复累加。这里只按条目数量
@@ -539,6 +562,22 @@ class TokenUsageTracker {
     this.store.byDayModelName[day][modelName] ??= emptyCounters()
     addUsage(this.store.byDayModelName[day][modelName], usage)
 
+    // —— 按模型名分组的全维度明细（供前端按模型筛选）——
+    const facets = this.store.byModelFacets[modelName] ??= {
+      provider: {}, project: {}, origin: {}, account: {}, day: {},
+    }
+    facets.provider[providerKey] ??= emptyCounters()
+    addUsage(facets.provider[providerKey], usage)
+    if (cwd) {
+      facets.project[cwd] ??= emptyCounters()
+      addUsage(facets.project[cwd], usage)
+    }
+    const originName = origin || 'main'
+    facets.origin[originName] ??= emptyCounters()
+    addUsage(facets.origin[originName], usage)
+    facets.day[day] ??= emptyCounters()
+    addUsage(facets.day[day], usage)
+
     // —— 按项目（工作目录）归组 ——
     if (cwd) {
       this.store.byProject[cwd] ??= emptyCounters()
@@ -563,6 +602,9 @@ class TokenUsageTracker {
     addUsage(accountEntry, usage)
     accountEntry.firstAt = Math.min(accountEntry.firstAt ?? stamp, stamp)
     accountEntry.lastAt = Math.max(accountEntry.lastAt ?? 0, stamp)
+    // 同步进按模型分组的明细，供前端筛选后展示账号维度。
+    facets.account[accountKey] ??= emptyCounters()
+    addUsage(facets.account[accountKey], usage)
 
     if (sessionId) {
       const entry = this.store.bySession[sessionId] ?? {
@@ -884,6 +926,25 @@ class TokenUsageTracker {
       })(),
       byProvider: this.store.byProvider,
       byModel: this.store.byModel,
+      /**
+       * 按模型分组的全维度明细（前端筛选用）。
+       *
+       * 每个模型给出 provider / project / origin / account / day 五个分组，
+       * 前端选中若干模型后把这些桶相加，就能同时刷新占比图、明细表与图表，
+       * 而不是只有指标卡跟着变。
+       */
+      byModelFacets: Object.fromEntries(
+        Object.entries(this.store.byModelFacets).map(([name, facets]) => [
+          name,
+          {
+            provider: Object.fromEntries(Object.entries(facets.provider ?? {}).map(([k, v]) => [k, withRate(v)])),
+            project: Object.fromEntries(Object.entries(facets.project ?? {}).map(([k, v]) => [k, withRate(v)])),
+            origin: Object.fromEntries(Object.entries(facets.origin ?? {}).map(([k, v]) => [k, withRate(v)])),
+            account: Object.fromEntries(Object.entries(facets.account ?? {}).map(([k, v]) => [k, withRate(v)])),
+            day: Object.fromEntries(Object.entries(facets.day ?? {}).map(([k, v]) => [k, withRate(v)])),
+          },
+        ]),
+      ),
       // 模型名合并视图（跨供应商）。占比图与「按模型筛选」用它。
       byModelName: Object.fromEntries(
         Object.entries(this.store.byModelName)

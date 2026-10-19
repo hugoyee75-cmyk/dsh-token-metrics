@@ -129,12 +129,32 @@ globalThis.fetch = async () => ({
         today: { calls: 3, inputTokens: 800, outputTokens: 200, cacheReadTokens: 100, cacheWriteTokens: 0, reasoningTokens: 60, totalTokens: 1100 },
         week: { calls: 10, inputTokens: 3000, outputTokens: 700, cacheReadTokens: 900, cacheWriteTokens: 0, reasoningTokens: 250, totalTokens: 4600 },
       },
-      byDay: { '2026-10-19': { calls: 3, inputTokens: 800, outputTokens: 200, totalTokens: 1100 } },
+      byDay: {
+        '2026-10-17': { calls: 2, inputTokens: 500, outputTokens: 100, totalTokens: 600 },
+        '2026-10-18': { calls: 3, inputTokens: 700, outputTokens: 150, totalTokens: 850 },
+        '2026-10-19': { calls: 3, inputTokens: 800, outputTokens: 200, totalTokens: 1100 },
+      },
       byProvider: { workbuddy: { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500 } },
       byModel: { 'workbuddy/deepseek-v4.1-flash': { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500 } },
       byModelName: {
         'deepseek-v4.1-flash': { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheHitRate: 0.3 },
         qfmodel: { calls: 3, inputTokens: 1000, outputTokens: 300, totalTokens: 1500, cacheHitRate: 0.2 },
+      },
+      byModelFacets: {
+        'deepseek-v4.1-flash': {
+          provider: { workbuddy: { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          project: { '/proj/a': { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          origin: { main: { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          account: { unknown: { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          day: { '2026-10-19': { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+        },
+        qfmodel: {
+          provider: { qoder: { calls: 3, inputTokens: 1000, outputTokens: 300, totalTokens: 1500, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          project: { '/proj/b': { calls: 3, inputTokens: 1000, outputTokens: 300, totalTokens: 1500, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          origin: { main: { calls: 3, inputTokens: 1000, outputTokens: 300, totalTokens: 1500, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          account: { unknown: { calls: 3, inputTokens: 1000, outputTokens: 300, totalTokens: 1500, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+          day: { '2026-10-19': { calls: 3, inputTokens: 1000, outputTokens: 300, totalTokens: 1500, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 } },
+        },
       },
       byModelDay: {
         'deepseek-v4.1-flash': { '2026-10-17': 1200, '2026-10-18': 1300, '2026-10-19': 1500 },
@@ -993,6 +1013,89 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   // 必须清空，否则后续测试会继续读到这份空数据。
   hookState.length = 0
   resetHooks()
+}
+
+// —— 筛选必须影响图表与明细，而不只是卡片 ——
+// 用户报的：「选择模型后，仅卡片指标刷新，可视化和明细都不变」。
+// 根因是各维度的 useMemo 只依赖 data、没依赖 selectedModels。
+{
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+
+  // 辅助：展开下拉并勾选指定模型
+  const pickModel = (name) => {
+    resetHooks()
+    const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    let btn
+    walkTree(tree, (node) => { if (node?.props?.className === 'tu-dropbtn') btn = node })
+    btn?.props?.onClick?.()
+    resetHooks()
+    const opened = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    const items = []
+    walkTree(opened, (node) => { if (node?.props?.className === 'tu-dropitem') items.push(node) })
+    items.find((item) => textsOf(item).trim().endsWith(name))?.props?.onClick?.()
+  }
+
+  pickModel('deepseek-v4.1-flash')
+  resetHooks()
+  const filtered = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  const filteredText = textsOf(filtered)
+
+  // 明细表：按模型视图应只剩被选中的模型
+  // 只看表格主列（qfmodel 仍会出现在筛选下拉的选项里，那是正常的）
+  const tableMainCells = []
+  walkTree(filtered, (node) => {
+    if (typeof node?.props?.className === 'string' && node.props.className === 'tu-cell-main') {
+      for (const c of node.children ?? []) if (typeof c === 'string') tableMainCells.push(c)
+    }
+  })
+  check('明细表跟随筛选', tableMainCells.length > 0 && tableMainCells.includes('qfmodel') === false,
+    `表格主列=${tableMainCells.join(',')}`)
+  check('明细表只剩被选中的模型', tableMainCells.includes('deepseek-v4.1-flash'), true)
+
+  // 占比图：只显示选中模型（图例中不含其它模型）
+  const pieLegend = []
+  walkTree(filtered, (node) => {
+    if (typeof node?.props?.className === 'string' && node.props.className.includes('tu-pie-legend-name')) {
+      for (const child of node.children ?? []) if (typeof child === 'string') pieLegend.push(child)
+    }
+  })
+  check('占比图跟随筛选', pieLegend.length > 0 && pieLegend.includes('qfmodel') === false,
+    `图例=${pieLegend.join(',')}`)
+
+  // 趋势图数据源应已切到筛选后的序列（选中模型后曲线仍存在）
+  {
+    const hasCanvas = filteredText.includes('tu-chart-canvas')
+    const dataState = hookState.find((v) => v !== null && typeof v === 'object' && 'status' in v)
+    check('趋势图仍可渲染', hasCanvas,
+      `byDay=${Object.keys(dataState?.data?.byDay ?? {}).length} byModelDay=${Object.keys(dataState?.data?.byModelDay ?? {}).join(',')}`)
+  }
+}
+
+// —— 日期视图：范围选择 + 分页 ——
+{
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  // 切到「按日期」视图
+  let dayTab
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((child) => child === '按日期')) dayTab = node
+  })
+  dayTab?.props?.onClick?.()
+  resetHooks()
+  const dayView = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  const dayText = textsOf(dayView)
+  check('日期视图有范围选择', dayText.includes('tu-daterange'), dayText.slice(-200))
+  check('日期视图有起止输入', dayText.includes('tu-dateinput'), true)
+
+  // 起止日期输入存在且类型为 date
+  const dateInputs = []
+  walkTree(dayView, (node) => {
+    if (node?.type === 'input' && node.props?.type === 'date') dateInputs.push(node)
+  })
+  check('渲染两个日期输入', dateInputs.length, 2)
 }
 
 // —— 两个可视化卡片对齐 ——
