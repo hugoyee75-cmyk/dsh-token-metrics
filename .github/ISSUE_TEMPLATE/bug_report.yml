@@ -1,0 +1,59 @@
+name: Bug report
+description: 报告一个可复现的问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先确认你用的是最新版本，并已搜索过已有 Issue。
+        **请勿粘贴凭据、token 或完整会话日志**——里面有你的对话内容。
+  - type: input
+    id: version
+    attributes:
+      label: 插件版本
+      description: 见统计页顶部，或 `GET /api/dsh-token-metrics/version`
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: DSH 版本与 Node 版本、操作系统
+      placeholder: DSH 0.2.0 / Node 24.5.0 / macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 现象
+      description: 发生了什么，你期望发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开侧边栏「Token 用量统计」
+        2. 切到「按项目」
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 请删掉其中的账号、路径与对话内容
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我已搜索过已有 Issue，没有重复
+          required: true
+        - label: 我粘贴的日志已删除凭据与个人内容
+          required: true

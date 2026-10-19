@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支上的新推送取消还在跑的旧任务。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines 声明为 ^22.19.0 || >=24.0.0
+        node: ['22.19', '24', '26']
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Show tool versions
+        run: node --version && npm --version
+
+      # 零运行时依赖，无需 npm install。
+      - name: Syntax check and test suites
+        run: npm run check
+
+  package:
+    name: Package manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # 断言 files 白名单真的覆盖了插件运行所需文件。
+      - name: Check published file list
+        run: node test/update-test.mjs
+
+      # 断言 package.json 元数据不是占位符、且自更新源可解析。
+      - name: Check release metadata
+        run: node test/metadata-test.mjs
