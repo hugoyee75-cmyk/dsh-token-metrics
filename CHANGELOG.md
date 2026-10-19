@@ -3,6 +3,23 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-10-19
+
+### 新增
+
+- **供应商维度固化为三类**：「官方 API Key」/「余额」/「其他」。按 DSH 的 `nativeAuth.oauth` 自动判定，同类别的多个路由在明细表里合并成一行，具体路由名保留在悬停提示里；判定不出的归「其他」而不是隐藏
+
+### 修复
+
+- **更新摘要空白**：Release 此前只用 `--generate-notes`，正文只有一行 Full Changelog 链接，导致插件更新弹窗的「更新说明」无内容。改为从 CHANGELOG 抽取当前版本段落作为 release 正文
+- **构成模式面积图接缝生硬**：上下边界此前一条用贝塞尔、一条用折线，曲率不一致。改为同参数平滑，并把张力下调到 0.45 避免峰值过冲
+
+### 说明
+
+- 第三方插件（qoder / workbuddy / our-free-model 等）注册 provider 时普遍不声明 `nativeAuth`，因此这些路由会归入「其他」；DSH 内置 provider 可正常判定
+
+[0.2.2]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.2.2
+
 ## [0.2.1] - 2026-10-19
 
 补丁版本：修复筛选联动失效，并补齐相关交互。
