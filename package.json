@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-metrics",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "统计所有经过 DeepSeek Harness 的模型调用 Token 用量：按模型/供应商/项目/来源/账号/日期拆分，带缓存命中率、趋势图表与自更新。",
@@ -35,14 +35,15 @@
     }
   },
   "scripts": {
-    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/metadata-test.mjs",
+    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/metadata-test.mjs",
     "test:host": "node test/host-test.mjs",
     "test:client": "node test/client-test.mjs",
     "test:update": "node test/update-test.mjs",
     "test:metadata": "node test/metadata-test.mjs",
     "verify": "node test/verify-against-logs.mjs",
     "check": "node --check index.js && node --check client.js && node --check src/reload.js && node --check src/updater.js && npm test",
-    "prepack": "npm run check"
+    "prepack": "npm run check",
+    "test:pricing": "node test/pricing-test.mjs"
   },
   "license": "MIT",
   "repository": {

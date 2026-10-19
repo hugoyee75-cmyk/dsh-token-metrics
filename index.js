@@ -38,6 +38,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync, copyFileSync } from 'node:fs'
 import { PluginUpdater, parseRepository } from './src/updater.js'
 import { isReloading, selfReload, watchPackage } from './src/reload.js'
+import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
@@ -51,7 +52,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.2.3'
+export const version = '0.3.0'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -483,6 +484,16 @@ class TokenUsageTracker {
     // 固定数据目录：定时落盘是异步的，若每次都读 process.env，环境变量一变
     // 就会把数据写到别的目录去（测试里真实踩到过）。
     this.home = process.env.DSH_HOME?.trim() ?? join(homedir(), '.dsh')
+    /**
+     * 价目表：负责模型单价、汇率、手工补价与供应商倍率。
+     *
+     * 成本核算依赖它。构造时同步加载磁盘缓存（含内置兜底），所以即使
+     * 首次启动还没联网，也能立刻算出成本。
+     */
+    this.priceBook = new PriceBook({
+      dataDir: dataDir(this.home),
+      log: (message) => logger?.info?.(message),
+    }).load()
     // 让落盘文件也带上 buildId，便于排查「哪一版代码写的数据」。
     this.store = loadStore(logger, this.home)
     this.store.buildId = buildId
@@ -951,6 +962,70 @@ class TokenUsageTracker {
       /** 各 provider 路由名的判定结果，供明细表把供应商列换成类别。 */
       providerKinds: Object.fromEntries(this.providerKinds ?? []),
       byModel: this.store.byModel,
+      /**
+       * 成本核算。
+       *
+       * `byModelCost` 给出每个模型的美元成本与所用单价，`totals.cost` 是
+       * 汇总。页面按 `fx.usdCny` 换算人民币，切换货币不必重新请求。
+       *
+       * 没有匹配到价格的模型会出现在 `unpriced` 里——页面据此显示「补价」
+       * 入口，而不是静默算成 0 让用户以为免费。
+       */
+      cost: (() => {
+        const book = this.priceBook
+        const byModelCost = {}
+        let totalUsd = 0
+        const unpriced = []
+        for (const [key, counters] of Object.entries(this.store.byModel)) {
+          // key 形如 provider/model
+          const slash = key.indexOf('/')
+          const providerName = slash === -1 ? 'unknown' : key.slice(0, slash)
+          const modelName = slash === -1 ? key : key.slice(slash + 1)
+          const price = resolvePrice(modelName, book.table, book.overrides)
+          const multiplier = book.multiplierOf(providerName)
+          if (price === undefined) {
+            unpriced.push({ model: key, tokens: counters.totalTokens ?? 0 })
+            byModelCost[key] = { usd: 0, priced: false, multiplier }
+            continue
+          }
+          const usd = costOf(counters, price, multiplier)
+          totalUsd += usd
+          byModelCost[key] = {
+            usd,
+            priced: true,
+            // 单价按每百万 token 展示，这是行业惯例
+            inputPerM: (price.input ?? 0) * 1e6,
+            outputPerM: (price.output ?? 0) * 1e6,
+            cacheReadPerM: (price.cacheRead ?? 0) * 1e6,
+            cacheWritePerM: (price.cacheWrite ?? 0) * 1e6,
+            matchedName: price.matchedName,
+            priceSource: price.source,
+            multiplier,
+          }
+        }
+        // 按模型名合并（与占比图同一口径），供页面表格直接用
+        const byModelNameCost = {}
+        for (const [key, entry] of Object.entries(byModelCost)) {
+          const slash = key.indexOf('/')
+          const modelName = slash === -1 ? key : key.slice(slash + 1)
+          const target = byModelNameCost[modelName] ?? { usd: 0, priced: false }
+          target.usd += entry.usd
+          target.priced = target.priced || entry.priced === true
+          byModelNameCost[modelName] = target
+        }
+        return {
+          totalUsd,
+          byModel: byModelCost,
+          byModelName: byModelNameCost,
+          unpriced: unpriced.sort((a, b) => b.tokens - a.tokens),
+          fx: {
+            usdCny: book.usdCny,
+            updatedAt: book.fxUpdatedAt,
+            error: book.fxError,
+          },
+          priceBook: book.status(),
+        }
+      })(),
       /**
        * 按模型分组的全维度明细（前端筛选用）。
        *
@@ -1870,6 +1945,74 @@ export function apply(ctx, rawConfig) {
 
             // 强制重建：丢弃内存与磁盘的聚合结果，从会话日志重新算一遍。
             // 用户手动修数据、或升级后想确保口径一致时使用。
+            // —— 成本核算：手工补价 / 供应商倍率 / 刷新价目表 ——
+            if (url.pathname === '/api/dsh-token-metrics/pricing/override') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const model = String(body.model ?? '')
+                if (model === '') {
+                  sendJson(res, 400, { error: '缺少 model' })
+                  return
+                }
+                // price 为 null 表示删除该补价，恢复自动匹配
+                tracker.priceBook.setOverride(model, body.price ?? null)
+                tracker.cachedSnapshot = undefined
+                tracker.storeRevision += 1
+                sendJson(res, 200, { ok: true, priceBook: tracker.priceBook.status() })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/pricing/multiplier') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const provider = String(body.provider ?? '')
+                if (provider === '') {
+                  sendJson(res, 400, { error: '缺少 provider' })
+                  return
+                }
+                tracker.priceBook.setMultiplier(provider, body.multiplier)
+                tracker.cachedSnapshot = undefined
+                tracker.storeRevision += 1
+                sendJson(res, 200, { ok: true, priceBook: tracker.priceBook.status() })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/pricing/refresh') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              // 拉取可能耗时数秒（价目表约 3MB），先回 202，由前端轮询。
+              sendJson(res, 202, { ok: true, accepted: true })
+              setTimeout(() => {
+                Promise.all([
+                  tracker.priceBook.refresh(),
+                  tracker.priceBook.refreshFx(),
+                ]).then(() => {
+                  tracker.cachedSnapshot = undefined
+                  tracker.storeRevision += 1
+                  logger?.info?.('token-metrics: 价目表与汇率已刷新')
+                }).catch((error) => {
+                  logger?.warn?.(`token-metrics: 刷新价目表失败（${error?.message ?? error}）`)
+                })
+              }, 20)
+              return
+            }
+
             if (url.pathname === '/api/dsh-token-metrics/rebuild') {
               if (req.method !== 'POST') {
                 sendJson(res, 405, { error: 'POST required' })
@@ -1919,6 +2062,35 @@ export function apply(ctx, rawConfig) {
   // 进程退出监听只装一次：热重载会多次 apply，每次都装会触发
   // MaxListenersExceededWarning，而且旧实例的监听器还会拖住已废弃的 tracker。
   ctx.effect(() => installExitFlush(tracker), 'token-metrics: 落盘')
+}
+
+/**
+ * 读取并解析 JSON 请求体。
+ *
+ * 带大小上限：补价请求体只有几十字节，给 64KB 足够，同时避免恶意/异常
+ * 请求把内存吃满。上限内也要求 content-type 是 JSON，减少意外的表单提交。
+ */
+async function readJsonBody(req, limitBytes = 64 * 1024) {
+  const chunks = []
+  let total = 0
+  for await (const chunk of req) {
+    total += chunk.length
+    if (total > limitBytes) {
+      const error = new Error(`请求体过大（超过 ${limitBytes} 字节）`)
+      error.statusCode = 413
+      throw error
+    }
+    chunks.push(chunk)
+  }
+  if (total === 0) return {}
+  const text = Buffer.concat(chunks).toString('utf8')
+  try {
+    return JSON.parse(text)
+  } catch {
+    const error = new Error('请求体不是合法 JSON')
+    error.statusCode = 400
+    throw error
+  }
 }
 
 function sendJson(res, status, value) {

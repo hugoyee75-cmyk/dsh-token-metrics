@@ -42,6 +42,9 @@ window.__ModuleLoader__.load({
     const UPDATE_CHECK_ROUTE = '/api/dsh-token-metrics/update/check'
     const UPDATE_APPLY_ROUTE = '/api/dsh-token-metrics/update/apply'
     const RELOAD_ROUTE = '/api/dsh-token-metrics/reload'
+  const PRICING_OVERRIDE_ROUTE = '/api/dsh-token-metrics/pricing/override'
+  const PRICING_MULTIPLIER_ROUTE = '/api/dsh-token-metrics/pricing/multiplier'
+  const PRICING_REFRESH_ROUTE = '/api/dsh-token-metrics/pricing/refresh'
 
     const name = 'dsh-token-metrics-client'
     // 只声明真正使用的服务：slots 承载两个注册，locale 提供文案。
@@ -63,6 +66,27 @@ window.__ModuleLoader__.load({
       'filter.selectedCount': '已选',
       'filter.clear': '清除选择',
       'field.total': '总量',
+      'field.cost': '总成本',
+      'currency.usd': 'USD',
+      'currency.cny': 'RMB',
+      'currency.toggleTitle': '点击换算为人民币 / 美元',
+      'cost.unpriced': '未定价',
+      'cost.priced': '已定价',
+      'cost.overrideTitle': '补价',
+      'cost.overrideHint': '填每百万 token 的美元单价，留空表示恢复自动匹配',
+      'cost.inputPerM': '输入 $/M',
+      'cost.outputPerM': '输出 $/M',
+      'cost.save': '保存',
+      'cost.remove': '恢复自动',
+      'cost.refresh': '刷新价目表',
+      'cost.refreshHint': '从 LiteLLM 拉取最新价目表与汇率',
+      'cost.status': '价目表',
+      'cost.models': '个模型',
+      'cost.updatedAt': '更新于',
+      'cost.fx': '汇率',
+      'cost.neverUpdated': '尚未更新',
+      'cost.multiplier': '倍率',
+      'column.cost': '成本',
       'field.input': '输入',
       'field.output': '输出',
       'field.cacheRead': '缓存读',
@@ -216,6 +240,27 @@ window.__ModuleLoader__.load({
       'filter.selectedCount': 'selected',
       'filter.clear': 'Clear',
       'field.total': 'Total',
+      'field.cost': 'Cost',
+      'currency.usd': 'USD',
+      'currency.cny': 'RMB',
+      'currency.toggleTitle': 'Click to switch between USD and RMB',
+      'cost.unpriced': 'Unpriced',
+      'cost.priced': 'Priced',
+      'cost.overrideTitle': 'Set price',
+      'cost.overrideHint': 'USD per million tokens; leave blank to restore auto matching',
+      'cost.inputPerM': 'Input $/M',
+      'cost.outputPerM': 'Output $/M',
+      'cost.save': 'Save',
+      'cost.remove': 'Restore auto',
+      'cost.refresh': 'Refresh price table',
+      'cost.refreshHint': 'Fetch the latest price table and FX rate from LiteLLM',
+      'cost.status': 'Price table',
+      'cost.models': 'models',
+      'cost.updatedAt': 'Updated',
+      'cost.fx': 'FX',
+      'cost.neverUpdated': 'never',
+      'cost.multiplier': 'Multiplier',
+      'column.cost': 'Cost',
       'field.input': 'Input',
       'field.output': 'Output',
       'field.cacheRead': 'Cache read',
@@ -638,6 +683,73 @@ window.__ModuleLoader__.load({
 @media (prefers-reduced-motion: reduce) {
   .tu-spinner { animation: none; }
   .tu-scan-fill[data-indeterminate='true'] { animation: none; width: 100%; }
+}
+.tu-card-cost {
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.tu-card-cost:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.tu-card-cost:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+.tu-unpriced {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: var(--dsw-alias-bg-layer-1);
+  font-size: 12.5px;
+}
+.tu-unpriced-label {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 600;
+}
+.tu-unpriced-item {
+  border: 1px dashed var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tu-unpriced-item:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
+.tu-unpriced-refresh { margin-left: auto; }
+.tu-priceform {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.tu-pricefield {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-priceinput {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  border-radius: 7px;
+  padding: 6px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  width: 130px;
 }
 .tu-daterange {
   display: flex;
@@ -2138,6 +2250,10 @@ window.__ModuleLoader__.load({
       const [dayFrom, setDayFrom] = useState('')
       const [dayTo, setDayTo] = useState('')
       const [page, setPage] = useState(0)
+      // 成本显示货币：默认 USD，点击卡片换算 RMB（用户明确要求）。
+      const [currency, setCurrency] = useState('usd')
+      // 补价弹窗：{ model, input, output } 或 null
+      const [priceDialog, setPriceDialog] = useState(null)
       const PAGE_SIZE = 20
       const toggleModel = (name) => {
         setSelectedModels((current) => (current.includes(name)
@@ -2197,6 +2313,41 @@ window.__ModuleLoader__.load({
           .catch(() => { /* 版本路由不可用时静默：不影响统计功能 */ })
         return () => { disposed = true }
       }, [])
+
+      /** 保存手工补价（价格为 null 时删除，恢复自动匹配）。 */
+      const savePriceOverride = useCallback(async (model, input, output) => {
+        try {
+          const price = (input === '' && output === '') ? null : {
+            input: Number(input) / 1e6,
+            output: Number(output) / 1e6,
+          }
+          const response = await fetch(PRICING_OVERRIDE_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ model, price }),
+          })
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}))
+            throw new Error(body.error ?? `HTTP ${response.status}`)
+          }
+          setPriceDialog(null)
+          void refresh()
+        } catch (error) {
+          setUpdateState((previous) => ({ ...previous, error: error?.message ?? String(error) }))
+        }
+      }, [refresh])
+
+      /** 触发价目表刷新（Host 是异步的，稍后自动重取快照）。 */
+      const refreshPricing = useCallback(async () => {
+        try {
+          await fetch(PRICING_REFRESH_ROUTE, {
+            method: 'POST', headers: { accept: 'application/json' }, credentials: 'same-origin',
+          })
+          // 拉取要几秒，稍等再刷新快照
+          setTimeout(() => { void refresh() }, 4000)
+        } catch { /* 忽略：轮询会补上 */ }
+      }, [refresh])
 
       const checkUpdate = useCallback(async () => {
         setUpdateState((previous) => ({ ...previous, busy: 'check', error: '' }))
@@ -2404,6 +2555,22 @@ window.__ModuleLoader__.load({
         return merged
       }, [data, selectedModels])
 
+      // 成本金额：按当前货币格式化。金额通常很小（几美元），
+      // 用两位小数会显示成 0.00，所以小于 1 元时多给几位。
+      const fx = data?.cost?.fx ?? {}
+      const usdCny = Number(fx.usdCny) > 0 ? Number(fx.usdCny) : 7.2
+      const costUsd = data?.cost?.totalUsd ?? 0
+      const costValue = currency === 'cny' ? costUsd * usdCny : costUsd
+      const costSymbol = currency === 'cny' ? '¥' : '$'
+      const formatMoney = (value) => {
+        const n = Number(value) || 0
+        if (n === 0) return `${costSymbol}0`
+        if (n < 0.01) return `${costSymbol}${n.toFixed(4)}`
+        if (n < 1) return `${costSymbol}${n.toFixed(3)}`
+        return `${costSymbol}${n.toFixed(2)}`
+      }
+
+
       const modelRows = useMemo(() => {
         if (data === undefined) return []
         return Object.entries(data.byModel ?? {})
@@ -2421,11 +2588,25 @@ window.__ModuleLoader__.load({
               // 命中率由 Host 统一算好；没有就用本地兜底，保证列不空。
               hitRate: `${Math.round((counters.cacheHitRate ?? hitRateOf(counters)) * 100)}%`,
               total: formatNumber(counters.totalTokens),
+              // 成本：按当前货币显示；未定价的显示「—」并可点开补价。
+              ...(() => {
+                const costEntry = data?.cost?.byModel?.[key]
+                const usd = costEntry?.usd ?? 0
+                const value = currency === 'cny' ? usd * usdCny : usd
+                return {
+                  cost: costEntry?.priced === false || costEntry === undefined
+                    ? '—'
+                    : `${costSymbol}${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`,
+                  costRaw: value,
+                  priced: costEntry?.priced === true,
+                  modelName: slash === -1 ? key : key.slice(slash + 1),
+                }
+              })(),
               sortKey: counters.totalTokens ?? 0,
             }
           })
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data])
+      }, [data, currency, usdCny, costSymbol])
 
       const providerRows = useMemo(() => {
         if (data === undefined) return []
@@ -2846,6 +3027,25 @@ window.__ModuleLoader__.load({
 
       const cards = h('div', { className: 'tu-cards' },
         h(MetricCard, { label: t('field.total'), value: totals?.totalTokens ?? 0, accent: true }),
+        // 成本卡片：整张卡可点，点击在 USD / RMB 之间切换。
+        h('div', {
+          className: 'tu-card tu-card-cost',
+          title: t('currency.toggleTitle'),
+          role: 'button',
+          tabIndex: 0,
+          onClick: () => setCurrency((current) => (current === 'usd' ? 'cny' : 'usd')),
+          onKeyDown: (event) => {
+            if (event?.key === 'Enter' || event?.key === ' ') {
+              event.preventDefault?.()
+              setCurrency((current) => (current === 'usd' ? 'cny' : 'usd'))
+            }
+          },
+        },
+        h('div', { className: 'tu-card-label' },
+          `${t('field.cost')} · ${currency === 'cny' ? t('currency.cny') : t('currency.usd')}`),
+        h('div', { className: 'tu-card-value' },
+          formatMoney(costValue)),
+        ),
         h(MetricCard, {
           label: t('field.cacheHitRate'),
           value: Math.round((totals?.cacheHitRate ?? 0) * 100),
@@ -2870,6 +3070,7 @@ window.__ModuleLoader__.load({
         { key: 'reasoning', label: t('field.reasoning') },
         { key: 'hitRate', label: t('field.cacheHitRate') },
         { key: 'total', label: t('field.total') },
+        { key: 'cost', label: t('column.cost') },
       ]
 
       const providerColumns = [
@@ -2895,6 +3096,7 @@ window.__ModuleLoader__.load({
         { key: 'output', label: t('field.output') },
         { key: 'hitRate', label: t('field.cacheHitRate') },
         { key: 'total', label: t('field.total') },
+        { key: 'cost', label: t('column.cost') },
       ]
 
       const originColumns = [
@@ -3108,6 +3310,71 @@ window.__ModuleLoader__.load({
       // 是否正处于更新流程中（决定弹窗是否显示三段式进度）。
       const isUpdating = ['download', 'install', 'activate'].includes(updateState.phase)
 
+      // 补价弹窗：为匹配不到价格的模型手工填单价（每百万 token，美元）。
+      // 中转站常用自定义模型名（qfmodel 之类），自动匹配注定覆盖不到，
+      // 没有这个入口这些模型的成本永远是 0。
+      const priceModal = priceDialog === null ? null : h('div', {
+        className: 'tu-modal-backdrop',
+        onClick: (event) => { if (event?.target === event?.currentTarget) setPriceDialog(null) },
+      },
+      h('div', { className: 'tu-modal', role: 'dialog', 'aria-modal': 'true' },
+        h('div', { className: 'tu-modal-title' }, `${t('cost.overrideTitle')} · ${priceDialog.model}`),
+        h('p', { className: 'tu-hint' }, t('cost.overrideHint')),
+        h('div', { className: 'tu-priceform' },
+          h('label', { className: 'tu-pricefield' },
+            h('span', null, t('cost.inputPerM')),
+            h('input', {
+              type: 'number', step: '0.001', min: '0',
+              className: 'tu-priceinput',
+              value: priceDialog.input,
+              onChange: (event) => setPriceDialog((current) => (
+                current === null ? null : { ...current, input: event.target.value })),
+            }),
+          ),
+          h('label', { className: 'tu-pricefield' },
+            h('span', null, t('cost.outputPerM')),
+            h('input', {
+              type: 'number', step: '0.001', min: '0',
+              className: 'tu-priceinput',
+              value: priceDialog.output,
+              onChange: (event) => setPriceDialog((current) => (
+                current === null ? null : { ...current, output: event.target.value })),
+            }),
+          ),
+        ),
+        h('div', { className: 'tu-modal-actions' },
+          h('button', {
+            type: 'button', className: 'tu-button',
+            onClick: () => setPriceDialog(null),
+          }, t('version.dialogOk')),
+          h('button', {
+            type: 'button', className: 'tu-button',
+            onClick: () => { void savePriceOverride(priceDialog.model, '', '') },
+          }, t('cost.remove')),
+          h('button', {
+            type: 'button', className: 'tu-button tu-button-primary',
+            onClick: () => { void savePriceOverride(priceDialog.model, priceDialog.input, priceDialog.output) },
+          }, t('cost.save')),
+        ),
+      ))
+
+      // 未定价模型：给出可点击入口，而不是静默算成 0
+      const unpriced = data?.cost?.unpriced ?? []
+      const unpricedBar = unpriced.length === 0 ? null : h('div', { className: 'tu-unpriced' },
+        h('span', { className: 'tu-unpriced-label' }, `${t('cost.unpriced')} ${unpriced.length}`),
+        ...unpriced.slice(0, 8).map((entry) => h('button', {
+          key: entry.model,
+          type: 'button',
+          className: 'tu-unpriced-item',
+          onClick: () => setPriceDialog({ model: entry.model, input: '', output: '' }),
+        }, entry.model)),
+        h('button', {
+          type: 'button', className: 'tu-button tu-unpriced-refresh',
+          title: t('cost.refreshHint'),
+          onClick: () => { void refreshPricing() },
+        }, t('cost.refresh')),
+      )
+
       // 版本检查结果弹窗：有新版给「更新并重载」，无新版给「知道了」。
       const versionModal = versionDialog === null ? null : h('div', {
         className: 'tu-modal-backdrop',
@@ -3189,7 +3456,7 @@ window.__ModuleLoader__.load({
       )
 
       return h('div', { className: 'tu-root' },
-        head, scanBar, tabs, accountBar, cards, charts, sections, warn, note, versionModal)
+        head, scanBar, tabs, accountBar, cards, unpricedBar, charts, sections, warn, note, versionModal, priceModal)
     }
 
     //#endregion

@@ -357,6 +357,39 @@ tracker 挂在 `globalThis` 上，按 `buildId`（由 `index.js` 自身的大小
 `beforeExit` 会累积监听器并拖住已废弃的 tracker；现在全局只装一个，并指向
 当前 tracker。
 
+## 成本核算
+
+按模型的实际 token 用量自动估算成本，单位美元；卡片可点击切换人民币。
+
+### 价格从哪来
+
+1. **LiteLLM 公开价目表**（社区事实标准，约 2800 个 chat 模型），启动后拉取并缓存到 `$DSH_HOME/token-metrics/prices.json`，之后离线也能用
+2. **内置兜底价目表**：首次启动且尚未联网时，至少覆盖 DeepSeek / GPT-4o / Claude 等主力模型
+3. **手工补价**：优先级最高，用于中转站自定义的模型名
+
+### 同一模型有十几个价格时怎么选
+
+LiteLLM 里同一个模型会挂在多个渠道下，价格能差几十倍（`coralbricks/deepseek-v4.1-flash`
+是 $0.01/M，`deepseek/` 官方是 $0.28/M）。插件按**渠道可信度**排序后取最权威的一个：
+
+| 优先级 | 渠道 |
+| --- | --- |
+| 最高 | 官方直营（`openai/`、`anthropic/`、`deepseek/`、`google/`） |
+| 高 | 主流云（`azure_ai/`、`bedrock/`、`vertex_ai/`） |
+| 中 | 无渠道前缀的条目（通常是官方公布价） |
+| 低 | 聚合与转售（`openrouter/`、`coralbricks/`、`inferenceapis/`） |
+
+这样算出来的成本与官方口径一致，而不是随机落到某个最便宜的转售商。
+
+### 自定义模型与倍率
+
+- **中转站的自定义模型名**（`qfmodel` 之类）匹配不到价格时，页面会列出「未定价」并给出补价入口，填每百万 token 的美元单价即可，**不会静默算成 0**
+- **供应商倍率**：中转站常在官方价上加价，可通过 `pricing/multiplier` 接口按 provider 设置倍率
+
+### 汇率
+
+从 `open.er-api.com` 拉取实时 USD/CNY，缓存在 `fx.json`；拉取失败沿用上次的值，再失败用内置的 7.2。
+
 ## 跨版本升级
 
 跨版本升级是**支持的**——只要两版文件布局兼容，直接替换即可，不需要先卸载。
