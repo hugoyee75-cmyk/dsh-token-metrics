@@ -1471,10 +1471,13 @@ window.__ModuleLoader__.load({
      * 张力系数 1/6 是 Catmull-Rom 的标准取值；整体乘 0.65 让曲线更收敛，
      * 避免在峰值附近冲过头（overshoot）造成「假高点」。
      */
-    function smoothPath(points) {
+    function smoothPath(points, options = {}) {
       if (points.length === 0) return ''
       if (points.length < 3) return linePath(points)
-      const tension = 0.65 / 6
+      // 面积图的上下边界必须用**同一条**平滑曲线，否则一条顺滑、一条是
+      // 直线段，接缝处会显得生硬。张力也调小一些：面积图靠面积表达量级，
+      // 过冲会在峰值处造出「假高点」。
+      const tension = (options.tension ?? 0.65) / 6
       let path = `M${points[0].x.toFixed(2)},${points[0].y.toFixed(2)}`
       for (let index = 0; index < points.length - 1; index += 1) {
         const p0 = points[index - 1] ?? points[index]
@@ -1683,9 +1686,12 @@ window.__ModuleLoader__.load({
           { key: 'cacheRead', color: 'var(--dsw-alias-state-success-primary)', value: (p) => p.cacheRead },
           { key: 'output', color: 'var(--dsw-alias-state-warn-primary)', value: (p) => p.output },
         ]
-        // 自下而上累积，每一层用「基线 + 该层值」画闭合区域。
-        // 曲线用 smoothPath 走贝塞尔，与其它模式的折线观感保持一致——
-        // 之前这里用直线段拼，切到「构成」时曲线会突然变生硬。
+        // 自下而上累积，每一层画成闭合区域。
+        //
+        // 关键：上下边界必须用**同一套**平滑参数。早先只把上边界做了
+        // 贝塞尔、下边界仍是折线，两者曲率不一致，接缝处看起来就很生硬。
+        // 面积图的张力也调小（0.45）——过冲会在峰值处造出假高点。
+        const AREA_TENSION = 0.45
         let lower = points.map(() => 0)
         const layerPaths = layers.map((layer) => {
           const upper = points.map((point, index) => lower[index] + layer.value(point))
@@ -1693,14 +1699,15 @@ window.__ModuleLoader__.load({
             x: toX(index),
             y: toY(upper[index], max),
           }))
-          // 下边界反向拼回，形成闭合区域
+          // 下边界反向拼回，形成闭合区域；同样走平滑曲线
           const bottomPoints = points.map((point, index) => ({
             x: toX(index),
             y: toY(lower[index], max),
           })).reverse()
-          const path = `${smoothPath(topPoints)} L${bottomPoints
-            .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-            .join(' L')} Z`
+          // smoothPath 返回的路径以 M 开头，拼到闭合区域里要换成 L 续接
+          const topPath = smoothPath(topPoints, { tension: AREA_TENSION })
+          const bottomPath = smoothPath(bottomPoints, { tension: AREA_TENSION })
+          const path = `${topPath} ${bottomPath.replace(/^M/, 'L')} Z`
           lower = upper
           return { key: layer.key, color: layer.color, path }
         })

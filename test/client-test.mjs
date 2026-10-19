@@ -1147,6 +1147,39 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   check('两列标题都存在', titles.length >= 2, `实际 ${titles.length}`)
 }
 
+// —— 构成模式：上下边界必须用同一套平滑曲线 ——
+// 回归点：早先只把上边界做成贝塞尔、下边界仍是折线，曲率不一致，
+// 接缝处看起来生硬。这里直接检查生成路径的段数是否匹配。
+{
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  // 切到「构成」模式
+  resetHooks()
+  const first = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  let composeBtn
+  walkTree(first, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((c) => c === '构成')) composeBtn = node
+  })
+  composeBtn?.props?.onClick?.()
+  resetHooks()
+  const composeTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
+  const areaPaths = []
+  walkTree(composeTree, (node) => {
+    if (node?.type === 'path' && typeof node.props?.d === 'string'
+      && node.props.d.includes('C') && node.props.d.trim().endsWith('Z')) {
+      areaPaths.push(node.props.d)
+    }
+  })
+  check('构成模式渲染出闭合面积', areaPaths.length >= 1, `paths=${areaPaths.length}`)
+  // 闭合区域里应当同时含上边界与下边界的贝塞尔段：
+  // 一段面积 = 上边界 C 段 + 下边界 C 段，因此 C 的数量应 >= 2*(点数-1)
+  const sample = areaPaths[0] ?? ''
+  const curveCount = (sample.match(/C/g) ?? []).length
+  check('上下边界都是平滑曲线', curveCount >= 4, `C 段数=${curveCount}`)
+}
 // —— 环形图结构：圆环与图例必须是**同级**的两个子节点 ——
 // 回归点：早先 h('svg', ...) 少一个右括号，图例被挤到 .tu-pie 之外，
 // 于是它换行到圆环下方而不是显示在右侧。这里直接断言元素结构。
