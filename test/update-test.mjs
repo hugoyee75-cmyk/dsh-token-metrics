@@ -17,9 +17,26 @@ import { gzipSync } from 'node:zlib'
 import {
   PluginUpdater, backupPackage, compareVersions, extractTarGz,
   installStaged, listPackageFiles, parseRepository, parseVersion,
-  renameWithRetry, restoreBackup,
+  parseReleaseAtom, renameWithRetry, restoreBackup,
 } from '../src/updater.js'
 import { isReloading, packageCacheKeys, packageUrlOf, entryUrlOf } from '../src/reload.js'
+
+// 供多个用例复用的 release atom 样本
+const atomXml = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v0.3.0</id>
+    <updated>2026-10-19T10:37:23Z</updated>
+    <title>v0.3.0</title>
+    <content type="html">&lt;p&gt;新版本说明&lt;/p&gt;&lt;p&gt;第二行&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v0.2.0</id>
+    <updated>2026-10-18T10:00:00Z</updated>
+    <title>v0.2.0</title>
+    <content type="html">&lt;p&gt;旧版本&lt;/p&gt;</content>
+  </entry>
+</feed>`
 
 const failures = []
 function check(label, actual, expected) {
@@ -197,6 +214,22 @@ rmSync(listHome, { recursive: true, force: true })
 
 //#endregion
 
+//#region 限流回退：api -> atom -> git
+
+// GitHub REST API 对匿名请求每小时只给 60 次，用户频繁点检查更新很容易
+// 打满。此时必须还能回答「有没有新版本」，否则功能等于坏了。
+{
+  const parsedAtom = parseReleaseAtom(atomXml)
+  check('atom 解析出最新版本', parsedAtom?.version, '0.3.0')
+  check('atom 剥离了 HTML 标签', parsedAtom?.notes.includes('<p>'), false)
+  check('atom 保留了说明文字', parsedAtom?.notes.includes('新版本说明'), true)
+  check('atom 解析了发布时间', (parsedAtom?.publishedAt ?? 0) > 0, true)
+  check('atom 空输入返回 undefined', parseReleaseAtom(''), undefined)
+
+}
+
+//#endregion
+
 //#region 更新器：失败必须回滚
 
 const upHome = mkdtempSync(join(tmpdir(), 'dtu-updater-'))
@@ -299,6 +332,27 @@ const applied = await okUpdater.apply({ version: '1.2.0', activate: async () => 
 check('更新成功', applied.ok, true)
 check('更新后内容生效', readFileSync(join(installedDir, 'index.js'), 'utf8'), 'V12')
 check('更新后版本已升', JSON.parse(readFileSync(join(installedDir, 'package.json'), 'utf8')).version, '1.2.0')
+
+  const up2 = new PluginUpdater({
+    pkgDir: installedDir, dataDir: join(upHome, 'data-atom'), runningVersion: '0.2.0',
+    repository: 'github:foo/bar',
+    // 只让 atom 可用：API 一律 403（模拟限流）
+    fetchImpl: async (url) => {
+      const target = String(url)
+      if (target.includes('api.github.com')) {
+        return { ok: false, status: 403, async json() { return {} }, async text() { return '' } }
+      }
+      if (target.includes('releases.atom')) {
+        return { ok: true, status: 200, async text() { return atomXml }, async json() { return {} } }
+      }
+      return { ok: false, status: 404, async json() { return {} }, async text() { return '' } }
+    },
+  })
+  const atomStatus = await up2.check()
+  check('API 限流时回退到 atom', atomStatus.latest, '0.3.0')
+  check('回退后仍判定可更新', atomStatus.available, true)
+  check('标注了版本来源通道', atomStatus.sourceChannel, 'atom')
+  check('回退后错误已清空', atomStatus.error, '')
 
 // apply：网络失败 -> 磁盘不动
 const netFailUpdater = new PluginUpdater({
