@@ -1,0 +1,24 @@
+# 依赖与构建产物
+node_modules/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# 日志
+*.log
+npm-debug.log*
+
+# 插件运行数据
+# 正常情况下数据在 $DSH_HOME/token-metrics/ 下，不进仓库；
+# 这几条只是防备手动把目录复制进来。
+usage.json
+upgrade-stage/
+rollback/
+
+# 本地临时比对产物
+/tmp-*/
+*.tmp
