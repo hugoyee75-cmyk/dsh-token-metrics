@@ -49,6 +49,10 @@ window.__ModuleLoader__.load({
   const BALANCE_SITE_ROUTE = '/api/dsh-token-metrics/balance/site'
   const BALANCE_REMOVE_ROUTE = '/api/dsh-token-metrics/balance/remove'
   const BALANCE_PROBE_ROUTE = '/api/dsh-token-metrics/balance/probe'
+  const PRICING_ALIAS_ROUTE = '/api/dsh-token-metrics/pricing/alias'
+  const SUPPLIER_MODELS_ROUTE = '/api/dsh-token-metrics/supplier/models'
+  const SUPPLIER_SYNC_ROUTE = '/api/dsh-token-metrics/supplier/sync'
+  const PRICING_MULTIPLIER_ROUTE2 = '/api/dsh-token-metrics/pricing/multiplier'
 
     const name = 'dsh-token-metrics-client'
     // 只声明真正使用的服务：slots 承载两个注册，locale 提供文案。
@@ -72,6 +76,99 @@ window.__ModuleLoader__.load({
       'field.total': '总量',
       'field.cost': '总成本',
       'balance.title': '供应商余额',
+      'view.stats': '统计',
+      'view.suppliers': '供应商',
+      'supplier.title': '供应商管理',
+      'supplier.subtitle': '管理第三方中转站：余额、可用模型与同步到 DSH 模型配置',
+      'supplier.add': '添加供应商',
+      'supplier.added': '已添加',
+      'supplier.discovered': '可添加',
+      'supplier.models': '个模型',
+      'supplier.default': '默认',
+      'supplier.current': '当前默认',
+      'supplier.setDefault': '设为默认',
+      'supplier.balance': '余额',
+      'supplier.edit': '编辑',
+      'supplier.sync': '同步到 DSH',
+      'supplier.syncing': '同步中…',
+      'supplier.synced': '已同步',
+      'supplier.empty': '还没有供应商。可以从下方「可添加」里选一个，或手动添加。',
+      'supplier.formTitle': '添加供应商',
+      'supplier.formEdit': '编辑供应商',
+      'supplier.name': '名称',
+      'supplier.baseUrl': '接口地址',
+      'supplier.apiKey': 'API 密钥',
+      'supplier.apiFormat': '接口格式',
+      'supplier.apiHint': '按上游实际协议选择，选错会导致调用失败',
+      'api.openai-completions': 'OpenAI Chat Completions',
+      'api.openai-responses': 'OpenAI Responses',
+      'api.anthropic-messages': 'Anthropic Messages',
+      'supplier.fetchModels': '获取列表',
+      'supplier.fetching': '获取中…',
+      'supplier.modelList': '该服务的模型',
+      'supplier.modelSettings': '模型设置',
+      'supplier.selected': '已选',
+      'supplier.alias': '别名',
+      'supplier.context': '上下文窗口',
+      'supplier.maxOutput': '最大输出',
+      'supplier.reasoning': '思考等级',
+      'supplier.noModels': '还没有选择模型。先在左侧列表里勾选。',
+      'supplier.needUrl': '填写地址后即可获取模型列表。',
+      'supplier.save': '保存',
+      'supplier.saveAndSync': '保存并同步',
+      'supplier.cancel': '取消',
+      'supplier.remove': '移除',
+      'supplier.keyHint': '密钥只保存在 DSH 凭据里，不会写入配置文件，也不会显示在此页面。',
+      'supplier.syncOk': '已同步到 DSH 模型配置',
+      'supplier.syncFail': '同步失败',
+      'supplier.fetchFail': '获取模型列表失败',
+      'supplier.probeAll': '刷新全部余额',
+      'supplier.groupBasic': '基础信息',
+      'supplier.groupService': '服务与凭据',
+      'supplier.groupModels': '模型选择',
+      'supplier.optional': '可选',
+      'supplier.keyPlaceholder': '粘贴访问令牌，留空则沿用已保存的',
+      'supplier.urlPlaceholder': 'https://api.example.com/v1',
+      'supplier.namePlaceholder': '例如：某某中转站',
+      'supplier.searchModel': '搜索模型 ID…',
+      'supplier.noResult': '没有匹配的模型',
+      'supplier.fetchHint': '填好地址和密钥后点「获取列表」，从服务端拉取可用模型。',
+      'supplier.pickHint': '勾选需要的模型，右侧可为每个模型设置别名与容量。',
+      'supplier.syncExplain': '「保存并同步」会把该供应商写入 DSH 的模型配置，之后就能在选择器里直接选它的模型。',
+      'supplier.editing': '编辑中',
+      'supplier.addNew': '新建',
+      'supplier.secretNote': '密钥经 DSH 凭据服务保存，不会写进配置文件，也不会回显。',
+      'supplier.preset': '常用',
+      'supplier.custom': '自定义',
+      'supplier.thinking': '思考',
+      'supplier.attach': '附件',
+      'supplier.attachImage': '图片',
+      'supplier.attachPdf': 'PDF',
+      'supplier.addCustomModel': '手动添加模型 ID',
+      'supplier.customModelPlaceholder': '如 my-model-v2',
+      'supplier.add': '添加',
+      'supplier.capacity': '容量',
+      'supplier.noCapacity': '未声明',
+      'supplier.modelCountHint': '勾选后会写入 DSH 模型配置；未勾选的模型不会出现在选择器里。',
+      'supplier.pickOne': '在左侧选一个模型来设置它的参数',
+      'supplier.contextHint': '模型能接受的最大输入长度',
+      'supplier.outputHint': '单次回复的最大 token 数',
+      'supplier.thinkingHint': '勾选模型支持的思考档位，对话里就能在这些档位间切换',
+      'supplier.thinkingNone': '未声明（非推理模型）',
+      'supplier.thinkingPick': '勾选该模型支持的档位',
+      'level.off': '关闭',
+      'level.minimal': '极简',
+      'level.low': '低',
+      'level.medium': '中',
+      'level.high': '高',
+      'level.xhigh': '超高',
+      'level.max': '最高',
+      'supplier.attachHint': '该模型支持的输入类型',
+      'supplier.autoDispatch': '可供 AI 自动调度',
+      'supplier.setBalance': '手动填写余额',
+      'supplier.balanceUsd': '余额（USD）',
+      'supplier.balanceSaved': '余额已保存',
+      'supplier.probeUnsupported': '该站点没有标准的余额接口，可手动填写余额',
       'balance.add': '添加站点',
       'balance.empty': '还没有配置任何站点。可以从下面自动发现的地址一键添加，或手动填写。',
       'balance.discovered': '自动发现的站点',
@@ -112,6 +209,14 @@ window.__ModuleLoader__.load({
       'cost.fx': '汇率',
       'cost.neverUpdated': '尚未更新',
       'cost.multiplier': '倍率',
+      'alias.title': '模型别名',
+      'alias.hint': '部分供应商上报的是内部代号（如 Qoder 的 qfmodel），不是真实模型名。填写真实模型名后，所有视图都会按它显示。',
+      'alias.raw': '原始代号',
+      'alias.display': '显示为',
+      'alias.save': '保存',
+      'alias.remove': '清除',
+      'alias.none': '暂无可设置的别名。',
+      'alias.manage': '管理别名',
       'column.cost': '成本',
       'field.input': '输入',
       'field.output': '输出',
@@ -269,6 +374,99 @@ window.__ModuleLoader__.load({
       'field.total': 'Total',
       'field.cost': 'Cost',
       'balance.title': 'Provider balance',
+      'view.stats': 'Stats',
+      'view.suppliers': 'Suppliers',
+      'supplier.title': 'Suppliers',
+      'supplier.subtitle': 'Manage relay stations: balance, available models, and syncing to DSH model config',
+      'supplier.add': 'Add supplier',
+      'supplier.added': 'Added',
+      'supplier.discovered': 'Available',
+      'supplier.models': 'models',
+      'supplier.default': 'Default',
+      'supplier.current': 'Current default',
+      'supplier.setDefault': 'Set default',
+      'supplier.balance': 'Balance',
+      'supplier.edit': 'Edit',
+      'supplier.sync': 'Sync to DSH',
+      'supplier.syncing': 'Syncing…',
+      'supplier.synced': 'Synced',
+      'supplier.empty': 'No suppliers yet. Pick one from "Available" below, or add manually.',
+      'supplier.formTitle': 'Add supplier',
+      'supplier.formEdit': 'Edit supplier',
+      'supplier.name': 'Name',
+      'supplier.baseUrl': 'Base URL',
+      'supplier.apiKey': 'API key',
+      'supplier.apiFormat': 'Interface format',
+      'supplier.apiHint': 'Pick the protocol the endpoint actually speaks; a mismatch breaks calls',
+      'api.openai-completions': 'OpenAI Chat Completions',
+      'api.openai-responses': 'OpenAI Responses',
+      'api.anthropic-messages': 'Anthropic Messages',
+      'supplier.fetchModels': 'Fetch list',
+      'supplier.fetching': 'Fetching…',
+      'supplier.modelList': 'Models offered',
+      'supplier.modelSettings': 'Model settings',
+      'supplier.selected': 'selected',
+      'supplier.alias': 'Alias',
+      'supplier.context': 'Context window',
+      'supplier.maxOutput': 'Max output',
+      'supplier.reasoning': 'Reasoning',
+      'supplier.noModels': 'No models selected yet. Pick them from the list on the left.',
+      'supplier.needUrl': 'Enter a URL to fetch the model list.',
+      'supplier.save': 'Save',
+      'supplier.saveAndSync': 'Save and sync',
+      'supplier.cancel': 'Cancel',
+      'supplier.remove': 'Remove',
+      'supplier.keyHint': 'Keys are stored only in DSH credentials, never in config files, and never shown on this page.',
+      'supplier.syncOk': 'Synced to DSH model config',
+      'supplier.syncFail': 'Sync failed',
+      'supplier.fetchFail': 'Could not fetch model list',
+      'supplier.probeAll': 'Refresh all balances',
+      'supplier.groupBasic': 'Basics',
+      'supplier.groupService': 'Service & credentials',
+      'supplier.groupModels': 'Model selection',
+      'supplier.optional': 'optional',
+      'supplier.keyPlaceholder': 'Paste the token; leave blank to keep the saved one',
+      'supplier.urlPlaceholder': 'https://api.example.com/v1',
+      'supplier.namePlaceholder': 'e.g. My relay station',
+      'supplier.searchModel': 'Search model ID…',
+      'supplier.noResult': 'No matching models',
+      'supplier.fetchHint': 'Fill in the URL and key, then click "Fetch list" to load models from the endpoint.',
+      'supplier.pickHint': 'Tick the models you need; set an alias and capacity for each on the right.',
+      'supplier.syncExplain': '"Save and sync" writes this supplier into the DSH model config so its models appear in the picker.',
+      'supplier.editing': 'Editing',
+      'supplier.addNew': 'New',
+      'supplier.secretNote': 'The key is stored via DSH credentials; it is never written to config files or echoed back.',
+      'supplier.preset': 'Presets',
+      'supplier.custom': 'Custom',
+      'supplier.thinking': 'Thinking',
+      'supplier.attach': 'Attachments',
+      'supplier.attachImage': 'Image',
+      'supplier.attachPdf': 'PDF',
+      'supplier.addCustomModel': 'Add model ID manually',
+      'supplier.customModelPlaceholder': 'e.g. my-model-v2',
+      'supplier.add': 'Add',
+      'supplier.capacity': 'Capacity',
+      'supplier.noCapacity': 'not declared',
+      'supplier.modelCountHint': 'Checked models are written to the DSH model config; unchecked ones never appear in the picker.',
+      'supplier.pickOne': 'Pick a model on the left to configure it',
+      'supplier.contextHint': 'Maximum input length the model accepts',
+      'supplier.outputHint': 'Maximum tokens per reply',
+      'supplier.thinkingHint': 'Tick the levels this model supports; chat will offer them',
+      'supplier.thinkingNone': 'not declared (non-reasoning model)',
+      'supplier.thinkingPick': 'Tick the levels this model supports',
+      'level.off': 'off',
+      'level.minimal': 'minimal',
+      'level.low': 'low',
+      'level.medium': 'medium',
+      'level.high': 'high',
+      'level.xhigh': 'xhigh',
+      'level.max': 'max',
+      'supplier.attachHint': 'Input types this model accepts',
+      'supplier.autoDispatch': 'Available for AI auto-dispatch',
+      'supplier.setBalance': 'Set balance manually',
+      'supplier.balanceUsd': 'Balance (USD)',
+      'supplier.balanceSaved': 'Balance saved',
+      'supplier.probeUnsupported': 'This site has no standard balance endpoint; you can enter the balance manually',
       'balance.add': 'Add site',
       'balance.empty': 'No sites configured yet. Add one from the discovered endpoints below, or fill it in manually.',
       'balance.discovered': 'Discovered endpoints',
@@ -309,6 +507,14 @@ window.__ModuleLoader__.load({
       'cost.fx': 'FX',
       'cost.neverUpdated': 'never',
       'cost.multiplier': 'Multiplier',
+      'alias.title': 'Model aliases',
+      'alias.hint': 'Some providers report internal codes (e.g. Qoder\'s qfmodel) instead of real model names. Set the real name here and every view will use it.',
+      'alias.raw': 'Raw code',
+      'alias.display': 'Show as',
+      'alias.save': 'Save',
+      'alias.remove': 'Clear',
+      'alias.none': 'No aliases to configure.',
+      'alias.manage': 'Manage aliases',
       'column.cost': 'Cost',
       'field.input': 'Input',
       'field.output': 'Output',
@@ -848,6 +1054,608 @@ window.__ModuleLoader__.load({
   gap: 12px;
   margin: 10px 0 12px;
 }
+.tu-sheet {
+  width: min(920px, 100%);
+  max-height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-overlay);
+  box-shadow: 0 24px 70px -18px rgb(0 0 0 / 55%);
+  overflow: hidden;
+}
+.tu-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 15px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  flex: none;
+}
+.tu-sheet-headings { min-width: 0; }
+.tu-sheet-title { font-size: 15px; font-weight: 600; margin: 0 0 5px; }
+.tu-sheet-sub {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+  margin: 0;
+  max-width: 600px;
+}
+.tu-sheet-body {
+  padding: 18px 24px 6px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+.tu-sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 24px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  flex: none;
+}
+.tu-sheet-foot-note {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tu-sheet-foot-actions { display: flex; gap: 8px; flex: none; }
+
+/* 行/列：连接信息一次排开，不再切碎成两个分组 */
+.tu-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.tu-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 0 1 200px; }
+.tu-col-wide { flex: 1 1 260px; }
+.tu-col-grow { flex: 2 1 320px; }
+.tu-flabel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 输入 */
+.tu-input {
+  appearance: none;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 11px;
+  transition: border-color 130ms ease, box-shadow 130ms ease;
+}
+.tu-input::placeholder { color: var(--dsw-alias-label-secondary); opacity: 0.6; }
+.tu-input:focus {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent);
+}
+.tu-input:disabled {
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.tu-input-xs { padding: 5px 8px; font-size: 12px; border-radius: 6px; }
+.tu-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 16px) 52%, calc(100% - 11px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+  cursor: pointer;
+}
+
+.tu-readonly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  padding: 8px 11px;
+  font-family: var(--dsw-alias-font-mono, monospace);
+}
+.tu-readonly-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+  flex: none;
+}
+.tu-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 18px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+.tu-note-icon { flex: none; opacity: 0.85; }
+
+/* 模型区 */
+.tu-sec { border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 16px; }
+.tu-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+  flex-wrap: wrap;
+}
+.tu-sec-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tu-sec-actions { display: flex; gap: 8px; align-items: center; }
+.tu-sec-hint { margin: 9px 0 14px; }
+.tu-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-brand-primary);
+  border: 1px solid var(--dsw-alias-brand-primary);
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.tu-search { width: 200px; padding: 6px 10px; font-size: 12px; border-radius: 7px; }
+
+/* 模型：左列表 + 右详情 */
+.tu-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 300px;
+  max-height: 360px;
+}
+.tu-list-pane,
+.tu-detail-pane {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: var(--dsw-alias-bg-layer-1);
+  min-width: 0;
+  overflow: hidden;
+}
+.tu-mlist {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  scrollbar-width: thin;
+}
+.tu-mlist-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+  min-width: 0;
+  border: 1px solid transparent;
+  transition: background 110ms ease, border-color 110ms ease;
+}
+.tu-mlist-row:hover { background: var(--dsw-alias-bg-layer-2); }
+.tu-mlist-row[data-picked='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);
+}
+.tu-mlist-row[data-active='true'] {
+  border-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 13%, transparent);
+}
+.tu-mlist-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--dsw-alias-font-mono, monospace);
+  font-size: 12px;
+}
+.tu-mlist-tag {
+  flex: none;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 15px;
+}
+.tu-mlist-foot {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
+  flex: none;
+}
+.tu-mlist-foot .tu-input { font-size: 12px; padding: 6px 9px; }
+.tu-mlist-foot .tu-btn-ghost { padding: 6px 11px; font-size: 14px; line-height: 1; }
+
+/* 详情面板 */
+.tu-detail {
+  padding: 12px 13px;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scrollbar-width: thin;
+}
+.tu-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-detail-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--dsw-alias-font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tu-dfield { display: flex; flex-direction: column; gap: 7px; }
+.tu-dfield-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.tu-dfield-hint {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  opacity: 0.85;
+}
+.tu-input-sm { padding: 6px 9px; font-size: 12px; border-radius: 7px; }
+
+/* 分段选择器：预设值一眼可选，比只给输入框好用 */
+.tu-segmented { display: flex; gap: 4px; flex-wrap: wrap; }
+.tu-seg {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 5px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 110ms ease;
+  font-variant-numeric: tabular-nums;
+}
+.tu-seg:hover { border-color: var(--dsw-alias-border-l2); color: var(--dsw-alias-label-primary); }
+.tu-seg[data-active='true'] {
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-bg-base);
+  font-weight: 600;
+}
+.tu-levels {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.tu-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+  transition: all 110ms ease;
+}
+.tu-level:hover { border-color: var(--dsw-alias-border-l2); }
+.tu-level[data-on='true'] {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+}
+.tu-checks { display: flex; gap: 14px; flex-wrap: wrap; }
+.tu-checkrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* 空状态：给出下一步，而不是干瞪眼 */
+.tu-empty-block {
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 11px;
+  padding: 26px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+}
+.tu-empty-title { font-size: 12.5px; }
+.tu-empty-hint {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+  max-width: 420px;
+}
+.tu-empty-action { display: flex; gap: 8px; margin-top: 6px; width: min(360px, 100%); }
+.tu-center { text-align: center; margin: 16px auto; }
+.tu-empty-inline {
+  border: none;
+  border-radius: 0;
+  padding: 28px 18px;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.tu-checkbox {
+  appearance: none;
+  width: 14px; height: 14px;
+  flex: none;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-base);
+  cursor: pointer;
+  position: relative;
+  transition: background 110ms ease, border-color 110ms ease;
+}
+.tu-checkbox:checked {
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+}
+.tu-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border: solid var(--dsw-alias-bg-base);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.tu-checkbox:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 按钮 */
+.tu-btn {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  padding: 9px 15px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  white-space: nowrap;
+}
+.tu-btn:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
+.tu-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.tu-btn-primary {
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-bg-base);
+  font-weight: 600;
+}
+.tu-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.tu-btn-ghost {
+  background: transparent;
+  border-color: var(--dsw-alias-border-l1);
+  padding: 6px 11px;
+  font-size: 11.5px;
+}
+.tu-chip {
+  flex: none;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-chip[data-tone='brand'] {
+  color: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+}
+.tu-balance-set {
+  appearance: none;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tu-balance-set:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
+
+@media (max-width: 780px) {
+  .tu-col, .tu-col-wide, .tu-col-grow { flex: 1 1 100%; }
+  .tu-search { width: 100%; }
+  .tu-split { grid-template-columns: minmax(0, 1fr); max-height: none; }
+  .tu-list-pane { max-height: 240px; }
+}
+
+.tu-viewtabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-viewtab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tu-viewtab[data-active='true'] {
+  color: var(--dsw-alias-label-primary);
+  border-bottom-color: var(--dsw-alias-brand-primary);
+  font-weight: 600;
+}
+.tu-page { display: flex; flex-direction: column; gap: 18px; }
+.tu-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.tu-page-title { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.tu-page-sub { font-size: 12px; color: var(--dsw-alias-label-secondary); margin: 0; }
+.tu-page-actions { display: flex; gap: 8px; flex: none; }
+.tu-page-grouphead {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  margin-bottom: 9px;
+}
+.tu-suplist { display: flex; flex-direction: column; gap: 10px; }
+.tu-supcard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 14px 17px;
+  flex-wrap: wrap;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.tu-supcard:hover {
+  border-color: var(--dsw-alias-border-l2);
+}
+.tu-supcard-discovered { border-style: dashed; }
+.tu-supcard-main { flex: 1 1 240px; min-width: 0; }
+.tu-supcard-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tu-supcard-badge {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.tu-supcard-url {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tu-supcard-balance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+}
+.tu-supcard-balance-label { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.tu-supcard-balance-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-state-success-primary);
+}
+.tu-supcard-balance[data-empty='true'] .tu-supcard-balance-value {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 400;
+}
+.tu-supcard-actions { display: flex; gap: 6px; flex: none; }
+.tu-notice {
+  border-radius: 9px;
+  padding: 9px 13px;
+  font-size: 12.5px;
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-notice[data-kind='ok'] {
+  color: var(--dsw-alias-state-success-primary);
+  border-color: var(--dsw-alias-state-success-primary);
+}
+.tu-notice[data-kind='error'] {
+  color: var(--dsw-alias-state-error-primary);
+  border-color: var(--dsw-alias-state-error-primary);
+}
+/* 宽弹窗：模型勾选与设置需要并排 */
+.tu-modal-wide { max-width: 920px; width: min(920px, 94vw); }
+.tu-aliaslist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.tu-aliasrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.tu-aliasraw {
+  min-width: 110px;
+  font-family: var(--dsw-alias-font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tu-aliasarrow { color: var(--dsw-alias-label-secondary); }
 .tu-card-cost {
   cursor: pointer;
   transition: border-color 150ms ease, background 150ms ease;
@@ -2510,6 +3318,14 @@ window.__ModuleLoader__.load({
       const [balanceState, setBalanceState] = useState({ sites: [], discovered: [] })
       const [balanceProbing, setBalanceProbing] = useState('')
       const [balanceForm, setBalanceForm] = useState(null)
+      // 别名管理：{ raw, display } 或 null（null 表示面板关闭）
+      const [aliasForm, setAliasForm] = useState(null)
+      // 顶层视图：统计 / 供应商。供应商是完整页面，不是明细里的标签。
+      const [topView, setTopView] = useState('stats')
+      // 供应商编辑表单：null 表示关闭
+      const [supplierForm, setSupplierForm] = useState(null)
+      const [supplierBusy, setSupplierBusy] = useState('')
+      const [supplierNotice, setSupplierNotice] = useState({ kind: '', text: '' })
       const PAGE_SIZE = 20
       const toggleModel = (name) => {
         setSelectedModels((current) => (current.includes(name)
@@ -2528,12 +3344,6 @@ window.__ModuleLoader__.load({
         if (data?.byModelName === undefined) return []
         return Object.keys(data.byModelName)
       }, [data])
-
-      // 清空模型选择后，「按模型」不再有意义，自动退回总量视图，
-      // 避免停在一个空图表上。
-      useEffect(() => {
-        if (chartMode === 'model' && selectedModels.length === 0) setChartMode('total')
-      }, [chartMode, selectedModels])
 
       const chartModes = [
         { id: 'total', labelKey: 'chart.mode.total' },
@@ -2575,6 +3385,21 @@ window.__ModuleLoader__.load({
           .catch(() => { /* 版本路由不可用时静默：不影响统计功能 */ })
         return () => { disposed = true }
       }, [])
+
+      /** 保存模型别名（display 为空表示清除）。 */
+      const saveAlias = useCallback(async (raw, display) => {
+        try {
+          const response = await fetch(PRICING_ALIAS_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ model: raw, alias: display === '' ? null : display }),
+          })
+          if (!response.ok) return
+          setAliasForm(null)
+          void refresh()
+        } catch { /* 忽略：用户可重试 */ }
+      }, [refresh])
 
       /** 读取余额站点列表与自动发现的端点。 */
       const loadBalance = useCallback(async () => {
@@ -2858,6 +3683,66 @@ window.__ModuleLoader__.load({
        * 这样占比图、项目表、来源表、账号表、日期表都会跟着筛选一起变，
        * 而不是只有指标卡刷新（用户实际反馈的问题）。
        */
+      /**
+       * 把原始模型名换成显示名。
+       *
+       * 明细表、占比图、趋势图都要用同一套映射，否则同一个模型在不同
+       * 视图里叫不同名字，看起来像两条独立记录。
+       */
+      /** 从站点拉取模型列表（用于添加供应商时的勾选）。 */
+      const fetchSupplierModels = useCallback(async (baseUrl, apiKey, id) => {
+        setSupplierBusy('models')
+        try {
+          const response = await fetch(SUPPLIER_MODELS_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ baseUrl, apiKey, id }),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (body.ok === true && Array.isArray(body.models)) {
+            setSupplierForm((current) => (current === null
+              ? null
+              : { ...current, available: body.models }))
+          } else {
+            setSupplierNotice({ kind: 'error', text: `${t('supplier.fetchFail')}：${body.error ?? ''}` })
+          }
+        } catch (error) {
+          setSupplierNotice({ kind: 'error', text: `${t('supplier.fetchFail')}：${error?.message ?? error}` })
+        } finally { setSupplierBusy('') }
+      }, [t])
+
+      /** 保存供应商并（可选）同步到 DSH 模型配置。 */
+      const saveSupplier = useCallback(async (site, apiKey, doSync) => {
+        setSupplierBusy('sync')
+        try {
+          const response = await fetch(SUPPLIER_SYNC_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ site, apiKey, sync: doSync !== false }),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (Array.isArray(body.sites)) {
+            setBalanceState((previous) => ({ ...previous, sites: body.sites }))
+          }
+          if (body.ok === true) {
+            setSupplierNotice({ kind: 'ok', text: t('supplier.syncOk') })
+            setSupplierForm(null)
+          } else {
+            setSupplierNotice({ kind: 'error', text: `${t('supplier.syncFail')}：${body.error ?? ''}` })
+          }
+        } catch (error) {
+          setSupplierNotice({ kind: 'error', text: `${t('supplier.syncFail')}：${error?.message ?? error}` })
+        } finally { setSupplierBusy('') }
+      }, [t])
+
+      const displayModel = useCallback((rawName) => {
+        if (typeof rawName !== 'string') return rawName
+        const aliases = data?.modelAliases ?? {}
+        return aliases[rawName] ?? rawName
+      }, [data])
+
       const facetOf = useCallback((facetKey) => {
         if (data === undefined) return {}
         if (selectedModels.length === 0) {
@@ -2910,9 +3795,16 @@ window.__ModuleLoader__.load({
         return Object.entries(data.byModel ?? {})
           .map(([key, counters]) => {
             const slash = key.indexOf('/')
+            const rawModel = slash === -1 ? key : key.slice(slash + 1)
+            // 别名：部分 provider 上报内部代号（Qoder 的 qfmodel 是队列
+            // modelKey），不是真实模型名。映射后显示真实名，原始代号
+            // 保留在 tooltip 里，避免信息丢失。
+            const aliasedName = displayModel(rawModel)
+            const aliased = aliasedName === rawModel ? undefined : aliasedName
             return {
               key,
-              model: slash === -1 ? key : key.slice(slash + 1),
+              model: aliased ?? rawModel,
+              modelHint: aliased === undefined ? undefined : `${rawModel} → ${aliased}`,
               provider: slash === -1 ? '—' : key.slice(0, slash),
               calls: formatNumber(counters.calls),
               input: formatNumber(counters.inputTokens),
@@ -2940,7 +3832,7 @@ window.__ModuleLoader__.load({
             }
           })
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data, currency, usdCny, costSymbol])
+      }, [data, currency, usdCny, costSymbol, displayModel])
 
       const providerRows = useMemo(() => {
         if (data === undefined) return []
@@ -3145,8 +4037,15 @@ window.__ModuleLoader__.load({
         // 用**模型名合并视图**：同一模型挂在多个供应商下时合并成一个扇区，
         // 否则环上会出现多个同名扇区、占比也被拆散。按供应商拆分看明细表。
         const source = data.byModelName ?? {}
-        const entries = Object.entries(source)
-          .map(([key, counters]) => ({ key, value: counters.totalTokens ?? 0 }))
+        // 按显示名合并：两个代号映射到同一真实模型时应合成一个扇区。
+        const mergedByName = {}
+        for (const [rawName, counters] of Object.entries(source)) {
+          const display = displayModel(rawName)
+          const target = mergedByName[display] ?? { key: display, value: 0 }
+          target.value += counters.totalTokens ?? 0
+          mergedByName[display] = target
+        }
+        const entries = Object.values(mergedByName)
           .filter((item) => item.value > 0)
           .sort((a, b) => b.value - a.value)
         const top = entries.slice(0, 6).map((item) => ({
@@ -3163,7 +4062,7 @@ window.__ModuleLoader__.load({
           })
         }
         return top
-      }, [data, t, selectedModels])
+      }, [data, t, selectedModels, displayModel])
 
       // 图表数据：按天升序。trend 由 Host 预先算好命中率，这里只做投影。
       const trendSeries = useMemo(() => {
@@ -3305,6 +4204,24 @@ window.__ModuleLoader__.load({
       }
 
       const empty = isEmpty(data?.totals?.all)
+
+      // 顶层视图切换：统计 / 供应商。供应商是完整页面而不是明细标签，
+      // 因为它管理的是「配置」而非「用量」，两者性质不同。
+      const viewTabs = h('div', { className: 'tu-viewtabs' },
+        h('button', {
+          type: 'button', className: 'tu-viewtab',
+          'data-active': topView === 'stats' ? 'true' : 'false',
+          onClick: () => setTopView('stats'),
+        }, t('view.stats')),
+        h('button', {
+          type: 'button', className: 'tu-viewtab',
+          'data-active': topView === 'suppliers' ? 'true' : 'false',
+          onClick: () => {
+            setTopView('suppliers')
+            void loadBalance()
+          },
+        }, t('view.suppliers')),
+      )
 
       const tabs = h('div', { className: 'tu-filterbar' },
         h('div', { className: 'tu-tabs' },
@@ -3516,20 +4433,13 @@ window.__ModuleLoader__.load({
             h('div', { className: 'tu-section-head' },
               h('h2', { className: 'tu-section-title' }, t('chart.title')),
               h('div', { className: 'tu-tabs tu-tabs-sm' },
-                chartModes.map((option) => {
-                  // 「按模型」需要先选定模型：未选时没有可画的曲线，
-                  // 与其让用户切过去看一句「暂无数据」，不如直接禁用并说明。
-                  const disabled = option.id === 'model' && selectedModels.length === 0
-                  return h('button', {
-                    key: option.id,
-                    type: 'button',
-                    className: 'tu-tab',
-                    disabled,
-                    title: disabled ? t('chart.modelDisabled') : undefined,
-                    'data-active': chartMode === option.id ? 'true' : 'false',
-                    onClick: () => { if (!disabled) setChartMode(option.id) },
-                  }, t(option.labelKey))
-                }),
+                chartModes.map((option) => h('button', {
+                  key: option.id,
+                  type: 'button',
+                  className: 'tu-tab',
+                  'data-active': chartMode === option.id ? 'true' : 'false',
+                  onClick: () => setChartMode(option.id),
+                }, t(option.labelKey))),
               ),
             ),
             h(TrendChart, {
@@ -3809,6 +4719,576 @@ window.__ModuleLoader__.load({
         ),
       ))
 
+      // 添加/编辑供应商弹窗：名称、地址、密钥、接口格式，
+      // 以及「该服务的模型」勾选与「模型设置」（别名 / 上下文 / 输出上限）。
+      const supplierModal = supplierForm === null ? null : (() => {
+        const form = supplierForm
+        const available = form.available ?? []
+        const selected = form.models ?? []
+        const selectedIds = new Set(selected.map((model) => model.id))
+        const keyword = String(form.keyword ?? '').trim().toLowerCase()
+        const visible = keyword === ''
+          ? available
+          : available.filter((model) => model.id.toLowerCase().includes(keyword))
+
+        // 上下文窗口的常用档位：比自由输入更快，也避免手滑填错量级。
+        const CONTEXT_PRESETS = [128_000, 200_000, 256_000, 1_000_000]
+        // DSH 底层 pi-ai 实际装载的协议适配器。选错会导致请求格式不符。
+        const API_OPTIONS = [
+          { id: 'openai-completions', labelKey: 'api.openai-completions' },
+          { id: 'openai-responses', labelKey: 'api.openai-responses' },
+          { id: 'anthropic-messages', labelKey: 'api.anthropic-messages' },
+        ]
+        // DSH 的思考等级全集（取自 pi-ai 的 EXTENDED_THINKING_LEVELS）。
+        // 注意 xhigh / max 必须在 reasoningEfforts 里显式出现才算支持。
+        const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+        const setField = (key, value) => setSupplierForm((current) => (
+          current === null ? null : { ...current, [key]: value }))
+        const toggleModel = (model) => setSupplierForm((current) => {
+          if (current === null) return null
+          const models = current.models ?? []
+          const exists = models.some((entry) => entry.id === model.id)
+          return {
+            ...current,
+            models: exists
+              ? models.filter((entry) => entry.id !== model.id)
+              : [...models, {
+                id: model.id,
+                name: model.name ?? '',
+                contextWindow: model.contextWindow,
+                maxOutput: model.maxOutput,
+                thinking: false,
+                image: true,
+              }],
+          }
+        })
+        const patchModel = (id, patch) => setSupplierForm((current) => (current === null ? null : {
+          ...current,
+          models: (current.models ?? []).map((entry) => (
+            entry.id === id ? { ...entry, ...patch } : entry)),
+        }))
+
+        const fieldLabel = (text) => h('span', { className: 'tu-flabel' }, text)
+        const input = (value, placeholder, onInput, extra = {}) => h('input', {
+          type: 'text',
+          className: 'tu-input',
+          value: value ?? '',
+          placeholder,
+          onChange: (event) => onInput(event.target.value),
+          ...extra,
+        })
+
+        return h('div', {
+          className: 'tu-modal-backdrop',
+          onClick: (event) => { if (event?.target === event?.currentTarget) setSupplierForm(null) },
+        },
+        h('div', { className: 'tu-sheet', role: 'dialog', 'aria-modal': 'true' },
+
+          // 头部
+          h('div', { className: 'tu-sheet-head' },
+            h('div', { className: 'tu-sheet-headings' },
+              h('h2', { className: 'tu-sheet-title' },
+                form.editing === true ? t('supplier.formEdit') : t('supplier.formTitle')),
+              h('p', { className: 'tu-sheet-sub' }, t('supplier.syncExplain')),
+            ),
+            h('span', {
+              className: 'tu-chip',
+              'data-tone': form.editing === true ? 'neutral' : 'brand',
+            }, form.editing === true ? t('supplier.editing') : t('supplier.addNew')),
+          ),
+
+          h('div', { className: 'tu-sheet-body' },
+
+            // ① 连接信息：一气呵成，不再分成两块
+            h('div', { className: 'tu-row' },
+              h('div', { className: 'tu-col tu-col-wide' },
+                fieldLabel(t('supplier.name')),
+                input(form.label, t('supplier.namePlaceholder'), (value) => setField('label', value)),
+              ),
+              h('div', { className: 'tu-col tu-col-grow' },
+                fieldLabel(t('supplier.baseUrl')),
+                input(form.baseUrl, t('supplier.urlPlaceholder'), (value) => setField('baseUrl', value), { type: 'url' }),
+              ),
+            ),
+            h('div', { className: 'tu-row' },
+              h('div', { className: 'tu-col tu-col-grow' },
+                fieldLabel(t('supplier.apiKey')),
+                h('input', {
+                  type: 'password',
+                  className: 'tu-input',
+                  value: form.apiKey,
+                  placeholder: t('supplier.keyPlaceholder'),
+                  onChange: (event) => setField('apiKey', event.target.value),
+                }),
+              ),
+              h('div', { className: 'tu-col' },
+                fieldLabel(t('supplier.apiFormat')),
+                h('select', {
+                  className: 'tu-input tu-select',
+                  value: form.api ?? 'openai-completions',
+                  onChange: (event) => setField('api', event.target.value),
+                },
+                ...API_OPTIONS.map((option) => h('option', {
+                  key: option.id, value: option.id,
+                }, t(option.labelKey))),
+                ),
+              ),
+            ),
+            h('p', { className: 'tu-note' },
+              h('span', { className: 'tu-note-icon' }, '🔒'),
+              t('supplier.secretNote'),
+            ),
+
+            // 手动余额：站点没有标准余额接口时的兜底
+            form.editing === true
+              ? h('div', { className: 'tu-row' },
+                h('div', { className: 'tu-col' },
+                  fieldLabel(t('supplier.balanceUsd')),
+                  h('input', {
+                    type: 'number', step: '0.01', min: '0',
+                    className: 'tu-input',
+                    value: form.manualBalance ?? '',
+                    placeholder: '0.00',
+                    onChange: (event) => setField('manualBalance', event.target.value),
+                  }),
+                ),
+                h('div', { className: 'tu-col tu-col-grow' },
+                  h('p', { className: 'tu-hint' }, t('supplier.probeUnsupported')),
+                ),
+              )
+              : null,
+
+            // ② 模型：左侧列表勾选，右侧配置选中模型的参数。
+            //    这种「列表 + 详情」比一行塞七列更容易看清：
+            //    容量、思考等级、附件都属于「单模型属性」，不该挤在表格里。
+            h('div', { className: 'tu-sec' },
+              h('div', { className: 'tu-sec-head' },
+                h('div', { className: 'tu-sec-title' },
+                  t('supplier.modelList'),
+                  selected.length > 0
+                    ? h('span', { className: 'tu-count' }, `${selected.length}`)
+                    : null,
+                ),
+                h('div', { className: 'tu-sec-actions' },
+                  h('input', {
+                    type: 'search',
+                    className: 'tu-input tu-search',
+                    placeholder: t('supplier.searchModel'),
+                    value: form.keyword ?? '',
+                    onChange: (event) => setField('keyword', event.target.value),
+                  }),
+                  h('button', {
+                    type: 'button',
+                    className: 'tu-btn tu-btn-ghost',
+                    disabled: supplierBusy === 'models' || form.baseUrl === '',
+                    onClick: () => { void fetchSupplierModels(form.baseUrl, form.apiKey, form.id) },
+                  }, supplierBusy === 'models' ? t('supplier.fetching') : t('supplier.fetchModels')),
+                ),
+              ),
+
+              h('div', { className: 'tu-split' },
+                // ── 左：模型勾选列表 ──
+                h('div', { className: 'tu-list-pane' },
+                  available.length === 0 && selected.length === 0
+                    ? h('div', { className: 'tu-empty-block tu-empty-inline' },
+                      h('div', { className: 'tu-empty-title' }, t('supplier.needUrl')),
+                      h('div', { className: 'tu-empty-hint' }, t('supplier.fetchHint')),
+                    )
+                    : h('div', { className: 'tu-mlist' },
+                      ...visible.map((model) => {
+                        const on = selectedIds.has(model.id)
+                        const active = form.activeModel === model.id
+                        return h('div', {
+                          key: model.id,
+                          className: 'tu-mlist-row',
+                          'data-picked': on ? 'true' : 'false',
+                          'data-active': active ? 'true' : 'false',
+                          onClick: () => setField('activeModel', model.id),
+                        },
+                        h('input', {
+                          type: 'checkbox',
+                          className: 'tu-checkbox',
+                          checked: on,
+                          onClick: (event) => event.stopPropagation?.(),
+                          onChange: () => toggleModel(model),
+                        }),
+                        h('span', { className: 'tu-mlist-id', title: model.id }, model.id),
+                        )
+                      },
+                      ),
+                      // 手填的模型也要出现在列表里
+                      ...selected.filter((entry) => !available.some((m) => m.id === entry.id))
+                        .map((entry) => h('div', {
+                          key: `custom-${entry.id}`,
+                          className: 'tu-mlist-row',
+                          'data-picked': 'true',
+                          'data-active': form.activeModel === entry.id ? 'true' : 'false',
+                          onClick: () => setField('activeModel', entry.id),
+                        },
+                        h('input', {
+                          type: 'checkbox', className: 'tu-checkbox', checked: true,
+                          onClick: (event) => event.stopPropagation?.(),
+                          onChange: () => toggleModel({ id: entry.id }),
+                        }),
+                        h('span', { className: 'tu-mlist-id' }, entry.id),
+                        h('span', { className: 'tu-mlist-tag' }, t('supplier.custom')),
+                        )),
+                    ),
+
+                  // 手填入口常驻在列表底部
+                  h('div', { className: 'tu-mlist-foot' },
+                    input(form.customModel ?? '', t('supplier.customModelPlaceholder'), (value) => setField('customModel', value)),
+                    h('button', {
+                      type: 'button', className: 'tu-btn tu-btn-ghost',
+                      onClick: () => {
+                        const id = String(form.customModel ?? '').trim()
+                        if (id === '') return
+                        setSupplierForm((current) => (current === null ? null : {
+                          ...current,
+                          customModel: '',
+                          activeModel: id,
+                          models: [...(current.models ?? []), { id, name: '', thinkingLevels: [], image: true }],
+                        }))
+                      },
+                    }, '+'),
+                  ),
+                ),
+
+                // ── 右：选中模型的详情 ──
+                h('div', { className: 'tu-detail-pane' },
+                  (() => {
+                    const active = selected.find((entry) => entry.id === form.activeModel) ?? selected[0]
+                    if (active === undefined) {
+                      return h('div', { className: 'tu-empty-block tu-empty-inline' },
+                        h('div', { className: 'tu-empty-hint' }, t('supplier.pickOne')),
+                      )
+                    }
+                    const patch = (value) => patchModel(active.id, value)
+                    return h('div', { className: 'tu-detail' },
+                      h('div', { className: 'tu-detail-head' },
+                        h('span', { className: 'tu-detail-id' }, active.id),
+                        h('button', {
+                          type: 'button', className: 'tu-icon-btn',
+                          title: t('supplier.remove'),
+                          onClick: () => toggleModel({ id: active.id }),
+                        }, '×'),
+                      ),
+
+                      // 别名
+                      h('div', { className: 'tu-dfield' },
+                        h('div', { className: 'tu-dfield-label' }, t('supplier.alias')),
+                        input(active.name, active.id, (value) => patch({ name: value })),
+                      ),
+
+                      // 上下文窗口：预设按钮 + 自定义
+                      h('div', { className: 'tu-dfield' },
+                        h('div', { className: 'tu-dfield-label' },
+                          t('supplier.context'),
+                          h('span', { className: 'tu-dfield-hint' }, t('supplier.contextHint')),
+                        ),
+                        h('div', { className: 'tu-segmented' },
+                          ...CONTEXT_PRESETS.map((preset) => h('button', {
+                            key: preset,
+                            type: 'button',
+                            className: 'tu-seg',
+                            'data-active': active.contextWindow === preset ? 'true' : 'false',
+                            onClick: () => patch({ contextWindow: preset }),
+                          }, preset >= 1_000_000 ? '1M' : `${preset / 1000}K`)),
+                        ),
+                        h('input', {
+                          type: 'number',
+                          className: 'tu-input tu-input-sm',
+                          placeholder: '262144',
+                          value: active.contextWindow ?? '',
+                          onChange: (event) => patch({ contextWindow: Number(event.target.value) || undefined }),
+                        }),
+                      ),
+
+                      // 最大输出
+                      h('div', { className: 'tu-dfield' },
+                        h('div', { className: 'tu-dfield-label' },
+                          t('supplier.maxOutput'),
+                          h('span', { className: 'tu-dfield-hint' }, t('supplier.outputHint')),
+                        ),
+                        h('div', { className: 'tu-segmented' },
+                          ...[4_096, 8_192, 16_384, 32_768, 65_536].map((preset) => h('button', {
+                            key: preset,
+                            type: 'button',
+                            className: 'tu-seg',
+                            'data-active': active.maxOutput === preset ? 'true' : 'false',
+                            onClick: () => patch({ maxOutput: preset }),
+                          }, preset >= 1024 ? `${preset / 1024}K` : String(preset))),
+                        ),
+                        h('input', {
+                          type: 'number',
+                          className: 'tu-input tu-input-sm',
+                          placeholder: '32768',
+                          value: active.maxOutput ?? '',
+                          onChange: (event) => patch({ maxOutput: Number(event.target.value) || undefined }),
+                        }),
+                      ),
+
+                      // 思考等级：多选该模型支持的档位
+                      h('div', { className: 'tu-dfield' },
+                        h('div', { className: 'tu-dfield-label' },
+                          t('supplier.thinking'),
+                          h('span', { className: 'tu-dfield-hint' }, t('supplier.thinkingHint')),
+                        ),
+                        h('div', { className: 'tu-levels' },
+                          ...THINKING_LEVELS.map((level) => {
+                            const checked = (active.thinkingLevels ?? []).includes(level)
+                            return h('label', {
+                              key: level,
+                              className: 'tu-level',
+                              'data-on': checked ? 'true' : 'false',
+                            },
+                            h('input', {
+                              type: 'checkbox',
+                              className: 'tu-checkbox',
+                              checked,
+                              onChange: () => {
+                                const current = active.thinkingLevels ?? []
+                                const next = checked
+                                  ? current.filter((item) => item !== level)
+                                  : [...current, level]
+                                // 保持与 DSH 的等级顺序一致，便于阅读
+                                patch({
+                                  thinkingLevels: THINKING_LEVELS.filter((item) => next.includes(item)),
+                                })
+                              },
+                            }),
+                            h('span', null, t(`level.${level}`)),
+                            )
+                          }),
+                        ),
+                        (active.thinkingLevels ?? []).length === 0
+                          ? h('span', { className: 'tu-dfield-hint' }, t('supplier.thinkingNone'))
+                          : null,
+                      ),
+
+                      // 附件
+                      h('div', { className: 'tu-dfield' },
+                        h('div', { className: 'tu-dfield-label' },
+                          t('supplier.attach'),
+                          h('span', { className: 'tu-dfield-hint' }, t('supplier.attachHint')),
+                        ),
+                        h('div', { className: 'tu-checks' },
+                          h('label', { className: 'tu-checkrow' },
+                            h('input', {
+                              type: 'checkbox', className: 'tu-checkbox',
+                              checked: active.image !== false,
+                              onChange: () => patch({ image: active.image === false }),
+                            }),
+                            t('supplier.attachImage'),
+                          ),
+                        ),
+                      ),
+                    )
+                  })(),
+                ),
+              ),
+              h('p', { className: 'tu-hint tu-sec-hint' }, t('supplier.modelCountHint')),
+            ),
+          ),
+
+          // 底部
+          h('div', { className: 'tu-sheet-foot' },
+            h('span', { className: 'tu-sheet-foot-note' },
+              selected.length === 0
+                ? t('supplier.noModels')
+                : `${selected.length} ${t('supplier.selected')}`),
+            h('div', { className: 'tu-sheet-foot-actions' },
+              h('button', {
+                type: 'button', className: 'tu-btn',
+                onClick: () => setSupplierForm(null),
+              }, t('supplier.cancel')),
+              h('button', {
+                type: 'button', className: 'tu-btn',
+                disabled: supplierBusy === 'sync',
+                onClick: () => { void saveSupplier(collect(), form.apiKey, false) },
+              }, t('supplier.save')),
+              h('button', {
+                type: 'button', className: 'tu-btn tu-btn-primary',
+                disabled: supplierBusy === 'sync',
+                onClick: () => { void saveSupplier(collect(), form.apiKey, true) },
+              }, supplierBusy === 'sync' ? t('supplier.syncing') : t('supplier.saveAndSync')),
+            ),
+          ),
+        ))
+
+        /** 把表单状态收敛成要提交的站点描述。 */
+        function collect() {
+          return {
+            id: form.id || (form.label || form.baseUrl).trim().replace(/\s+/g, '-').toLowerCase(),
+            label: form.label,
+            baseUrl: form.baseUrl,
+            keyEnv: form.keyEnv,
+            api: form.api ?? 'openai-completions',
+            // 手填余额：保存成 lastBalance，页面就按它显示
+            ...(form.manualBalance !== undefined && form.manualBalance !== ''
+              ? { lastBalance: { usd: Number(form.manualBalance) }, lastCheckedAt: Date.now() }
+              : {}),
+            models: (form.models ?? []).map((model) => ({
+              id: model.id,
+              name: model.name,
+              contextWindow: model.contextWindow,
+              maxOutput: model.maxOutput,
+              // 只写用户勾选的档位。pi-ai 对空对象会直接拒绝整条配置，
+              // 所以没有勾选时完全不写这个字段（= 非推理模型）。
+              ...(Array.isArray(model.thinkingLevels) && model.thinkingLevels.length > 0
+                ? { thinkingLevels: model.thinkingLevels }
+                : {}),
+              ...(model.image === false ? { input: ['text'] } : {}),
+            })),
+          }
+        }
+      })()
+
+      // 供应商管理页面（顶层视图，占满整页）。
+      const supplierPage = (() => {
+        const sites = balanceState.sites ?? []
+        const discovered = (balanceState.discovered ?? [])
+          .filter((entry) => !sites.some((site) => site.id === entry.id))
+
+        /** 一张供应商卡片。 */
+        const card = (site) => {
+          const balance = site.lastBalance
+          const money = (value) => (typeof value === 'number'
+            ? `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
+          const modelCount = Array.isArray(site.models) ? site.models.length : 0
+          return h('div', { key: site.id, className: 'tu-supcard' },
+            h('div', { className: 'tu-supcard-main' },
+              h('div', { className: 'tu-supcard-name' },
+                site.label || site.id,
+                modelCount > 0 ? h('span', { className: 'tu-supcard-badge' },
+                  `${modelCount} ${t('supplier.models')}`) : null,
+              ),
+              h('div', { className: 'tu-supcard-url' }, site.baseUrl),
+            ),
+            h('div', {
+              className: 'tu-supcard-balance',
+              'data-empty': typeof balance?.usd === 'number' ? 'false' : 'true',
+            },
+            h('span', { className: 'tu-supcard-balance-label' }, t('supplier.balance')),
+            typeof balance?.usd === 'number'
+              ? h('span', { className: 'tu-supcard-balance-value' }, money(balance.usd))
+              // 没有余额时给一个可点的入口：不是所有中转站都提供余额接口，
+              // 抓不到就让用户手填，而不是永远显示「—」。
+              : h('button', {
+                type: 'button', className: 'tu-balance-set',
+                onClick: () => setSupplierForm({
+                  id: site.id,
+                  label: site.label ?? '',
+                  baseUrl: site.baseUrl ?? '',
+                  apiKey: '',
+                  keyEnv: site.keyEnv ?? '',
+                  models: Array.isArray(site.models) ? site.models : [],
+                  available: Array.isArray(site.models) ? site.models : [],
+                  manualBalance: '',
+                  editing: true,
+                }),
+              }, t('supplier.setBalance')),
+            ),
+            h('div', { className: 'tu-supcard-actions' },
+              h('button', {
+                type: 'button', className: 'tu-btn tu-btn-ghost',
+                disabled: supplierBusy === site.id,
+                onClick: () => { void probeSite(site.id) },
+              }, supplierBusy === site.id ? t('balance.probing') : t('balance.probe')),
+              h('button', {
+                type: 'button', className: 'tu-btn tu-btn-ghost',
+                onClick: () => setSupplierForm({
+                  id: site.id,
+                  label: site.label ?? '',
+                  baseUrl: site.baseUrl ?? '',
+                  apiKey: '',
+                  keyEnv: site.keyEnv ?? '',
+                  models: Array.isArray(site.models) ? site.models : [],
+                  available: Array.isArray(site.models) ? site.models : [],
+                  editing: true,
+                }),
+              }, t('supplier.edit')),
+              h('button', {
+                type: 'button', className: 'tu-btn tu-btn-ghost',
+                onClick: () => { void removeSite(site.id) },
+              }, t('supplier.remove')),
+            ),
+            site.error === ''
+              ? null
+              : h('div', { className: 'tu-balerror' }, `${t('balance.error')}：${site.error}`),
+          )
+        }
+
+        return h('section', { className: 'tu-page' },
+          h('div', { className: 'tu-page-head' },
+            h('div', null,
+              h('h2', { className: 'tu-page-title' }, t('supplier.title')),
+              h('p', { className: 'tu-page-sub' }, t('supplier.subtitle')),
+            ),
+            h('div', { className: 'tu-page-actions' },
+              h('button', {
+                type: 'button', className: 'tu-btn',
+                onClick: () => { void loadBalance() },
+              }, t('supplier.probeAll')),
+              h('button', {
+                type: 'button', className: 'tu-btn tu-btn-primary',
+                onClick: () => setSupplierForm({
+                  id: '', label: '', baseUrl: '', apiKey: '', keyEnv: '',
+                  models: [], available: [], editing: false,
+                }),
+              }, t('supplier.add')),
+            ),
+          ),
+
+          supplierNotice.text === ''
+            ? null
+            : h('div', {
+              className: 'tu-notice',
+              'data-kind': supplierNotice.kind,
+            }, supplierNotice.text),
+
+          // 已添加
+          h('div', { className: 'tu-page-group' },
+            h('div', { className: 'tu-page-grouphead' },
+              `${t('supplier.added')} · ${sites.length}`),
+            sites.length === 0
+              ? h('p', { className: 'tu-hint' }, t('supplier.empty'))
+              : h('div', { className: 'tu-suplist' }, ...sites.map(card)),
+          ),
+
+          // 可添加（从 DSH 配置自动发现）
+          discovered.length === 0
+            ? null
+            : h('div', { className: 'tu-page-group' },
+              h('div', { className: 'tu-page-grouphead' },
+                `${t('supplier.discovered')} · ${discovered.length}`),
+              h('div', { className: 'tu-suplist' },
+                ...discovered.map((entry) => h('div', {
+                  key: entry.id, className: 'tu-supcard tu-supcard-discovered',
+                },
+                h('div', { className: 'tu-supcard-main' },
+                  h('div', { className: 'tu-supcard-name' }, entry.label || entry.id),
+                  h('div', { className: 'tu-supcard-url' }, entry.baseUrl),
+                ),
+                h('div', { className: 'tu-supcard-actions' },
+                  h('button', {
+                    type: 'button', className: 'tu-btn tu-btn-ghost',
+                    onClick: () => setSupplierForm({
+                      id: entry.id,
+                      label: entry.label ?? entry.id,
+                      baseUrl: entry.baseUrl ?? '',
+                      apiKey: '', keyEnv: '',
+                      models: [], available: [], editing: false,
+                    }),
+                  }, t('supplier.add')),
+                ),
+                )),
+              ),
+            ),
+        )
+      })()
+
       // 未定价模型：给出可点击入口，而不是静默算成 0
       const unpriced = data?.cost?.unpriced ?? []
       const unpricedBar = unpriced.length === 0 ? null : h('div', { className: 'tu-unpriced' },
@@ -3820,11 +5300,68 @@ window.__ModuleLoader__.load({
           onClick: () => setPriceDialog({ model: entry.model, input: '', output: '' }),
         }, entry.model)),
         h('button', {
+          type: 'button', className: 'tu-button',
+          onClick: () => setAliasForm({}),
+        }, t('alias.manage')),
+        h('button', {
           type: 'button', className: 'tu-button tu-unpriced-refresh',
           title: t('cost.refreshHint'),
           onClick: () => { void refreshPricing() },
         }, t('cost.refresh')),
       )
+
+      // 别名管理弹窗：列出「看起来像内部代号」的模型，供用户确认真实名称。
+      const aliasCandidates = (() => {
+        if (data === undefined) return []
+        const aliases = data?.modelAliases ?? {}
+        const names = Object.keys(data?.byModelName ?? {})
+        // 判断哪些可能是代号：没有斜杠、不含常见模型关键词、长度短。
+        // 这只是给用户一个「可能需要处理」的提示，不自动改任何东西。
+        const looksLikeCode = (name) => {
+          if (aliases[name] !== undefined) return true   // 已配置的优先列出
+          if (name.includes('/')) return false
+          if (/deepseek|claude|gpt|glm|qwen|kimi|gemini|llama|grok|mistral/i.test(name)) return false
+          return /^[a-z]{2,8}\d{0,3}$/i.test(name)
+        }
+        return names.filter(looksLikeCode).sort()
+      })()
+
+      const aliasModal = aliasForm === null ? null : h('div', {
+        className: 'tu-modal-backdrop',
+        onClick: (event) => { if (event?.target === event?.currentTarget) setAliasForm(null) },
+      },
+      h('div', { className: 'tu-modal', role: 'dialog', 'aria-modal': 'true' },
+        h('div', { className: 'tu-modal-title' }, t('alias.title')),
+        h('p', { className: 'tu-hint' }, t('alias.hint')),
+
+        aliasCandidates.length === 0
+          ? h('p', { className: 'tu-hint' }, t('alias.none'))
+          : h('div', { className: 'tu-aliaslist' },
+            ...aliasCandidates.map((raw) => h('div', { key: raw, className: 'tu-aliasrow' },
+              h('span', { className: 'tu-aliasraw', title: raw }, raw),
+              h('span', { className: 'tu-aliasarrow' }, '→'),
+              h('input', {
+                type: 'text',
+                className: 'tu-priceinput',
+                placeholder: t('alias.display'),
+                value: aliasForm[raw] ?? (data?.modelAliases?.[raw] ?? ''),
+                onChange: (event) => setAliasForm((current) => (
+                  current === null ? null : { ...current, [raw]: event.target.value })),
+              }),
+              h('button', {
+                type: 'button', className: 'tu-button',
+                onClick: () => { void saveAlias(raw, aliasForm[raw] ?? '') },
+              }, t('alias.save')),
+            )),
+          ),
+
+        h('div', { className: 'tu-modal-actions' },
+          h('button', {
+            type: 'button', className: 'tu-button',
+            onClick: () => setAliasForm(null),
+          }, t('version.dialogOk')),
+        ),
+      ))
 
       // 版本检查结果弹窗：有新版给「更新并重载」，无新版给「知道了」。
       const versionModal = versionDialog === null ? null : h('div', {
@@ -3906,8 +5443,15 @@ window.__ModuleLoader__.load({
         h('span', null, `${t('updatedAt')} ${formatTime(data?.generatedAt, locale)}`),
       )
 
+      // 供应商视图是完整页面，不叠在统计内容下面。
+      if (topView === 'suppliers') {
+        return h('div', { className: 'tu-root' },
+          head, viewTabs, supplierPage, supplierModal, versionModal)
+      }
+
       return h('div', { className: 'tu-root' },
-        head, scanBar, tabs, accountBar, cards, unpricedBar, charts, sections, warn, note, versionModal, priceModal)
+        head, viewTabs, scanBar, tabs, accountBar, cards, unpricedBar, charts, sections,
+        warn, note, versionModal, priceModal, aliasModal)
     }
 
     //#endregion

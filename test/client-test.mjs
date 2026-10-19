@@ -140,6 +140,7 @@ globalThis.fetch = async () => ({
         'mystery-route': { calls: 3, inputTokens: 600, outputTokens: 60, totalTokens: 660 },
       },
       providerKinds: { 'official-route': 'apikey', 'balance-route': 'balance' },
+      modelAliases: { qfmodel: 'deepseek-v4.1-flash' },
       byModel: { 'workbuddy/deepseek-v4.1-flash': { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500 } },
       byModelName: {
         'deepseek-v4.1-flash': { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheHitRate: 0.3 },
@@ -1192,8 +1193,9 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   check('加载后不抛错', reinstallTree !== undefined, true)
 }
 
-// —— 「按模型」模式：未选模型时禁用并说明 ——
-// 用户反馈：切到「按模型」只看到一行提示文字，因为该模式需要先选定模型。
+// —— 模型别名：内部代号显示为真实模型名 ——
+// 用户反馈：Qoder 的 qfmodel / dfmodel 是上游队列 modelKey，不是模型名，
+// 表格里显示成 qfmodel 无法辨认实际用的是哪个模型。
 {
   hookState.length = 0
   resetHooks()
@@ -1202,16 +1204,72 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   resetHooks()
   const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
 
-  // 找到「按模型」按钮，未选模型时应当 disabled 且有 title 说明
+  const cells = []
+  walkTree(tree, (node) => {
+    if (node?.props?.className === 'tu-cell-main') {
+      for (const child of node.children ?? []) if (typeof child === 'string') cells.push(child)
+    }
+  })
+  // 桩数据里 qfmodel 映射到 deepseek-v4.1-flash
+  check('别名已应用于模型列', cells.includes('deepseek-v4.1-flash'), cells.join('|'))
+  check('原始代号不再直接显示', cells.includes('qfmodel') === false, cells.join('|'))
+}
+
+// —— 「按模型」模式必须可切换 ——
+// 回归点：曾错误地「未选模型就禁用」，但 modelTrend 本身就有全量数据，
+// 禁用后用户点不动，看起来像卡住。
+{
+  hookState.length = 0
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
   let modelBtn
   walkTree(tree, (node) => {
     if (node?.type === 'button' && Array.isArray(node.children)
       && node.children.some((c) => c === '按模型')) modelBtn = node
   })
   check('存在「按模型」按钮', modelBtn !== undefined, true)
-  check('未选模型时禁用', modelBtn?.props?.disabled, true)
-  check('禁用时给出说明', typeof modelBtn?.props?.title === 'string'
-    && modelBtn.props.title.includes('选择一个或多个模型'), String(modelBtn?.props?.title))
+  // 关键：不能禁用，否则用户点不动
+  check('「按模型」始终可点', (modelBtn?.props?.disabled ?? false) === false, true,
+    `disabled=${JSON.stringify(modelBtn?.props?.disabled)}`)
+
+  // 点击后应真的切过去
+  modelBtn?.props?.onClick?.()
+  resetHooks()
+  const switched = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  let activeBtn
+  walkTree(switched, (node) => {
+    if (node?.type === 'button' && node?.props?.['data-active'] === 'true'
+      && Array.isArray(node.children) && node.children.some((c) => c === '按模型')) {
+      activeBtn = node
+    }
+  })
+  check('点击后切到按模型', activeBtn !== undefined, true)
+}
+
+// —— 模型别名：内部代号显示为真实模型名 ——
+// 用户反馈：Qoder 的 qfmodel / dfmodel 是上游队列 modelKey，不是模型名，
+// 表格里显示成 qfmodel 无法辨认实际用的是哪个模型。
+{
+  hookState.length = 0
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
+  const cells = []
+  walkTree(tree, (node) => {
+    if (node?.props?.className === 'tu-cell-main') {
+      for (const child of node.children ?? []) if (typeof child === 'string') cells.push(child)
+    }
+  })
+  // 桩数据里 qfmodel 映射到 deepseek-v4.1-flash
+  check('别名已应用于模型列', cells.includes('deepseek-v4.1-flash'), cells.join('|'))
+  check('原始代号不再直接显示', cells.includes('qfmodel') === false, cells.join('|'))
 }
 
 // —— 饼图图例：模型多时不能撑破卡片 ——

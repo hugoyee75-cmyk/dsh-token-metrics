@@ -39,7 +39,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { PluginUpdater, parseRepository } from './src/updater.js'
 import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
-import { BalanceBook, probeBalance, normalizeBaseUrl } from './src/balance.js'
+import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
+import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
@@ -67,11 +68,27 @@ const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
  * 派生标识：源码未变 → 标识相同 → 复用同一 tracker（不重复计数）；
  * 源码已变 → 标识不同 → 换上新实例（修改立即生效）。
  */
+/**
+ * 构建标识：入口文件与 src/ 下所有模块的 (大小, mtime) 汇总。
+ *
+ * 只看 index.js 的话，改了 src/balance.js 之类的模块后 buildId 不变，
+ * 缓存判定会认为「代码没变」而继续跑旧模块——热重载看似成功、行为却是旧的。
+ */
 const BUILD_ID = (() => {
+  const parts = []
   try {
-    const url = new URL(import.meta.url)
-    const stat = statSync(fileURLToPath(url))
-    return `${stat.size}:${Math.floor(stat.mtimeMs)}`
+    const entryPath = fileURLToPath(new URL(import.meta.url))
+    const entryStat = statSync(entryPath)
+    parts.push(`${entryStat.size}:${Math.floor(entryStat.mtimeMs)}`)
+    try {
+      const srcDir = join(dirname(entryPath), 'src')
+      for (const name of readdirSync(srcDir).sort()) {
+        if (!name.endsWith('.js')) continue
+        const stat = statSync(join(srcDir, name))
+        parts.push(`${name}:${stat.size}:${Math.floor(stat.mtimeMs)}`)
+      }
+    } catch { /* 没有 src 目录就只用入口文件 */ }
+    return parts.join('|')
   } catch {
     return 'unknown'
   }
@@ -1458,6 +1475,15 @@ function acquireTracker(logger, buildId, config) {
       if (logger !== undefined) existing.logger = logger
       // 配置可能被用户改过（cordis.patch.yml 热更新），同步到现有实例。
       if (config !== undefined) existing.config = config
+      // 复用实例时也要重读余额配置：它是「配置」不是「计数」，
+      // 用户在插件外改过文件时，内存里留着旧值会一直显示已删除的站点。
+      try {
+        existing.balanceBook = new BalanceBook({
+          dataDir: dataDir(existing.home),
+          log: (message) => logger?.info?.(message),
+        }).loadFrom(join(dataDir(existing.home), 'balance.json'))
+        existing.cachedSnapshot = undefined
+      } catch { /* 读失败保持原对象，不影响统计 */ }
       // 复用时若存在待迁移标记，也要给它一次回扫机会。
       return { tracker: existing, fresh: existing.store.needsRebuild === true }
     }
@@ -1962,6 +1988,85 @@ export function apply(ctx, rawConfig) {
             // 强制重建：丢弃内存与磁盘的聚合结果，从会话日志重新算一遍。
             // 用户手动修数据、或升级后想确保口径一致时使用。
             // —— 余额：列表 / 配置 / 删除 / 探测 ——
+            // —— 供应商：模型发现 / 同步回 DSH ——
+            if (url.pathname === '/api/dsh-token-metrics/supplier/models') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const baseUrl = String(body.baseUrl ?? '')
+                if (baseUrl === '') {
+                  sendJson(res, 400, { error: '缺少 baseUrl' })
+                  return
+                }
+                let apiKey = String(body.apiKey ?? '')
+                if (apiKey === '' && body.id !== undefined) {
+                  const site = tracker.balanceBook.sites.find((entry) => entry.id === body.id)
+                  if (site !== undefined) apiKey = await resolveSiteKey(ctx, site)
+                }
+                sendJson(res, 200, await discoverModels({ baseUrl, apiKey, fetchImpl: globalThis.fetch }))
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/supplier/sync') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const site = body.site ?? {}
+                const saved = tracker.balanceBook.upsertSite(site)
+                if (saved === undefined) {
+                  sendJson(res, 400, { error: '供应商缺少 id' })
+                  return
+                }
+                tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                const result = await syncProviderToDsh({
+                  ctx,
+                  site: saved,
+                  apiKey: typeof body.apiKey === 'string' ? body.apiKey : '',
+                })
+                // 同步确定了最终的凭据引用名，回写到站点记录，
+                // 否则下次「查询余额」找不到密钥。
+                if (result.ok === true && typeof result.keyEnv === 'string' && result.keyEnv !== '') {
+                  tracker.balanceBook.upsertSite({ ...saved, keyEnv: result.keyEnv })
+                  tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                }
+                sendJson(res, result.ok ? 200 : 400, { ...result, ...tracker.balanceBook.status() })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/pricing/alias') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const model = String(body.model ?? '')
+                if (model === '') {
+                  sendJson(res, 400, { error: '缺少 model' })
+                  return
+                }
+                tracker.priceBook.setAlias(model, body.alias ?? null)
+                tracker.cachedSnapshot = undefined
+                tracker.storeRevision += 1
+                sendJson(res, 200, { ok: true, aliases: { ...tracker.priceBook.aliases } })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
             if (url.pathname === '/api/dsh-token-metrics/balance') {
               if (!isGet) {
                 sendJson(res, 405, { error: 'method not allowed' })
@@ -2228,20 +2333,45 @@ function discoverProviderEndpoints(ctx) {
  *
  * 找不到就返回空串，让探测报「没有可用的访问令牌」而不是崩掉。
  */
+/**
+ * 取某个站点要用的访问令牌。
+ *
+ * 关键点（都是踩过的坑）：
+ *  - `CredentialRef` 是 **branded string**，传 `{ name }` 对象会被当成一个
+ *    不存在引用的名字，describe 永远返回 configured: false。
+ *  - 站点上可能有两个名字：`keyEnv`（同步进 DSH 模型配置的那个）与
+ *    `keyRef`（插件自己早期写的那个）。两个都要试。
+ *  - 最后回落到进程环境变量，覆盖用户自己 export 的情况。
+ */
 async function resolveSiteKey(ctx, site) {
-  try {
-    const credentials = ctx.get('credentials')
-    if (credentials !== undefined && site.keyRef) {
-      const info = await credentials.describe?.({ name: site.keyRef })
-      if (info?.configured === true) {
-        const resolved = await credentials.resolve?.({ name: site.keyRef })
-        if (typeof resolved?.value === 'string' && resolved.value !== '') return resolved.value
-      }
+  const candidates = []
+  for (const name of [site?.keyEnv, site?.keyRef]) {
+    if (typeof name === 'string' && name !== '' && !candidates.includes(name)) {
+      candidates.push(name)
     }
-  } catch { /* 凭据服务不可用则继续尝试环境变量 */ }
-  const envName = site.keyEnv
-  if (typeof envName === 'string' && envName !== '') {
-    const value = process.env[envName]
+  }
+  // 同步时还会自动生成一个默认名，也试一下
+  if (typeof site?.id === 'string' && site.id !== '') {
+    const fallback = defaultKeyEnvName(site.id)
+    if (!candidates.includes(fallback)) candidates.push(fallback)
+  }
+
+  const credentials = ctx.get('credentials')
+  if (credentials !== undefined) {
+    for (const name of candidates) {
+      try {
+        const info = await credentials.describe?.(name)
+        if (info?.configured !== true) continue
+        const resolved = await credentials.resolve?.(name)
+        if (typeof resolved?.value === 'string' && resolved.value !== '') {
+          return resolved.value
+        }
+      } catch { /* 换下一个候选名 */ }
+    }
+  }
+
+  for (const name of candidates) {
+    const value = process.env[name]
     if (typeof value === 'string' && value !== '') return value
   }
   return ''
