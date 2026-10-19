@@ -89,6 +89,16 @@ window.__ModuleLoader__.load({
       'table.project': '项目',
       'table.origin': '来源',
       'table.day': '按日期',
+      'pager.prev': '上一页',
+      'pager.next': '下一页',
+      'pager.info': '第',
+      'pager.of': '/',
+      'pager.pages': '页',
+      'pager.rows': '条',
+      'day.from': '起',
+      'day.to': '止',
+      'day.clear': '全部日期',
+      'day.range': '日期范围',
       'table.account': '账号',
       'chart.pie.title': '模型用量占比',
       'chart.pie.total': '总计',
@@ -145,6 +155,13 @@ window.__ModuleLoader__.load({
       'version.dialogUpdate': '更新并重载',
       'version.dialogLater': '稍后',
       'version.dialogOk': '知道了',
+      'version.notes': '更新说明',
+      'version.progressDownload': '正在下载新版本…',
+      'version.progressInstall': '正在替换文件…',
+      'version.progressActivate': '正在热重载…',
+      'version.success': '更新成功',
+      'version.successBody': '已升级到',
+      'version.noNotes': '（本次无更新说明）',
       'version.checkFailed': '检查更新失败',
       'version.reloading': '重载中…',
       'version.notes': '更新说明',
@@ -216,6 +233,16 @@ window.__ModuleLoader__.load({
       'table.project': 'Project',
       'table.origin': 'Origin',
       'table.day': 'By day',
+      'pager.prev': 'Prev',
+      'pager.next': 'Next',
+      'pager.info': 'Page',
+      'pager.of': 'of',
+      'pager.pages': '',
+      'pager.rows': 'rows',
+      'day.from': 'From',
+      'day.to': 'To',
+      'day.clear': 'All dates',
+      'day.range': 'Date range',
       'table.account': 'Account',
       'chart.pie.title': 'Model share',
       'chart.pie.total': 'Total',
@@ -272,6 +299,13 @@ window.__ModuleLoader__.load({
       'version.dialogUpdate': 'Update and reload',
       'version.dialogLater': 'Later',
       'version.dialogOk': 'OK',
+      'version.notes': 'Release notes',
+      'version.progressDownload': 'Downloading the new version…',
+      'version.progressInstall': 'Installing files…',
+      'version.progressActivate': 'Hot reloading…',
+      'version.success': 'Update complete',
+      'version.successBody': 'Upgraded to',
+      'version.noNotes': '(no release notes)',
       'version.checkFailed': 'Update check failed',
       'version.reloading': 'Reloading…',
       'version.notes': 'Release notes',
@@ -587,6 +621,48 @@ window.__ModuleLoader__.load({
   .tu-spinner { animation: none; }
   .tu-scan-fill[data-indeterminate='true'] { animation: none; width: 100%; }
 }
+.tu-daterange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-datefield {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tu-dateinput {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+.tu-daterange-meta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.tu-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-pager-info {
+  font-variant-numeric: tabular-nums;
+  min-width: 90px;
+  text-align: center;
+}
 .tu-empty {
   padding: 40px 20px;
   text-align: center;
@@ -802,6 +878,39 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
   margin-bottom: 16px;
   overflow-wrap: anywhere;
+}
+.tu-modal-notes {
+  margin-bottom: 14px;
+}
+.tu-modal-notes-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.tu-modal-notes-body {
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 9px 11px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tu-modal-progress {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
 }
 .tu-modal-actions {
   display: flex;
@@ -1574,13 +1683,24 @@ window.__ModuleLoader__.load({
           { key: 'cacheRead', color: 'var(--dsw-alias-state-success-primary)', value: (p) => p.cacheRead },
           { key: 'output', color: 'var(--dsw-alias-state-warn-primary)', value: (p) => p.output },
         ]
-        // 自下而上累积，每一层用「基线 + 该层值」画闭合区域
+        // 自下而上累积，每一层用「基线 + 该层值」画闭合区域。
+        // 曲线用 smoothPath 走贝塞尔，与其它模式的折线观感保持一致——
+        // 之前这里用直线段拼，切到「构成」时曲线会突然变生硬。
         let lower = points.map(() => 0)
         const layerPaths = layers.map((layer) => {
           const upper = points.map((point, index) => lower[index] + layer.value(point))
-          const top = points.map((point, index) => `${toX(index).toFixed(2)},${toY(upper[index], max).toFixed(2)}`)
-          const bottom = points.map((point, index) => `${toX(index).toFixed(2)},${toY(lower[index], max).toFixed(2)}`).reverse()
-          const path = `M${top.join(' L')} L${bottom.join(' L')} Z`
+          const topPoints = points.map((point, index) => ({
+            x: toX(index),
+            y: toY(upper[index], max),
+          }))
+          // 下边界反向拼回，形成闭合区域
+          const bottomPoints = points.map((point, index) => ({
+            x: toX(index),
+            y: toY(lower[index], max),
+          })).reverse()
+          const path = `${smoothPath(topPoints)} L${bottomPoints
+            .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+            .join(' L')} Z`
           lower = upper
           return { key: layer.key, color: layer.color, path }
         })
@@ -1988,6 +2108,12 @@ window.__ModuleLoader__.load({
       }, [modelMenuOpen])
       // 版本检查弹窗：{ kind: 'new' | 'same' | 'error', latest, message }
       const [versionDialog, setVersionDialog] = useState(null)
+      // 「按日期」表的时间范围与分页。日期多时一次全渲染会很卡，
+      // 所以默认每页 20 条，且允许按起止日期收窄。
+      const [dayFrom, setDayFrom] = useState('')
+      const [dayTo, setDayTo] = useState('')
+      const [page, setPage] = useState(0)
+      const PAGE_SIZE = 20
       const toggleModel = (name) => {
         setSelectedModels((current) => (current.includes(name)
           ? current.filter((item) => item !== name)
@@ -2020,6 +2146,8 @@ window.__ModuleLoader__.load({
         busy: '', available: false, latest: '', checked: false, error: '',
         // 磁盘版本与运行版本不一致 = 需要重载才能生效。
         versionMismatch: false,
+        // 更新进度阶段：'' | 'download' | 'install' | 'activate' | 'done'
+        phase: '',
       })
 
       useEffect(() => {
@@ -2065,6 +2193,7 @@ window.__ModuleLoader__.load({
           setVersionDialog({
             kind: available ? 'new' : 'same',
             latest,
+            notes: String(body.notes ?? ''),
             message: String(body.error ?? ''),
           })
         } catch (error) {
@@ -2088,8 +2217,15 @@ window.__ModuleLoader__.load({
           // 轮询新版本落地：重载完成后 buildId 与版本号都会变，
           // 用它们确认升级真的生效，而不是凭「已受理」就当成功。
           const before = pluginVersion
+          setUpdateState((previous) => ({ ...previous, phase: 'download' }))
           for (let attempt = 0; attempt < 20; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 1500))
+            // 进度是估算的：后端没有细粒度事件，按轮询次数推进阶段，
+            // 让用户看到「在动」而不是一个静止的按钮。
+            setUpdateState((previous) => ({
+              ...previous,
+              phase: attempt < 4 ? 'download' : attempt < 10 ? 'install' : 'activate',
+            }))
             try {
               const probe = await fetch(VERSION_ROUTE, {
                 headers: { accept: 'application/json' }, credentials: 'same-origin',
@@ -2098,13 +2234,19 @@ window.__ModuleLoader__.load({
               if (probe.ok) {
                 const info = await probe.json()
                 if (String(info.version ?? '') !== before) {
-                  setPluginVersion(String(info.version))
-                  setUpdateState((previous) => ({ ...previous, busy: '', available: false, latest: '' }))
+                  const nextVersion = String(info.version)
+                  setPluginVersion(nextVersion)
+                  setUpdateState((previous) => ({
+                    ...previous, busy: '', available: false, latest: '', phase: '',
+                  }))
+                  // 成功必须有明确反馈，而不是按钮变回原样就当成功。
+                  setVersionDialog({ kind: 'success', latest: nextVersion, message: '' })
                   return
                 }
               }
             } catch { /* 重载瞬间请求会失败，继续重试 */ }
           }
+          setUpdateState((previous) => ({ ...previous, phase: '' }))
           setUpdateState((previous) => ({
             ...previous, busy: '',
             error: '更新已提交，但未检测到新版本生效；请手动重载或查看日志',
@@ -2179,6 +2321,44 @@ window.__ModuleLoader__.load({
       ]
 
       // 按模型：把 provider/model 拆成两列，按总量降序。
+      /**
+       * 按当前模型筛选取出某个维度的聚合。
+       *
+       * 未筛选时直接用 Host 算好的全局桶；选了模型则把各模型的 facets 相加。
+       * 这样占比图、项目表、来源表、账号表、日期表都会跟着筛选一起变，
+       * 而不是只有指标卡刷新（用户实际反馈的问题）。
+       */
+      const facetOf = useCallback((facetKey) => {
+        if (data === undefined) return {}
+        if (selectedModels.length === 0) {
+          // 全局视图：直接用 host 的 byXxx 桶，避免重复求和。
+          const map = {
+            provider: data.byProvider,
+            project: data.byProject,
+            origin: data.byOrigin,
+            account: data.accounts,
+            day: data.byDay,
+          }
+          return map[facetKey] ?? {}
+        }
+        // 筛选视图：把选中模型的该维度桶逐个相加。
+        const merged = {}
+        for (const name of selectedModels) {
+          const facets = data.byModelFacets?.[name]?.[facetKey]
+          if (facets === undefined) continue
+          for (const [key, counters] of Object.entries(facets)) {
+            const target = merged[key] ?? (merged[key] = {
+              calls: 0, inputTokens: 0, outputTokens: 0,
+              cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
+            })
+            for (const field of Object.keys(target)) {
+              target[field] += counters[field] ?? 0
+            }
+          }
+        }
+        return merged
+      }, [data, selectedModels])
+
       const modelRows = useMemo(() => {
         if (data === undefined) return []
         return Object.entries(data.byModel ?? {})
@@ -2204,7 +2384,7 @@ window.__ModuleLoader__.load({
 
       const providerRows = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(data.byProvider ?? {})
+        return Object.entries(facetOf('provider'))
           .map(([key, counters]) => ({
             key,
             provider: key,
@@ -2215,11 +2395,11 @@ window.__ModuleLoader__.load({
             sortKey: counters.totalTokens ?? 0,
           }))
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data])
+      }, [data, facetOf])
 
-      const dayRows = useMemo(() => {
+      const dayRowsAll = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(data.byDay ?? {})
+        return Object.entries(facetOf('day'))
           .map(([day, counters]) => ({
             key: day,
             date: day,
@@ -2230,7 +2410,26 @@ window.__ModuleLoader__.load({
             sortKey: day,
           }))
           .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
-      }, [data])
+      }, [data, facetOf])
+
+      // 日期范围过滤（含边界）。
+      const dayRowsFiltered = useMemo(() => {
+        if (dayFrom === '' && dayTo === '') return dayRowsAll
+        return dayRowsAll.filter((row) => {
+          if (dayFrom !== '' && row.key < dayFrom) return false
+          if (dayTo !== '' && row.key > dayTo) return false
+          return true
+        })
+      }, [dayRowsAll, dayFrom, dayTo])
+
+      // 只在「按日期」视图分页，其它视图数据量小、直接全渲染。
+      const pageCount = Math.max(1, Math.ceil(dayRowsFiltered.length / PAGE_SIZE))
+      const safePage = Math.min(page, pageCount - 1)
+      const dayRows = useMemo(() => {
+        if (tableView !== 'day') return dayRowsFiltered
+        const start = safePage * PAGE_SIZE
+        return dayRowsFiltered.slice(start, start + PAGE_SIZE)
+      }, [dayRowsFiltered, safePage, tableView])
 
       const sessionRows = useMemo(() => {
         if (data === undefined) return []
@@ -2248,10 +2447,11 @@ window.__ModuleLoader__.load({
           .slice(0, 200)
       }, [data, locale, t])
 
+
       // 按项目（工作目录）——路径太长，只显示末两段。
       const projectRows = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(data.byProject ?? {})
+        return Object.entries(facetOf('project'))
           .map(([cwd, counters]) => ({
             key: cwd,
             project: shortPath(cwd),
@@ -2264,12 +2464,12 @@ window.__ModuleLoader__.load({
             fullPath: cwd,
           }))
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data])
+      }, [data, facetOf])
 
       // 按会话来源：主会话 / 子代理 / workflow。
       const originRows = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(data.byOrigin ?? {})
+        return Object.entries(facetOf('origin'))
           .map(([origin, counters]) => ({
             key: origin,
             origin: t(`origin.${origin}`),
@@ -2280,12 +2480,12 @@ window.__ModuleLoader__.load({
             sortKey: counters.totalTokens ?? 0,
           }))
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data, t])
+      }, [data, t, facetOf])
 
       // 账号分段。
       const accountRows = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(data.accounts ?? {})
+        return Object.entries(facetOf('account'))
           .map(([id, entry]) => ({
             key: id,
             account: id === 'unknown' ? t('account.unknown') : id,
@@ -2297,12 +2497,21 @@ window.__ModuleLoader__.load({
             sortKey: entry.totalTokens ?? 0,
           }))
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data, locale, t])
+      }, [data, locale, t, facetOf])
 
       // 环形图数据：按模型总量降序，取前 6 个，其余合并为「其他」，
       // 避免图例出现几十行、色板循环撞色。
       const modelPieItems = useMemo(() => {
         if (data === undefined) return []
+        // 选中若干模型时，占比图只显示这些模型（其余隐藏），
+        // 这样它与明细表、图表的口径保持一致。
+        if (selectedModels.length > 0) {
+          const source = data.byModelName ?? {}
+          return selectedModels
+            .filter((name) => (source[name]?.totalTokens ?? 0) > 0)
+            .map((name) => ({ key: name, label: name, value: source[name].totalTokens }))
+            .sort((a, b) => b.value - a.value)
+        }
         // 用**模型名合并视图**：同一模型挂在多个供应商下时合并成一个扇区，
         // 否则环上会出现多个同名扇区、占比也被拆散。按供应商拆分看明细表。
         const source = data.byModelName ?? {}
@@ -2324,7 +2533,7 @@ window.__ModuleLoader__.load({
           })
         }
         return top
-      }, [data, t])
+      }, [data, t, selectedModels])
 
       // 图表数据：按天升序。trend 由 Host 预先算好命中率，这里只做投影。
       const trendSeries = useMemo(() => {
@@ -2718,11 +2927,61 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
+          // 「按日期」视图：日期范围选择 + 分页，避免一次渲染几百行。
+          activeView.id === 'day'
+            ? h('div', { className: 'tu-daterange' },
+              h('label', { className: 'tu-datefield' },
+                h('span', null, t('day.from')),
+                h('input', {
+                  type: 'date',
+                  className: 'tu-dateinput',
+                  value: dayFrom,
+                  max: dayTo !== '' ? dayTo : undefined,
+                  onChange: (event) => { setDayFrom(event.target.value); setPage(0) },
+                }),
+              ),
+              h('label', { className: 'tu-datefield' },
+                h('span', null, t('day.to')),
+                h('input', {
+                  type: 'date',
+                  className: 'tu-dateinput',
+                  value: dayTo,
+                  min: dayFrom !== '' ? dayFrom : undefined,
+                  onChange: (event) => { setDayTo(event.target.value); setPage(0) },
+                }),
+              ),
+              dayFrom !== '' || dayTo !== ''
+                ? h('button', {
+                  type: 'button', className: 'tu-button',
+                  onClick: () => { setDayFrom(''); setDayTo(''); setPage(0) },
+                }, t('day.clear'))
+                : null,
+              h('span', { className: 'tu-daterange-meta' },
+                `${formatNumber(dayRowsFiltered.length)} ${t('pager.rows')}`),
+            )
+            : null,
           h(UsageTable, {
             columns: activeView.columns,
             rows: activeView.rows,
             emptyText: t('empty'),
           }),
+          // 只有日期视图需要分页。
+          activeView.id === 'day' && pageCount > 1
+            ? h('div', { className: 'tu-pager' },
+              h('button', {
+                type: 'button', className: 'tu-button',
+                disabled: safePage <= 0,
+                onClick: () => setPage((current) => Math.max(0, current - 1)),
+              }, t('pager.prev')),
+              h('span', { className: 'tu-pager-info' },
+                `${t('pager.info')} ${safePage + 1} ${t('pager.of')} ${pageCount} ${t('pager.pages')}`),
+              h('button', {
+                type: 'button', className: 'tu-button',
+                disabled: safePage >= pageCount - 1,
+                onClick: () => setPage((current) => Math.min(pageCount - 1, current + 1)),
+              }, t('pager.next')),
+            )
+            : null,
           activeView.id === 'account' ? h('p', { className: 'tu-hint' }, t('account.note')) : null,
         )
 
@@ -2746,9 +3005,35 @@ window.__ModuleLoader__.load({
       h('div', { className: 'tu-modal-body' },
         versionDialog.kind === 'new'
           ? `${t('version.newBody')}（${pluginVersion} → ${versionDialog.latest}）`
-          : versionDialog.kind === 'same'
-            ? `${t('version.sameBody')}（${pluginVersion}）`
-            : `${t('version.checkFailed')}：${versionDialog.message}`),
+          : versionDialog.kind === 'success'
+            ? `${t('version.success')}：${t('version.successBody')} ${versionDialog.latest}`
+            : versionDialog.kind === 'same'
+              ? `${t('version.sameBody')}（${pluginVersion}）`
+              : `${t('version.checkFailed')}：${versionDialog.message}`),
+      // 更新说明：有就滚动展示，没有就明确写「无」，不留空白让人猜。
+      versionDialog.kind === 'new'
+        ? h('div', { className: 'tu-modal-notes' },
+          h('div', { className: 'tu-modal-notes-title' }, t('version.notes')),
+          h('pre', { className: 'tu-modal-notes-body' },
+            (versionDialog.notes ?? '') === ''
+              ? t('version.noNotes')
+              : versionDialog.notes),
+        )
+        : null,
+      // 更新中的阶段提示：下载 / 替换 / 重载，三段式。
+      updateState.phase !== ''
+        ? h('div', { className: 'tu-modal-progress' },
+          h('div', { className: 'tu-scan-bar' },
+            h('div', { className: 'tu-scan-fill', 'data-indeterminate': 'true' }),
+          ),
+          h('div', { className: 'tu-scan-meta' },
+            updateState.phase === 'download'
+              ? t('version.progressDownload')
+              : updateState.phase === 'install'
+                ? t('version.progressInstall')
+                : t('version.progressActivate')),
+        )
+        : null,
       h('div', { className: 'tu-modal-actions' },
         versionDialog.kind === 'new'
           ? h('button', {
