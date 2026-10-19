@@ -20,6 +20,9 @@ import { dirname } from 'node:path'
 
 /** new-api / one-api 的余额端点候选。按命中概率排序。 */
 export const BALANCE_ENDPOINTS = [
+  // Sub2API 系（如 sub.100xlabs.space）：直接给 balance 与日用量明细。
+  // 这是最省事的一种——字段本身就是美元，不需要单位换算。
+  { path: '/v1/usage', kind: 'sub2api' },
   // new-api：返回 data.quota（额度，通常以 500000 为单位换算美元）
   { path: '/api/user/self', kind: 'new-api' },
   // one-api 风格
@@ -65,6 +68,50 @@ export function parseNewApiBalance(body) {
     username: typeof data.username === 'string' ? data.username : undefined,
     raw: { quota, used_quota: Number.isFinite(usedRaw) ? usedRaw : undefined },
   }
+}
+
+/**
+ * 解析 Sub2API 系的 `/v1/usage` 响应。
+ *
+ * 典型响应（实测自 sub.100xlabs.space）：
+ *
+ *   {
+ *     "balance": 60.0941164,
+ *     "isValid": true,
+ *     "mode": "unrestricted",
+ *     "daily_usage": [{ "date": "...", "cost": 0.53, ... }],
+ *     "model_stats": [{ "model": "claude-opus-5-5", "cost": 0.53, ... }]
+ *   }
+ *
+ * `balance` 就是剩余美元，`daily_usage` 的 cost 之和是已用金额。
+ * 有的变体把余额放在 `remaining` 或 `quota.remaining` 里，一并兼容。
+ */
+export function parseSub2ApiUsage(body) {
+  if (body === null || typeof body !== 'object') return undefined
+  const remaining = numberOrUndefined(body.balance)
+    ?? numberOrUndefined(body.remaining)
+    ?? numberOrUndefined(body?.quota?.remaining)
+  if (remaining === undefined) return undefined
+  // 已用金额：日明细累加（拿不到就留 undefined）
+  let usedUsd
+  if (Array.isArray(body.daily_usage)) {
+    const sum = body.daily_usage.reduce((total, entry) => {
+      const cost = numberOrUndefined(entry?.cost) ?? numberOrUndefined(entry?.actual_cost) ?? 0
+      return total + cost
+    }, 0)
+    usedUsd = sum
+  }
+  return {
+    usd: remaining,
+    usedUsd,
+    isValid: body.isValid !== false && body.is_active !== false,
+    mode: typeof body.mode === 'string' ? body.mode : undefined,
+  }
+}
+
+function numberOrUndefined(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : undefined
 }
 
 /**
@@ -139,6 +186,28 @@ export async function probeBalance({ baseUrl, apiKey, fetchImpl, signal, timeout
       const body = await response.json().catch(() => undefined)
       if (body === undefined) { lastError = '响应不是 JSON'; continue }
 
+      if (endpoint.kind === 'sub2api') {
+        const parsed = parseSub2ApiUsage(body)
+        if (parsed !== undefined) {
+          // 有些站点会返回 isValid:false（key 失效），那不算探测成功
+          if (parsed.isValid === false) {
+            lastError = '令牌已失效'
+            continue
+          }
+          return {
+            ok: true,
+            kind: 'sub2api',
+            usd: parsed.usd,
+            usedUsd: parsed.usedUsd,
+            // Sub2API 不返回总额度，用「剩余 + 已用」推算
+            limitUsd: parsed.usedUsd === undefined ? undefined : parsed.usd + parsed.usedUsd,
+            mode: parsed.mode,
+          }
+        }
+        lastError = '响应里没有余额字段'
+        continue
+      }
+
       if (endpoint.kind === 'new-api') {
         const parsed = parseNewApiBalance(body)
         if (parsed !== undefined) {
@@ -185,6 +254,95 @@ export async function probeBalance({ baseUrl, apiKey, fetchImpl, signal, timeout
     }
   }
   return { ok: false, error: lastError === '' ? '所有端点都没有返回可用数据' : lastError }
+}
+
+/**
+ * 从站点拉取可用模型列表。
+ *
+ * 走 OpenAI 兼容的 `GET {baseURL}/models`：这是所有中转站的通行做法，
+ * 响应形如 `{ data: [{ id, created, owned_by }] }`，也有网关返回数组或
+ * `{ models: [...] }`。这里对三种形态都做兼容。
+ *
+ * 拉取失败不抛异常——模型列表是给用户勾选的辅助信息，拿不到就让他手填。
+ *
+ * @returns {Promise<{ok:boolean, models?:Array<{id:string,name?:string}>, error?:string}>}
+ */
+export async function discoverModels({ baseUrl, apiKey, fetchImpl, signal, timeoutMs = 12_000 }) {
+  const base = normalizeBaseUrl(baseUrl)
+  if (base === '') return { ok: false, error: '没有填写站点地址' }
+  const doFetch = fetchImpl ?? globalThis.fetch
+  if (typeof doFetch !== 'function') return { ok: false, error: '当前环境没有 fetch' }
+
+  const headers = { accept: 'application/json', 'user-agent': 'dsh-token-metrics' }
+  if (typeof apiKey === 'string' && apiKey !== '') headers.authorization = `Bearer ${apiKey}`
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : undefined
+  const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    // 有些网关的模型列表带 /v1 前缀，有些不带；两种都试一次。
+    const candidates = [`${base}/v1/models`, `${base}/models`]
+    let lastError = ''
+    for (const url of candidates) {
+      try {
+        const response = await doFetch(url, {
+          headers, signal: signal ?? controller?.signal, redirect: 'error',
+        })
+        if (!response.ok) { lastError = `HTTP ${response.status}`; continue }
+        const body = await response.json().catch(() => undefined)
+        const models = normalizeModelList(body)
+        if (models.length === 0) { lastError = '返回里没有模型'; continue }
+        return { ok: true, models }
+      } catch (error) {
+        lastError = error?.message ?? String(error)
+      }
+    }
+    return { ok: false, error: lastError === '' ? '没有可用的模型列表端点' : lastError }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * 把各种形态的模型列表响应归一化成 `[{ id, name }]`。
+ *
+ * 兼容：
+ *  - `{ data: [{ id }] }`（OpenAI 标准）
+ *  - `[{ id }]`（部分网关直接给数组）
+ *  - `{ models: [{ id }] }`
+ *  - 富信息对象：`{ data: [{ id, name, context_length, max_output_tokens }] }`
+ */
+export function normalizeModelList(body) {
+  const raw = Array.isArray(body)
+    ? body
+    : Array.isArray(body?.data)
+      ? body.data
+      : Array.isArray(body?.models)
+        ? body.models
+        : []
+  const out = []
+  const seen = new Set()
+  for (const entry of raw) {
+    // 条目可能是字符串，也可能是对象
+    const id = typeof entry === 'string'
+      ? entry
+      : String(entry?.id ?? entry?.model ?? entry?.name ?? '')
+    if (id === '' || seen.has(id)) continue
+    seen.add(id)
+    const model = { id }
+    const name = typeof entry === 'object' && entry !== null
+      ? (entry.display_name ?? entry.displayName ?? entry.name)
+      : undefined
+    if (typeof name === 'string' && name !== '' && name !== id) model.name = name
+    // 顺带带上容量信息（有的网关会给）
+    if (typeof entry === 'object' && entry !== null) {
+      const context = Number(entry.context_length ?? entry.contextWindow ?? entry.max_input_tokens)
+      if (Number.isFinite(context) && context > 0) model.contextWindow = context
+      const maxOut = Number(entry.max_output_tokens ?? entry.maxTokens ?? entry.max_tokens)
+      if (Number.isFinite(maxOut) && maxOut > 0) model.maxOutput = maxOut
+    }
+    out.push(model)
+  }
+  return out.sort((a, b) => (a.id < b.id ? -1 : 1))
 }
 
 /**
@@ -245,15 +403,29 @@ export class BalanceBook {
       label: input.label ?? id,
       baseUrl: normalizeBaseUrl(input.baseUrl ?? ''),
       keyRef: input.keyRef ?? `dsh-token-metrics/${id}`,
+      // keyEnv 与 models 必须带过来：前者是同步到 DSH 时的凭据引用名，
+      // 后者是路由必须声明的模型清单。漏掉任何一个都会让同步失败。
+      keyEnv: input.keyEnv ?? '',
+      api: input.api ?? 'openai-completions',
+      models: input.models ?? [],
       kind: input.kind ?? 'auto',
       lastBalance: input.lastBalance,
       lastCheckedAt: input.lastCheckedAt,
       error: input.error,
     })
     const index = this.sites.findIndex((entry) => entry.id === id)
-    if (index === -1) this.sites.push(site)
-    else this.sites[index] = { ...this.sites[index], ...site }
-    return site
+    if (index === -1) {
+      this.sites.push(site)
+      // 新增时 index 是 -1，必须返回刚 push 进去的那个
+      return site
+    }
+    const previous = this.sites[index]
+    // 没传 models 时沿用已有的，避免「只改余额」把模型列表清空。
+    const models = (Array.isArray(input.models) && input.models.length > 0)
+      ? site.models
+      : (previous.models ?? [])
+    this.sites[index] = { ...previous, ...site, models }
+    return this.sites[index]
   }
 
   /** 删除一个站点。 */
@@ -289,6 +461,9 @@ export class BalanceBook {
         id: site.id,
         label: site.label,
         baseUrl: site.baseUrl,
+        keyEnv: site.keyEnv ?? '',
+        api: site.api ?? 'openai-completions',
+        models: site.models ?? [],
         kind: site.kind,
         lastBalance: site.lastBalance ?? null,
         lastCheckedAt: site.lastCheckedAt ?? 0,
@@ -305,14 +480,45 @@ function sanitizeSite(input) {
     label: String(input?.label ?? input?.id ?? ''),
     baseUrl: typeof input?.baseUrl === 'string' ? input.baseUrl : '',
     keyRef: typeof input?.keyRef === 'string' ? input.keyRef : '',
+    // 密钥环境变量名（引用，不是密钥本身）。同步到 DSH 时要写进 apiKeyEnv。
+    keyEnv: typeof input?.keyEnv === 'string' ? input.keyEnv : '',
+    // 上游协议：openai-completions / openai-responses / anthropic-messages。
+    // 同步到 DSH 时会写进 provider 的 api 字段，选错请求格式就不对。
+    api: typeof input?.api === 'string' && input.api !== '' ? input.api : 'openai-completions',
     kind: typeof input?.kind === 'string' ? input.kind : 'auto',
+    // 可用模型列表：同步到 DSH 模型配置时要用。
+    // 早先漏了白名单，导致模型列表在保存时被剥掉、同步必然失败。
+    models: Array.isArray(input?.models)
+      ? input.models
+        .filter((model) => model !== null && typeof model === 'object' && typeof model.id === 'string' && model.id !== '')
+        .map((model) => {
+          const entry = { id: model.id }
+          if (typeof model.name === 'string' && model.name !== '') entry.name = model.name
+          const context = Number(model.contextWindow)
+          if (Number.isFinite(context) && context > 0) entry.contextWindow = context
+          const maxOut = Number(model.maxOutput)
+          if (Number.isFinite(maxOut) && maxOut > 0) entry.maxOutput = maxOut
+          // 思考档位：同步到 DSH 时转成 reasoningEfforts。
+          // 白名单漏了它就会在保存时被剥掉，导致同步出去的配置没有档位。
+          if (Array.isArray(model.thinkingLevels)) {
+            const levels = model.thinkingLevels.filter((level) => typeof level === 'string' && level !== '')
+            if (levels.length > 0) entry.thinkingLevels = levels
+          }
+          // 附件能力：false 表示只接受文本
+          if (model.image === false) entry.image = false
+          return entry
+        })
+      : [],
     lastBalance: input?.lastBalance ?? null,
     lastCheckedAt: Number(input?.lastCheckedAt ?? 0) || 0,
     error: typeof input?.error === 'string' ? input.error : '',
   }
-  // 明确拒绝任何形似密钥的字段混进来
+  // 明确拒绝任何形似密钥的字段混进来。
+  // keyEnv / keyRef 只是「名字」，不是密钥本体，必须放行——
+  // 否则同步到 DSH 时拿不到 apiKeyEnv。
+  const allowedNames = new Set(['keyRef', 'keyEnv'])
   for (const key of Object.keys(input ?? {})) {
-    if (/key|token|secret|password/i.test(key) && key !== 'keyRef') {
+    if (/key|token|secret|password/i.test(key) && !allowedNames.has(key)) {
       delete site[key]
     }
   }

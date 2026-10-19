@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   probeBalance, normalizeBaseUrl, parseNewApiBalance, parseOneApiSubscription,
-  parseOneApiUsage, BalanceBook,
+  parseOneApiUsage, parseSub2ApiUsage, BalanceBook,
 } from '../src/balance.js'
 
 const failures = []
@@ -51,6 +51,19 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   check('缺字段返回 undefined', parseNewApiBalance({ foo: 1 }), undefined)
   check('null 安全', parseNewApiBalance(null), undefined)
 
+  // Sub2API 系（实测自 sub.100xlabs.space 的 /v1/usage）
+  const sub2 = parseSub2ApiUsage({
+    balance: 60.0941164, isValid: true, mode: 'unrestricted',
+    daily_usage: [{ cost: 0.5 }, { cost: 0.25 }],
+  })
+  check('sub2api 余额', sub2.usd, 60.0941164)
+  check('sub2api 已用累加', sub2.usedUsd, 0.75)
+  check('sub2api 有效标记', sub2.isValid, true)
+  // 兼容 remaining / quota.remaining 变体
+  check('sub2api 兼容 remaining', parseSub2ApiUsage({ remaining: 5 }).usd, 5)
+  check('sub2api 兼容 quota.remaining', parseSub2ApiUsage({ quota: { remaining: 7 } }).usd, 7)
+  check('sub2api 无余额字段返回 undefined', parseSub2ApiUsage({ foo: 1 }), undefined)
+
   check('one-api 额度解析', parseOneApiSubscription({ hard_limit_usd: 20 }).limitUsd, 20)
   // total_usage 单位是美分
   check('one-api 用量按美分', parseOneApiUsage({ total_usage: 1500 }).usedUsd, 15)
@@ -68,6 +81,18 @@ check('非字符串安全', normalizeBaseUrl(null), '')
     }
     return { ok: false, status: 404, async json() { return {} } }
   }
+
+  // sub2api 系：/v1/usage 优先命中
+  const sub2Fetch = makeFetch({
+    '/v1/usage': () => ({
+      ok: true, status: 200,
+      async json() { return { balance: 12.5, isValid: true, daily_usage: [{ cost: 1 }] } },
+    }),
+  })
+  const r0 = await probeBalance({ baseUrl: 'https://s2.test', apiKey: 'sk-x', fetchImpl: sub2Fetch })
+  check('sub2api 探测成功', r0.ok, true)
+  check('sub2api 识别类型', r0.kind, 'sub2api')
+  check('sub2api 余额', r0.usd, 12.5)
 
   // new-api 成功：第一个端点就命中
   const newApi = makeFetch({
@@ -131,7 +156,14 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   const path = join(dir, 'balance.json')
   const book = new BalanceBook({ dataDir: dir, now: () => 5000 })
 
-  book.upsertSite({ id: 'relay-a', label: '中转 A', baseUrl: 'https://a.test/v1', keyRef: 'dsh-token-metrics/relay-a' })
+  // 回归：新增站点时 upsertSite 必须返回新站点（早先返回 undefined，
+  // 导致同步流程误判为「缺少 id」）
+  const created = book.upsertSite({
+    id: 'relay-a', label: '中转 A', baseUrl: 'https://a.test/v1',
+    keyRef: 'dsh-token-metrics/relay-a',
+  })
+  check('新增返回站点对象', created?.id, 'relay-a')
+  check('新增返回含 models 字段', Array.isArray(created?.models), true)
   book.upsertSite({ id: 'relay-b', label: '中转 B', baseUrl: 'https://b.test' })
   check('站点数量', book.sites.length, 2)
   check('baseUrl 已归一化', book.sites[0].baseUrl, 'https://a.test')
@@ -161,8 +193,38 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   reloaded.saveTo(path)
   checkTrue('磁盘仍不含 sk- 前缀的密钥', !readFileSync(path, 'utf8').includes('sk-should-not-persist'))
 
-  // 删除
-  check('删除存在站点', reloaded.removeSite('evil'), true)
+  // 回归：models 与 keyEnv 必须在白名单里存活
+  // 早先 sanitizeSite 漏了它们，导致模型列表被剥掉、同步到 DSH 必然失败。
+  reloaded.removeSite('evil')
+  reloaded.upsertSite({
+    id: 'with-models',
+    label: '带模型',
+    baseUrl: 'https://m.test/v1',
+    keyEnv: 'MY_KEY',
+    models: [
+      { id: 'm1', name: 'M1', contextWindow: 131072, maxOutput: 8192, junk: 'drop-me' },
+      { id: 'm2' },
+      { notId: 'ignored' },
+    ],
+  })
+  const withModels = reloaded.sites.find((s) => s.id === 'with-models')
+  check('模型列表被保留', withModels.models.length, 2)
+  check('模型 id 保留', withModels.models[0].id, 'm1')
+  check('模型名称保留', withModels.models[0].name, 'M1')
+  check('上下文窗口保留', withModels.models[0].contextWindow, 131072)
+  check('最大输出保留', withModels.models[0].maxOutput, 8192)
+  check('多余字段被丢弃', withModels.models[0].junk, undefined)
+  check('keyEnv 被保留', withModels.keyEnv, 'MY_KEY')
+
+  // 重启后仍在（持久化不能丢）
+  reloaded.saveTo(path)
+  const afterSave = new BalanceBook({ dataDir: dir }).loadFrom(path)
+  const roundTrip = afterSave.sites.find((s) => s.id === 'with-models')
+  check('模型列表可持久化', roundTrip.models.length, 2)
+  check('keyEnv 可持久化', roundTrip.keyEnv, 'MY_KEY')
+
+  // 删除（此时有三个：relay-a、relay-b、with-models）
+  check('删除存在站点', reloaded.removeSite('with-models'), true)
   check('删除不存在的返回 false', reloaded.removeSite('nope'), false)
   check('删除后数量', reloaded.sites.length, 2)
 
