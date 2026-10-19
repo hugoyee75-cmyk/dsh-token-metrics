@@ -267,6 +267,13 @@ export class PriceBook {
     this.overrides = {}
     /** 供应商倍率：provider 路由名 -> number */
     this.multipliers = {}
+    /**
+     * 模型别名：原始名 -> 显示名。
+     *
+     * 部分 provider 上报内部代号（Qoder 的 `qfmodel` 是上游队列 modelKey），
+     * 不是真实模型名。这些代号无法从 DSH 元数据反查，只能由用户指定。
+     */
+    this.aliases = {}
     /** 美元兑人民币 */
     this.usdCny = DEFAULT_USD_CNY
     this.fxUpdatedAt = 0
@@ -291,6 +298,7 @@ export class PriceBook {
         this.updatedAt = parsed.updatedAt ?? 0
         this.overrides = parsed.overrides ?? {}
         this.multipliers = parsed.multipliers ?? {}
+        this.aliases = parsed.aliases ?? {}
       }
     } catch (error) {
       this.log?.(`token-metrics: 读取价目表缓存失败（${error?.message ?? error}）`)
@@ -321,6 +329,7 @@ export class PriceBook {
         updatedAt: this.updatedAt,
         overrides: this.overrides,
         multipliers: this.multipliers,
+        aliases: this.aliases,
       }), 'utf8')
     } catch (error) {
       this.log?.(`token-metrics: 保存价目表失败（${error?.message ?? error}）`)
@@ -352,6 +361,15 @@ export class PriceBook {
     } else {
       this.multipliers[provider] = value
     }
+    this.save()
+  }
+
+  /** 设置模型别名（显示名）。传 null 或空串表示删除。 */
+  setAlias(rawName, displayName) {
+    if (typeof rawName !== 'string' || rawName === '') return
+    const value = typeof displayName === 'string' ? displayName.trim() : ''
+    if (value === '') delete this.aliases[rawName]
+    else this.aliases[rawName] = value
     this.save()
   }
 
@@ -439,6 +457,7 @@ export class PriceBook {
       fxError: this.fxError,
       overrides: { ...this.overrides },
       multipliers: { ...this.multipliers },
+      aliases: { ...this.aliases },
     }
   }
 }
