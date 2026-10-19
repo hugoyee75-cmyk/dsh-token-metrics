@@ -1,0 +1,77 @@
+{
+  "name": "dsh-token-usage",
+  "version": "0.2.0",
+  "private": false,
+  "type": "module",
+  "description": "统计所有经过 DeepSeek Harness 的模型调用 Token 用量：按模型/供应商/项目/来源/账号/日期拆分，带缓存命中率、趋势图表与自更新。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/metadata-test.mjs",
+    "test:host": "node test/host-test.mjs",
+    "test:client": "node test/client-test.mjs",
+    "test:update": "node test/update-test.mjs",
+    "test:metadata": "node test/metadata-test.mjs",
+    "verify": "node test/verify-against-logs.mjs",
+    "check": "node --check index.js && node --check client.js && node --check src/reload.js && node --check src/updater.js && npm test",
+    "prepack": "npm run check"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hugoyee75-cmyk/dsh-token-usage.git"
+  },
+  "homepage": "https://github.com/hugoyee75-cmyk/dsh-token-usage#readme",
+  "bugs": {
+    "url": "https://github.com/hugoyee75-cmyk/dsh-token-usage/issues"
+  },
+  "author": "hugoyee75-cmyk",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "token-usage",
+    "usage-statistics",
+    "observability"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  }
+}
