@@ -8,12 +8,12 @@
 
 A DeepSeek Harness plugin that records every model call that goes through DSH and gives you a Token usage panel in the sidebar.
 
-Once installed, you can answer questions like:
+Once installed, you can see the following metrics:
 
-- How many tokens did I spend today? Is this week's trend up or down?
-- Which model and which provider do I use most?
-- How good is my cache hit rate — am I paying to re-read the same input?
-- Which project or which subagent burns the most tokens?
+- Token totals for today, the last 7 days, and all time, plus the trend direction
+- Usage ranking by model and by provider
+- Cache hit rate — whether you are paying to re-read the same input
+- Token spend by project and by subagent
 
 The data comes from DSH's own session logs. The plugin sends no extra requests and uploads nothing.
 
@@ -281,6 +281,8 @@ No runtime dependencies, no `npm install` needed, no build step.
 
 Issues and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). For security reports, see [SECURITY.md](SECURITY.md).
+
+If this plugin is useful to you, a Star ⭐ is the most direct way to support the project.
 
 ## License
 
