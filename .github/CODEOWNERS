@@ -1,0 +1,30 @@
+# CODEOWNERS — 指定每个路径的负责人。
+#
+# 作用：当本仓库启用分支保护并勾选「Require review from Code Owners」后，
+# 任何改动到下列路径的 PR 都**必须由列出的负责人批准**，其他人无法自行合并。
+#
+# 这是「想改我的项目，必须先经我同意」这条规则的技术落点：
+# 公开仓库无法禁止 fork，但 fork 出来的改动只能通过 PR 回到本仓库，
+# 而任何 PR 都需要这里指定的负责人批准才能合并。
+#
+# 语法：<路径模式>  <GitHub 用户名或 @组织/团队>
+# 更多模式见 https://docs.github.com/repos/managing-your-work-on-github/about-code-owners
+
+# 默认：所有文件归仓库所有者，任何 PR 都需要其批准。
+*       @hugoyee75-cmyk
+
+# 核心运行时与自更新逻辑：改动会影响所有用户，单独强调。
+/index.js               @hugoyee75-cmyk
+/client.js              @hugoyee75-cmyk
+/src/                   @hugoyee75-cmyk
+
+# 打包与发布元数据：改错会让插件装不上或自更新失效。
+/package.json           @hugoyee75-cmyk
+/cordis.patch.yml       @hugoyee75-cmyk
+
+# CI 与发布流程：涉及仓库权限与发布，必须经手。
+/.github/               @hugoyee75-cmyk
+
+# 法律与安全文档。
+/LICENSE                @hugoyee75-cmyk
+/SECURITY.md            @hugoyee75-cmyk
