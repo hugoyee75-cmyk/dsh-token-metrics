@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Token Usage Stats",
+    "description": "Totals every model call routed through dsh, broken down by model, provider, day, and session, with a dedicated stats panel in the sidebar."
+  }
+}

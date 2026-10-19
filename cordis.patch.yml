@@ -1,0 +1,28 @@
+# 注册 Token 用量统计插件。
+#
+# Host 侧监听 session/event 与 llm/stream，把每次模型调用的 usage 聚合进
+# 插件自己的数据文件；Client 侧提供侧边栏入口与统计页。
+#
+# 所有配置项都有内置默认值，这里不写 config，以免覆盖你自己在 profile 的
+# cordis.patch.yml 里的设置（同 id 的 override 会替换整个 config）。
+#
+# 需要调整时，在你的 profile cordis.patch.yml 里加一条同 id 的 override：
+#
+#   - id: token-metrics
+#     config:
+#       flushDelayMs: 2000       # 落盘防抖，毫秒（250–60000）
+#       snapshotCacheMs: 3000    # 聚合快照缓存，毫秒（0–60000）；0 表示不缓存
+#       retentionDays: 400       # 按天分桶保留天数（0–3650）；0 表示不裁剪
+#       maxSessions: 500         # 会话明细上限（0–5000，showSessions 打开时生效）
+#       maxTrendSeries: 6        # 趋势图最多画几条模型曲线（1–20），多出的聚合成「其他」
+#       maxSeenEntries: 200000   # 去重表上限（1000–2000000）
+#       showSessions: false      # 是否展示「按会话」明细
+#       trackFailedAttempts: false  # 是否统计失败请求；适配器目前只上报全 0 usage，开启后仅见次数
+#       trackAccount: true       # 是否读取登录账号身份与余额（只读，不碰凭据）
+#       autoUpdate: true         # 是否启用自更新（检查版本、安装、热重载）
+#       watchFiles: false        # 监视包目录，改文件即热重载（开发用）
+#
+# 完整说明见 README.md 的「配置」一节。
+- insert:
+    - id: token-metrics
+      name: dsh-token-metrics
