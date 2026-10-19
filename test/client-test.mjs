@@ -851,6 +851,14 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   const opened = modalPanel.component({ t: modalPanel.options.inject().t, locale: 'zh' })
   const openText = textsOf(opened)
   check('检查后弹出结果弹窗', openText.includes('tu-modal'), openText.slice(-160))
+  // 回归：只做「检查更新」时，弹窗里绝不能出现更新进度。
+  // 历史 bug：checkUpdate 的状态替换漏了 phase 字段，它是 undefined，
+  // 而渲染条件是 `phase !== ''`，undefined 通过 → 冒出「正在热重载」。
+  check('检查更新的弹窗不含更新进度', openText.includes('tu-modal-progress') === false,
+    openText.slice(-200))
+  check('检查更新的弹窗不含热重载文案',
+    !openText.includes('正在热重载') && !openText.includes('正在下载') && !openText.includes('正在替换'),
+    openText.slice(-200))
   check('弹窗提示有新版本', openText.includes('发现新版本'), openText.slice(-200))
   check('弹窗给出更新按钮', openText.includes('更新并重载'), openText.slice(-200))
   check('弹窗显示版本号对比', openText.includes('0.3.0'), openText.slice(-200))

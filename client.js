@@ -2188,6 +2188,10 @@ window.__ModuleLoader__.load({
             busy: '', available, latest, checked: true,
             error: String(body.error ?? ''),
             versionMismatch: body.versionMismatch === true,
+            // 保持与初始状态一致的字段形状。此前漏了 phase，导致它是
+            // undefined，而渲染条件 `phase !== ''` 对 undefined 为真，
+            // 于是「检查更新」的弹窗里会冒出「正在热重载」。
+            phase: '',
           })
           // 用弹窗告知结果，而不是把结果默默写到某个角落。
           setVersionDialog({
@@ -2990,6 +2994,9 @@ window.__ModuleLoader__.load({
         ? null
         : h('div', { className: 'tu-warn' }, t('integrityWarn'))
 
+      // 是否正处于更新流程中（决定弹窗是否显示三段式进度）。
+      const isUpdating = ['download', 'install', 'activate'].includes(updateState.phase)
+
       // 版本检查结果弹窗：有新版给「更新并重载」，无新版给「知道了」。
       const versionModal = versionDialog === null ? null : h('div', {
         className: 'tu-modal-backdrop',
@@ -3021,7 +3028,9 @@ window.__ModuleLoader__.load({
         )
         : null,
       // 更新中的阶段提示：下载 / 替换 / 重载，三段式。
-      updateState.phase !== ''
+      // 条件要严：phase 必须是已知阶段之一。只检查 `phase !== ''` 会把
+      // undefined 也放进来（历史 bug：检查更新的弹窗里冒出「正在热重载」）。
+      isUpdating
         ? h('div', { className: 'tu-modal-progress' },
           h('div', { className: 'tu-scan-bar' },
             h('div', { className: 'tu-scan-fill', 'data-indeterminate': 'true' }),
@@ -3039,7 +3048,9 @@ window.__ModuleLoader__.load({
           ? h('button', {
             type: 'button',
             className: 'tu-button tu-button-primary',
-            onClick: () => { setVersionDialog(null); void applyUpdate() },
+            // 不关弹窗：更新过程要在弹窗里显示三段式进度，
+            // 关掉就没有任何地方能看到「正在做什么」了。
+            onClick: () => { void applyUpdate() },
           }, t('version.dialogUpdate'))
           : null,
         h('button', {

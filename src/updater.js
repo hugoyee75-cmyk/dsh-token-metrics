@@ -109,6 +109,67 @@ export async function renameWithRetry(from, to) {
   }
 }
 
+/**
+ * 解析 GitHub 的 releases.atom。
+ *
+ * Atom feed 里每条 entry 依次给出 tag 名（`<title>`）、发布时间
+ * （`<updated>`）和 release 说明（`<content>`）。feed 已按时间倒序，
+ * 因此只取第一条。
+ *
+ * 注意 `<content>` 里是**转义后**的 HTML（`&lt;p&gt;`），必须先把实体
+ * 反转义成真正的标签，再剥标签；顺序反了会把 `&lt;p&gt;` 当正文残留。
+ *
+ * @returns {{version: string, notes: string, publishedAt: number}|undefined}
+ */
+export function parseReleaseAtom(xml) {
+  if (typeof xml !== 'string' || !xml.includes('<entry>')) return undefined
+  const entry = /<entry>([\s\S]*?)<\/entry>/.exec(xml)?.[1]
+  if (entry === undefined) return undefined
+  const pick = (tag) => {
+    const match = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`).exec(entry)
+    return match === null ? '' : match[1]
+  }
+  const version = pick('title').trim().replace(/^v/, '')
+  if (parseVersion(version) === null) return undefined
+  const notes = pick('content')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { version, notes, publishedAt: Date.parse(pick('updated').trim()) || 0 }
+}
+
+/**
+ * 用 `git ls-remote` 列出 tag，作为最后兜底。
+ *
+ * GitHub REST API 对匿名请求每小时只给 60 次，用户频繁点「检查更新」
+ * 很容易打满。git 协议没有这个限制；它只给 tag 名（拿不到 release
+ * 说明），但「有没有新版本」这个核心问题依然能回答。
+ */
+export async function listTagsViaGit(repo, signal) {
+  const { execFile } = await import('node:child_process')
+  const url = `https://github.com/${repo.owner}/${repo.repo}.git`
+  const stdout = await new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      ['ls-remote', '--tags', '--refs', url],
+      { timeout: 12_000, signal, maxBuffer: 1024 * 1024 },
+      (error, out) => (error ? reject(error) : resolve(String(out ?? ''))),
+    )
+  })
+  return stdout
+    .split('\n')
+    .map((line) => /refs\/tags\/(v?[0-9][^\s]*)$/.exec(line.trim())?.[1])
+    .filter((tag) => tag !== undefined)
+    .map((tag) => tag.replace(/^v/, ''))
+    .filter((tag) => parseVersion(tag) !== null)
+    .sort(compareVersions)
+}
+
 /** 文件 sha256。 */
 function sha256File(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
@@ -239,6 +300,8 @@ export class PluginUpdater {
       latest: this.latest?.version ?? '',
       available,
       notes: this.latest?.notes ?? '',
+      // 版本信息来自哪条通道：api / atom / git。便于排查限流等情况。
+      sourceChannel: this.latest?.channel ?? '',
       publishedAt: this.latest?.publishedAt ?? 0,
       checkedAt: this.checkedAt,
       applying: this.applying,
@@ -265,31 +328,56 @@ export class PluginUpdater {
     }
 
     const headers = { accept: 'application/vnd.github+json', 'user-agent': 'dsh-token-metrics' }
-    const base = `https://api.github.com/repos/${repo.owner}/${repo.repo}`
+    const apiBase = `https://api.github.com/repos/${repo.owner}/${repo.repo}`
+    const webBase = `https://github.com/${repo.owner}/${repo.repo}`
 
     let version
     let notes = ''
     let publishedAt = 0
+    let channel = ''
+
+    // ① GitHub REST API：带完整说明，但匿名限流每小时 60 次。
     try {
-      const response = await fetchImpl(`${base}/releases/latest`, { headers, signal })
+      const response = await fetchImpl(`${apiBase}/releases/latest`, { headers, signal })
       if (response.ok) {
         const body = await response.json()
-        version = String(body.tag_name ?? body.name ?? '').replace(/^v/, '')
-        notes = String(body.body ?? '')
-        publishedAt = Date.parse(body.published_at ?? '') || 0
+        const candidate = String(body.tag_name ?? body.name ?? '').replace(/^v/, '')
+        if (parseVersion(candidate) !== null) {
+          version = candidate
+          notes = String(body.body ?? '')
+          publishedAt = Date.parse(body.published_at ?? '') || 0
+          channel = 'api'
+        }
       }
-    } catch { /* 退回 tags */ }
+    } catch { /* 继续回退 */ }
 
-    if (version === undefined || parseVersion(version) === null) {
+    // ② releases.atom：不受 API 限流，且带 release 标题与说明。
+    //    限流情况下这是最实用的通道——既知道版本也拿得到说明。
+    if (version === undefined) {
       try {
-        const response = await fetchImpl(`${base}/tags?per_page=30`, { headers, signal })
+        const response = await fetchImpl(`${webBase}/releases.atom`, {
+          headers: { accept: 'application/atom+xml', 'user-agent': 'dsh-token-metrics' },
+          signal,
+        })
         if (response.ok) {
-          const body = await response.json()
-          const candidates = (Array.isArray(body) ? body : [])
-            .map((tag) => String(tag.name ?? '').replace(/^v/, ''))
-            .filter((tag) => parseVersion(tag) !== null)
-          candidates.sort(compareVersions)
+          const parsed = parseReleaseAtom(await response.text())
+          if (parsed !== undefined) {
+            version = parsed.version
+            notes = parsed.notes
+            publishedAt = parsed.publishedAt
+            channel = 'atom'
+          }
+        }
+      } catch { /* 继续回退 */ }
+    }
+
+    // ③ git 协议：只给 tag 名，拿不到说明；但完全不限流，作为最后兜底。
+    if (version === undefined) {
+      try {
+        const candidates = await listTagsViaGit(repo, signal)
+        if (candidates.length > 0) {
           version = candidates[candidates.length - 1]
+          channel = 'git'
         }
       } catch (error) {
         this.error = `查询更新失败：${error?.message ?? error}`
@@ -297,12 +385,12 @@ export class PluginUpdater {
       }
     }
 
-    if (version === undefined || parseVersion(version) === null) {
+    if (version === undefined) {
       this.error = '没有找到可用的版本号'
       return this.status()
     }
     this.error = ''
-    this.latest = { version, notes, publishedAt }
+    this.latest = { version, notes, publishedAt, channel }
     this.checkedAt = Date.now()
     return this.status()
   }
