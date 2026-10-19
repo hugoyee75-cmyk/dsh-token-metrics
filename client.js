@@ -162,6 +162,9 @@ window.__ModuleLoader__.load({
       'version.success': '更新成功',
       'version.successBody': '已升级到',
       'version.noNotes': '（本次无更新说明）',
+      'version.reinstallTitle': '需要重新安装',
+      'version.reinstallHint': '插件管理 → 卸载本插件 → 重新安装最新版本。统计数据保存在本地，卸载不会丢失。',
+      'version.reinstallOk': '我知道了',
       'version.checkFailed': '检查更新失败',
       'version.reloading': '重载中…',
       'version.notes': '更新说明',
@@ -310,6 +313,9 @@ window.__ModuleLoader__.load({
       'version.success': 'Update complete',
       'version.successBody': 'Upgraded to',
       'version.noNotes': '(no release notes)',
+      'version.reinstallTitle': 'Reinstall required',
+      'version.reinstallHint': 'Plugins → uninstall this plugin → install the latest version again. Your usage data is stored locally and survives uninstall.',
+      'version.reinstallOk': 'Got it',
       'version.checkFailed': 'Update check failed',
       'version.reloading': 'Reloading…',
       'version.notes': 'Release notes',
@@ -2236,6 +2242,7 @@ window.__ModuleLoader__.load({
           // 轮询新版本落地：重载完成后 buildId 与版本号都会变，
           // 用它们确认升级真的生效，而不是凭「已受理」就当成功。
           const before = pluginVersion
+          const startedAt = Date.now()
           setUpdateState((previous) => ({ ...previous, phase: 'download' }))
           for (let attempt = 0; attempt < 20; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 1500))
@@ -2252,6 +2259,21 @@ window.__ModuleLoader__.load({
               })
               if (probe.ok) {
                 const info = await probe.json()
+                // 失败信息只在 status 里：路由先回 202，失败不会体现在响应上。
+                // 一旦看到失败就停止轮询并如实展示，尤其「需重装」要给出指引。
+                const failure = info?.updater?.lastFailure
+                if (failure !== undefined && failure !== null && (failure.at ?? 0) > startedAt) {
+                  setUpdateState((previous) => ({
+                    ...previous, busy: '', phase: '',
+                    error: failure.message ?? '更新失败',
+                  }))
+                  setVersionDialog({
+                    kind: failure.reinstall === true ? 'reinstall' : 'error',
+                    latest: '',
+                    message: failure.message ?? '',
+                  })
+                  return
+                }
                 if (String(info.version ?? '') !== before) {
                   const nextVersion = String(info.version)
                   setPluginVersion(nextVersion)
@@ -3047,15 +3069,23 @@ window.__ModuleLoader__.load({
         'aria-modal': 'true',
         onClick: (event) => event.stopPropagation(),
       },
-      h('div', { className: 'tu-modal-title' }, t('version.checkTitle')),
+      h('div', { className: 'tu-modal-title' },
+        versionDialog.kind === 'reinstall' ? t('version.reinstallTitle') : t('version.checkTitle')),
       h('div', { className: 'tu-modal-body' },
         versionDialog.kind === 'new'
           ? `${t('version.newBody')}（${pluginVersion} → ${versionDialog.latest}）`
           : versionDialog.kind === 'success'
             ? `${t('version.success')}：${t('version.successBody')} ${versionDialog.latest}`
-            : versionDialog.kind === 'same'
-              ? `${t('version.sameBody')}（${pluginVersion}）`
-              : `${t('version.checkFailed')}：${versionDialog.message}`),
+            : versionDialog.kind === 'reinstall'
+              // 跨版本差异过大时，自动升级会被拒绝；这里给出可执行的操作路径，
+              // 而不是让用户反复重试或去翻日志。
+              ? `${versionDialog.message}`
+              : versionDialog.kind === 'same'
+                ? `${t('version.sameBody')}（${pluginVersion}）`
+                : `${t('version.checkFailed')}：${versionDialog.message}`),
+      versionDialog.kind === 'reinstall'
+        ? h('p', { className: 'tu-hint tu-reinstall-hint' }, t('version.reinstallHint'))
+        : null,
       // 更新说明：有就滚动展示，没有就明确写「无」，不留空白让人猜。
       versionDialog.kind === 'new'
         ? h('div', { className: 'tu-modal-notes' },
@@ -3096,7 +3126,9 @@ window.__ModuleLoader__.load({
           type: 'button',
           className: 'tu-button',
           onClick: () => setVersionDialog(null),
-        }, versionDialog.kind === 'new' ? t('version.dialogLater') : t('version.dialogOk')),
+        }, versionDialog.kind === 'new'
+          ? t('version.dialogLater')
+          : versionDialog.kind === 'reinstall' ? t('version.reinstallOk') : t('version.dialogOk')),
         ),
       ))
 

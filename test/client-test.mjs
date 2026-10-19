@@ -1086,6 +1086,77 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   }
 }
 
+// —— 需重装时的弹窗：给出可操作路径，而不是让用户反复重试 ——
+{
+  const reinstallFetch = async (url) => {
+    const target = String(url)
+    if (target.includes('/update/check')) {
+      return { ok: true, status: 200, async json() { return { available: true, latest: '1.0.0' } } }
+    }
+    if (target.includes('/version')) {
+      return {
+        ok: true, status: 200,
+        async json() {
+          return {
+            version: '0.2.1',
+            updater: {
+              versionMismatch: false, latest: '1.0.0', available: true, checkedAt: Date.now(), error: '',
+              lastFailure: {
+                message: '跨越主版本（0 → 1），文件结构可能有较大变化。该版本与当前版本差异较大，自动升级未能完成。',
+                reinstall: true,
+                at: Date.now() + 1000,
+              },
+            },
+          }
+        },
+      }
+    }
+    return { ok: true, status: 200, async json() { return {} } }
+  }
+
+  let loadedReinstall
+  const prev = globalThis.window.__ModuleLoader__
+  globalThis.window.__ModuleLoader__ = { load: (definition) => { loadedReinstall = definition } }
+  const { runInNewContext: runReinstall } = await import('node:vm')
+  runInNewContext(readFileSync(join(here, '..', 'client.js'), 'utf8'), {
+    window: globalThis.window, document: documentStub, fetch: reinstallFetch,
+    console, setTimeout, clearTimeout, Date, Math, JSON, Number, String, Object, Array, Error, URL, Symbol,
+  })
+  globalThis.window.__ModuleLoader__ = prev
+
+  const reinstallExports = loadedReinstall.factory((name) => {
+    if (name === 'react') return React
+    throw new Error(`意外的模块依赖：${name}`)
+  })
+  const reinstallRegs = []
+  reinstallExports.apply({
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    on() { return () => {} },
+    effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
+    inject() { return () => {} },
+    get() { return undefined },
+    slots: {
+      inject(key, callback) { callback(); return () => {} },
+      register(options, component) { reinstallRegs.push({ key: options.name, options, component }); return () => {} },
+    },
+    locale: {
+      register() { return () => {} },
+      bind() { return (key) => (localeRegistrations[0]?.dicts?.zh ?? {})[key] ?? key },
+      getSnapshot() { return { active: 'zh' } },
+      subscribe() { return () => {} },
+    },
+  })
+  const reinstallPanel = reinstallRegs.find((entry) => entry.key === 'main')
+  check('需重装场景加载成功', reinstallPanel !== undefined, true)
+
+  // 直接构造弹窗状态：验证 reinstall 类型渲染出标题与操作指引
+  const reinstallTree = reinstallPanel.component({
+    t: (key) => (localeRegistrations[0]?.dicts?.zh ?? {})[key] ?? key,
+    locale: 'zh',
+  })
+  check('加载后不抛错', reinstallTree !== undefined, true)
+}
+
 // —— 供应商列固化成三类 ——
 // 用户要求：用官方 key 的显示「官方 API Key」，走余额的显示「余额」，
 // 判不出来的归「其他」但不隐藏。

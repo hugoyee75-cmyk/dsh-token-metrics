@@ -170,6 +170,57 @@ export async function listTagsViaGit(repo, signal) {
     .sort(compareVersions)
 }
 
+/**
+ * 评估一次升级的「跨度」，用于决定是否需要用户重装。
+ *
+ * 跨版本升级本身是支持的：只要两版的文件布局兼容，直接替换即可。
+ * 但差异过大时（例如主版本号跳跃、或声明了不兼容的最低版本），
+ * 直接覆盖有风险——新代码可能依赖旧包里不存在的文件，或旧的残留文件
+ * 干扰新逻辑。这时应当**明确告诉用户卸载重装**，而不是硬试一次再回滚。
+ *
+ * @param {string} from 当前运行的版本
+ * @param {string} to 目标版本
+ * @param {object} [stagedManifest] 目标版本的 package.json（可选）
+ * @returns {{level: 'ok'|'risky'|'incompatible', reason: string}}
+ */
+export function assessUpgradeSpan(from, to, stagedManifest) {
+  const a = parseVersion(from)
+  const b = parseVersion(to)
+  if (a === null || b === null) {
+    return { level: 'risky', reason: '版本号无法解析，无法评估兼容性' }
+  }
+  // 目标版本自己声明了最低可升级版本时，以它为准——这是包作者的明确意图。
+  const minSupported = stagedManifest?.dsh?.minSupportedVersion
+  if (typeof minSupported === 'string' && parseVersion(minSupported) !== null) {
+    if (compareVersions(from, minSupported) < 0) {
+      return {
+        level: 'incompatible',
+        reason: `目标版本要求至少从 ${minSupported} 升级，当前是 ${from}`,
+      }
+    }
+  }
+  // 主版本号跨过 -> 结构性变更风险高
+  if (b.major !== a.major) {
+    return {
+      level: 'risky',
+      reason: `跨越主版本（${a.major} → ${b.major}），文件结构可能有较大变化`,
+    }
+  }
+  // 跨多个次版本（>=3）-> 累计变更较多
+  if (b.minor - a.minor >= 3) {
+    return {
+      level: 'risky',
+      reason: `跨越 ${b.minor - a.minor} 个次版本，累计变更较多`,
+    }
+  }
+  return { level: 'ok', reason: '' }
+}
+
+/** 跨版本升级失败时给用户的建议文案（供 UI 原样展示）。 */
+export const REINSTALL_ADVICE =
+  '该版本与当前版本差异较大，自动升级未能完成。请先在插件管理里卸载本插件，'
+  + '再重新安装最新版本；你的统计数据保存在 $DSH_HOME/token-metrics 下，卸载不会丢失。'
+
 /** 文件 sha256。 */
 function sha256File(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
@@ -306,6 +357,13 @@ export class PluginUpdater {
       checkedAt: this.checkedAt,
       applying: this.applying,
       error: this.error,
+      // 最近一次失败的详情（含是否需重装）。apply 是异步的、路由先回 202，
+      // 前端只能靠轮询 status 得知结果，所以失败必须留在这里。
+      lastFailure: this.lastFailure ?? null,
+      // 升级跨度评估：ok 可直接升，risky 建议留意，incompatible 要求重装。
+      span: this.latest === undefined
+        ? undefined
+        : assessUpgradeSpan(current, this.latest.version, this.latest.manifest),
       source: this.repository(),
     }
   }
@@ -390,7 +448,7 @@ export class PluginUpdater {
       return this.status()
     }
     this.error = ''
-    this.latest = { version, notes, publishedAt, channel }
+    this.latest = { version, notes, publishedAt, channel, manifest: undefined }
     this.checkedAt = Date.now()
     return this.status()
   }
@@ -410,6 +468,13 @@ export class PluginUpdater {
     const repo = this.repository()
     if (repo === null) throw new Error('没有可用的 repository')
 
+    // 升级前先评估跨度。这里只能判断「本地已知」的部分（主/次版本跨度）；
+    // 目标包声明的 minSupportedVersion 要等下载到 manifest 才知道，
+    // 因此在 #extractAndInstall 里再判定一次。
+    const current = this.deps.runningVersion ?? this.currentVersion()
+    const preSpan = assessUpgradeSpan(current, target)
+    const fromVersion = current
+
     this.applying = true
     const fetchImpl = this.deps.fetchImpl
     let backupMade = false
@@ -427,11 +492,11 @@ export class PluginUpdater {
           signal,
         })
         if (!alt.ok) throw new Error(`下载失败：HTTP ${response.status}`)
-        return await this.#extractAndInstall(await alt.arrayBuffer(), target, activate, repo)
+        return await this.#extractAndInstall(await alt.arrayBuffer(), target, activate, repo, fromVersion)
       }
-      return await this.#extractAndInstall(await response.arrayBuffer(), target, activate, repo)
+      return await this.#extractAndInstall(await response.arrayBuffer(), target, activate, repo, fromVersion)
     } catch (error) {
-      this.error = error?.message ?? String(error)
+      let message = error?.message ?? String(error)
       if (backupMade) {
         try {
           restoreBackup(this.backupDir, this.deps.pkgDir)
@@ -440,6 +505,15 @@ export class PluginUpdater {
           this.deps.log?.(`token-metrics: 回滚也失败：${restoreError?.message ?? restoreError}`)
         }
       }
+      // 跨度较大时失败，多半是文件结构不兼容——直接给出重装指引，
+      // 比让用户反复重试或去翻日志有用得多。
+      if (preSpan.level === 'risky' && error?.reinstall !== true) {
+        message = `${message}（${preSpan.reason}）${REINSTALL_ADVICE}`
+        error.reinstall = true
+      }
+      this.error = message
+      // 保留原始 error 对象（含 code/reinstall），只是补上诊断信息
+      if (error instanceof Error) error.message = message
       throw error
     } finally {
       this.applying = false
@@ -447,13 +521,23 @@ export class PluginUpdater {
   }
 
   /** 解压 tarball、安装、触发重载。 */
-  async #extractAndInstall(buffer, target, activate, repo) {
+  async #extractAndInstall(buffer, target, activate, repo, fromVersion) {
     const files = await extractTarGz(buffer, this.stageDir, `${repo.repo}-${target}`)
     const manifestPath = join(this.stageDir, 'package.json')
     if (!existsSync(manifestPath)) throw new Error('下载的包里没有 package.json')
     const staged = JSON.parse(readFileSync(manifestPath, 'utf8'))
     if (String(staged.version ?? '') !== target) {
       throw new Error(`版本不符：期望 ${target}，包内声明 ${String(staged.version)}`)
+    }
+
+    // 拿到目标包的 manifest 后做完整跨度判定：它可能声明了最低可升级版本。
+    // 明确不兼容时直接拒绝，**不动磁盘**，并给出「卸载重装」的指引。
+    const fullSpan = assessUpgradeSpan(fromVersion, target, staged)
+    if (fullSpan.level === 'incompatible') {
+      const error = new Error(`${fullSpan.reason}。${REINSTALL_ADVICE}`)
+      error.code = 'reinstall-required'
+      error.reinstall = true
+      throw error
     }
 
     // 备份当前版本，然后安装新文件

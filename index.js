@@ -1831,6 +1831,13 @@ export function apply(ctx, rawConfig) {
                   })
                   .catch((error) => {
                     logger?.warn?.(`token-metrics: 更新失败（${error?.message ?? error}）`)
+                    // 202 已经发出去了，前端只能靠轮询 version 得知结果。
+                    // 把失败原因与「需重装」标记留在 status 里，让页面能展示。
+                    updater.lastFailure = {
+                      message: error?.message ?? String(error),
+                      reinstall: error?.reinstall === true,
+                      at: Date.now(),
+                    }
                   })
               }, 50)
               return

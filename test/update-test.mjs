@@ -18,6 +18,7 @@ import {
   PluginUpdater, backupPackage, compareVersions, extractTarGz,
   installStaged, listPackageFiles, parseRepository, parseVersion,
   parseReleaseAtom, renameWithRetry, restoreBackup,
+  assessUpgradeSpan, REINSTALL_ADVICE,
 } from '../src/updater.js'
 import { isReloading, packageCacheKeys, packageUrlOf, entryUrlOf } from '../src/reload.js'
 
@@ -211,6 +212,66 @@ check('清单不含 node_modules', packageFiles.some((f) => f.startsWith('node_m
 check('清单不含 .git', packageFiles.some((f) => f.startsWith('.git')), false)
 check('清单含源码', packageFiles.includes('index.js'), true)
 rmSync(listHome, { recursive: true, force: true })
+
+//#endregion
+
+//#region 跨版本升级：跨度评估与重装指引
+
+// 跨版本升级是支持的，但差异过大时应当明确要求重装，
+// 而不是硬试一次、失败回滚，再让用户反复重试。
+{
+  check('补丁升级可直接进行', assessUpgradeSpan('0.2.1', '0.2.2').level, 'ok')
+  check('次版本升级可直接进行', assessUpgradeSpan('0.2.1', '0.3.0').level, 'ok')
+  check('主版本跳跃标为 risky', assessUpgradeSpan('0.2.1', '1.0.0').level, 'risky')
+  check('跨 3 个次版本标为 risky', assessUpgradeSpan('0.2.1', '0.5.0').level, 'risky')
+  check('跨 2 个次版本仍可进行', assessUpgradeSpan('0.2.1', '0.3.9').level, 'ok')
+
+  // 包作者可以通过 minSupportedVersion 明确拒绝过旧的起点
+  const blocked = assessUpgradeSpan('0.1.0', '0.2.2', { dsh: { minSupportedVersion: '0.2.0' } })
+  check('低于最低支持版本标为 incompatible', blocked.level, 'incompatible')
+  check('不兼容时说明原因', blocked.reason.includes('0.2.0'), true)
+  const allowed = assessUpgradeSpan('0.2.1', '0.2.2', { dsh: { minSupportedVersion: '0.2.0' } })
+  check('满足最低版本时放行', allowed.level, 'ok')
+
+  // 无法解析的版本号要保守处理，不当作安全
+  check('无法解析时保守处理', assessUpgradeSpan('abc', '0.2.2').level, 'risky')
+
+  check('重装指引提到卸载', REINSTALL_ADVICE.includes('卸载'), true)
+  check('重装指引说明数据不会丢', REINSTALL_ADVICE.includes('不会丢失'), true)
+
+  // incompatible 时 apply 必须直接拒绝，且带上 reinstall 标记
+  const blockHome = mkdtempSync(join(tmpdir(), 'dtu-block-'))
+  const blockPkg = join(blockHome, 'pkg')
+  mkdirSync(blockPkg, { recursive: true })
+  writeFileSync(join(blockPkg, 'index.js'), 'V1')
+  writeFileSync(join(blockPkg, 'package.json'), JSON.stringify({
+    name: 'dsh-token-metrics', version: '0.1.0', repository: 'github:foo/bar',
+  }))
+  const blockingUpdater = new PluginUpdater({
+    pkgDir: blockPkg, dataDir: join(blockHome, 'data'), runningVersion: '0.1.0',
+    repository: 'github:foo/bar',
+    fetchImpl: async () => ({
+      ok: true, status: 200,
+      async arrayBuffer() {
+        return makeTar([
+          { name: 'bar-0.2.2/package.json', content: JSON.stringify({ version: '0.2.2', dsh: { minSupportedVersion: '0.2.0' } }) },
+          { name: 'bar-0.2.2/index.js', content: 'NEW' },
+        ])
+      },
+    }),
+  })
+  let blockError
+  try {
+    await blockingUpdater.apply({ version: '0.2.2' })
+  } catch (error) {
+    blockError = error
+  }
+  check('不兼容升级被拒绝', blockError !== undefined, true)
+  check('拒绝时带 reinstall 标记', blockError?.reinstall, true)
+  check('拒绝时磁盘未被改动', readFileSync(join(blockPkg, 'index.js'), 'utf8'), 'V1')
+  check('拒绝信息含重装指引', String(blockError?.message ?? '').includes('卸载'), true)
+  rmSync(blockHome, { recursive: true, force: true })
+}
 
 //#endregion
 
