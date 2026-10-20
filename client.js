@@ -241,6 +241,7 @@ window.__ModuleLoader__.load({
       'quota.left': '剩余',
       'quota.resetsIn': '后重置',
       'quota.resetAt': '重置于',
+      'quota.expired': '数据已过期，请刷新',
       'unit.day': '天',
       'unit.hour': '小时',
       'unit.minute': '分',
@@ -259,6 +260,8 @@ window.__ModuleLoader__.load({
       'balance.discovered': '自动发现的站点',
       'balance.adopt': '添加',
       'balance.probe': '查询余额',
+      'balance.probeQuota': '刷新用量',
+      'balance.probeQuotaHint': '订阅制按时间窗口限流，没有「余额」概念，这里刷新的是各窗口的用量',
       'balance.probing': '查询中…',
       'balance.remove': '移除',
       'balance.remaining': '剩余',
@@ -581,6 +584,7 @@ window.__ModuleLoader__.load({
       'quota.left': 'left',
       'quota.resetsIn': 'until reset',
       'quota.resetAt': 'resets',
+      'quota.expired': 'stale — refresh',
       'unit.day': 'd',
       'unit.hour': 'h',
       'unit.minute': 'm',
@@ -599,6 +603,8 @@ window.__ModuleLoader__.load({
       'balance.discovered': 'Discovered endpoints',
       'balance.adopt': 'Add',
       'balance.probe': 'Check balance',
+      'balance.probeQuota': 'Refresh usage',
+      'balance.probeQuotaHint': 'Subscription plans are rate-limited by time window; this refreshes per-window usage, not a balance',
       'balance.probing': 'Checking…',
       'balance.remove': 'Remove',
       'balance.remaining': 'Remaining',
@@ -3443,8 +3449,8 @@ window.__ModuleLoader__.load({
           else relative = `${minutes}${t('unit.minute')}`
           resetText = `${relative} ${t('quota.resetsIn')}`
         } else {
-          // 已过重置点：说明数据过期，提示刷新
-          resetText = t('quota.resetAt')
+          // 已过重置点：数据已过期，提示重新查询（而不是留一个「重置于」空标签）
+          resetText = t('quota.expired')
         }
       }
 
@@ -5489,9 +5495,14 @@ window.__ModuleLoader__.load({
           const modelCount = Array.isArray(site.models) ? site.models.length : 0
           const hasQuota = quotas.length > 0
           const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex'])
+          // 订阅型判定：有配额数据、或平台本身是订阅制、或明确回报「无订阅」。
+          // 最后一条很关键：GLM 没订阅时也属于订阅平台，按钮该说「刷新用量」
+          // 而不是「查询余额」。
           const looksLikeQuota = hasQuota
+            || site.noPlan === true
             || (balance?.provider !== undefined && QUOTA_PLATFORMS.has(balance.provider))
             || (balance === undefined && QUOTA_PLATFORMS.has(site.provider))
+            || QUOTA_PLATFORMS.has(site.provider)
 
           return h('div', { key: site.id, className: 'tu-supcard' },
             // ── 左：名称 / 地址 / 模型数 ──
@@ -5574,8 +5585,12 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button', className: 'tu-btn tu-btn-ghost',
                 disabled: supplierBusy === site.id,
+                title: looksLikeQuota ? t('balance.probeQuotaHint') : undefined,
                 onClick: () => { void probeSite(site.id) },
-              }, supplierBusy === site.id ? t('balance.probing') : t('balance.probe')),
+              }, supplierBusy === site.id
+                ? t('balance.probing')
+                // 订阅制没有「余额」概念，说「刷新用量」才准确
+                : (looksLikeQuota ? t('balance.probeQuota') : t('balance.probe'))),
               h('button', {
                 type: 'button', className: 'tu-btn tu-btn-ghost',
                 onClick: () => setSupplierForm({
