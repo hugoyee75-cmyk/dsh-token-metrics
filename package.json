@@ -1,9 +1,9 @@
 {
   "name": "dsh-token-metrics",
-  "version": "0.3.0",
+  "version": "3.0.0",
   "private": false,
   "type": "module",
-  "description": "统计所有经过 DeepSeek Harness 的模型调用 Token 用量：按模型/供应商/项目/来源/账号/日期拆分，带缓存命中率、趋势图表与自更新。",
+  "description": "统计所有经过 DeepSeek Harness 的模型调用：Token 用量、成本核算、供应商余额与配额，带趋势图表、右下角告警与自更新。",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -65,6 +65,8 @@
     "deepseek",
     "token-usage",
     "usage-statistics",
+    "cost-tracking",
+    "balance-monitor",
     "observability"
   ],
   "engines": {

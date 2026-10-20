@@ -97,6 +97,10 @@ plugin_manager install_bundle /path/to/dsh-token-metrics
 | `trackAccount` | `true` | — | 是否读取登录账号身份与余额（只读，不碰凭据） |
 | `autoUpdate` | `true` | — | 是否启用自更新 |
 | `watchFiles` | `false` | — | 监视包目录，改文件即热重载。开发用 |
+| `modelAliases` | `{}` | — | 模型别名映射，把 provider 上报的内部代号转成真实模型名 |
+| `alertThresholds.balanceLowUsd` | `5` | 0–1e6 | 余额低于此值（美元）时通知；`0` 关闭 |
+| `alertThresholds.quotaLowPercent` | `10` | 0–100 | 配额窗口剩余低于此百分比时通知；`0` 关闭 |
+| `alertThresholds.quotaResetSoonMinutes` | `10` | — | 配额即将重置的提前量（分钟）|
 
 ## HTTP 接口
 
@@ -390,39 +394,115 @@ LiteLLM 里同一个模型会挂在多个渠道下，价格能差几十倍（`co
 
 从 `open.er-api.com` 拉取实时 USD/CNY，缓存在 `fx.json`；拉取失败沿用上次的值，再失败用内置的 7.2。
 
-## 供应商余额
+## 供应商管理
 
-「明细视图 → 供应商余额」标签页，用于查看第三方中转站的余额与套餐额度。
+顶部「供应商」页签，管理第三方中转站与官方平台的余额、可用模型，并可一键写入
+DSH 模型配置。
 
-### 自动发现
+### 添加供应商
 
-打开页面时会读取 DSH 里已配置的 provider，把它们的 `baseURL` 列出来供一键添加
-（`/v1` 会被自动剥离，因为余额接口在站点根路径下）。实测能直接识别出 profile
-里配置的中转站。
+先选「服务」，地址与协议会自动填好——比手抄 `baseURL` 可靠，也避免把
+Anthropic 的地址配成 OpenAI 协议这类错误。
 
-### 余额探测
+内置 **32 个预设**，按「国内 → 国际 → 自定义」排序：
 
-按顺序尝试 new-api 与 one-api 的约定端点，第一个能解析出数字的就采用：
-
-| 端点 | 语义 |
+| 分类 | 包含 |
 | --- | --- |
-| `/api/user/self` | new-api：`quota` 以 500000 为 1 美元 |
-| `/v1/dashboard/billing/subscription` | one-api：`hard_limit_usd` |
-| `/dashboard/billing/subscription` | one-api 旧路径 |
+| 国内模型 | DeepSeek、Kimi、智谱 GLM、MiniMax、阿里百炼、火山方舟、百度千帆、腾讯混元、百川、阶跃星辰、SiliconFlow |
+| 国内 Coding Plan | 智谱、Kimi、MiniMax、阿里、火山 |
+| 国际 | OpenAI、Anthropic、Gemini、xAI、Groq、Mistral、Together、Fireworks、DeepInfra、Cerebras、OpenRouter、Novita |
+| 自定义中转 | Sub2API、new-api、one-api、不查余额 |
 
-拿到额度与用量后，页面按「已用 / 总额度」画进度条，剩余不足 20% 转黄、
-不足 5% 转红。只知道剩余金额时退化为纯数字，不画假进度。
+选中服务后会标注该平台的能力：余额能否用 API key 查询、需要什么凭据。
+
+### 余额与配额查询
+
+两类数据分开呈现，语义不同：
+
+| 类型 | 计费方式 | 展示 |
+| --- | --- | --- |
+| 余额型 | 预充值，按量扣减 | `余额 · USD $60.09`，点击可切换 RMB |
+| 订阅制 | 按时间窗口限流 | 进度条 + `剩余 60%` + `2h 15m 后重置` |
+
+余额点击可在 USD / RMB 之间切换；CNY 余额在 USD 模式下按实时汇率换算，
+不会出现「人民币数字配美元标签」。
+
+### 余额接口
+
+中转站按网关类型区分，**从源头决定用哪个接口**，不做盲目探测：
+
+| 类型 | 端点 | 字段 |
+| --- | --- | --- |
+| Sub2API | `/v1/usage` | `balance`（直接是美元）|
+| new-api | `/api/user/self` | `quota`（÷500000 换算）|
+| one-api | `/dashboard/billing/subscription` | `hard_limit_usd` |
+
+### 官方平台适配器
+
+按 `baseURL` 域名自动识别，走各自专用接口：
+
+| 平台 | 端点 | 类型 |
+| --- | --- | --- |
+| DeepSeek | `/user/balance` | 余额 |
+| OpenRouter | `/api/v1/credits` | 余额 |
+| SiliconFlow | `/v1/user/info` | 余额 |
+| Novita | `/v3/user/balance` | 余额 |
+| 阶跃星辰 | `/v1/accounts` | 余额 |
+| Kimi | `/coding/v1/usages` | 配额 |
+| 智谱 GLM | `/api/monitor/usage/quota/limit` | 配额 |
+| MiniMax | `/v1/usage` | 配额 |
+
+**明确不支持查询的平台**会给出原因而不是含糊失败：
+
+- **ChatGPT / Codex**：订阅额度绑定账号登录态，API key 请求实测返回 403
+- **Gemini**：Google 未提供公开的配额查询接口
+
+### 模型管理与同步
+
+「该服务的模型」支持从端点拉取列表（`GET {baseURL}/models`）并勾选，也可手填
+模型 ID。每个模型可设别名、上下文窗口、输出上限、思考档位、附件能力。
+
+「保存并同步」会把供应商写入 DSH 的 `llm-pi-ai` provider 配置，之后就能在
+模型选择器里直接选它的模型。
 
 ### 密钥安全
 
-**插件不保存任何密钥。** 页面只填「密钥环境变量名」或凭据引用名，探测时从
-环境变量或 DSH 凭据服务读取；已添加的站点写入 `balance.json` 时只保留白名单
-字段，任何形似 `apiKey`/`token`/`secret` 的字段都会被过滤掉。
+**插件不保存任何密钥。** 密钥经 DSH 凭据服务托管，写入配置时只留引用名
+（`apiKeyEnv`），任何形似 `apiKey`/`token`/`secret` 的字段都会被过滤掉。
 
-### 探测失败怎么办
+## 右下角通知
 
-失败原因会显示在对应站点卡片上（如 `HTTP 401`），可修正配置后重试。
-新增站点也支持完全手工填写，不依赖自动发现。
+关键状态变化通过右下角通知提醒，与 DSH 里其它插件的通知位置一致。
+
+### 通知机制
+
+用 SSE 长连接推送：DSH 没有通知服务，但 `webServer` 允许 handler 持有响应，
+这正好是 SSE 需要的。定期写注释心跳防空闲超时，客户端断开即清理。
+
+### 告警类型
+
+| 类型 | 触发条件 | 级别 |
+| --- | --- | --- |
+| 余额不足 | 余额 < 阈值（默认 $5）| 黄 |
+| 余额已用尽 | 余额 ≤ $0 | 红 |
+| 配额将尽 | 窗口剩余 < 阈值（默认 10%）| 黄 |
+| 配额已用尽 | 窗口剩余 = 0% | 红 |
+| 配额即将重置 | 已用尽且 10 分钟内恢复 | 绿 |
+| 查询失败 | key 过期 / 站点挂 / 地址错 | 红 |
+| 插件有新版本 | 检测到新版本 | 绿 |
+
+告警消失时会发「已恢复」通知（余额已恢复 / 配额已恢复 / 查询已恢复）。
+「即将重置」与「新版本」不是故障，消失时不提示。
+
+### 三层去重，避免重复弹
+
+| 层 | 机制 |
+| --- | --- |
+| 服务端冷却 | 余额/配额 30 分钟、查询失败 2 小时、新版本 24 小时 |
+| 状态落盘 | 告警状态写入 `alerts.json`，插件重载后不会重推 |
+| 客户端记忆 | `localStorage` 记 6 小时，页面刷新也不会重弹 |
+
+所有类型都有 60 秒硬下限，即使规则配 0 冷却也不允许短时间重复。
 
 ## 跨版本升级
 
@@ -505,6 +585,11 @@ React 驱动 factory，覆盖：slot 注册、文案双语键一致、样式仅�
 | `client.js` | Client 侧：侧边栏入口 + 统计页 |
 | `src/updater.js` | 自更新：版本检查、下载校验、备份回滚 |
 | `src/reload.js` | 热重载：模块缓存清理、fiber 替换 |
+| `src/pricing.js` | 成本核算：价目表拉取、汇率、模型匹配、补价与倍率 |
+| `src/balance.js` | 中转站余额探测：Sub2API / new-api / one-api |
+| `src/providers.js` | 官方平台适配器：按域名识别，走各自专用接口 |
+| `src/sync.js` | 把供应商写入 DSH 模型配置，密钥走凭据服务 |
+| `src/push.js` | SSE 推送与告警规则求值、冷却与去重 |
 | `cordis.patch.yml` | Bundle patch，插入插件行 |
 | `locale/{zh,en}.json` | Plugin Manager 里显示的标题与描述 |
 | `icon.svg` | 插件图标 |

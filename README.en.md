@@ -289,6 +289,141 @@ Both paths dedupe on `(sessionId, turn, step)`, so live increments and the start
 
 **The exit flush installs one listener only.** Hot reload calls `apply()` many times, and installing `beforeExit` each time would accumulate listeners and hold on to discarded trackers. There is now one global listener pointing at the current tracker.
 
+## Cost accounting
+
+Estimates cost from actual per-model token usage. Prices come from the public
+LiteLLM price table (~2800 chat models), fetched and cached on startup so it
+works offline; a built-in fallback table covers the first run before any fetch.
+
+- **Currency toggle**: the cost card shows USD by default; click to convert to RMB
+  at the live USD/CNY rate from `open.er-api.com` (cached, falls back to the last value)
+- **Cost column** in the detail table, following the current currency
+- **Manual pricing**: models that cannot be matched are listed as "unpriced" with
+  an entry point to set a price — never silently counted as zero
+- **Provider multiplier**: relays that mark up official prices can be configured
+
+### Picking the right channel price
+
+The same model appears under many channels in LiteLLM with prices differing by
+tens of times. The plugin ranks by channel trust (official direct > major cloud >
+no-prefix entries > aggregators) so the result matches the official price rather
+than landing on whichever reseller happens to be cheapest.
+
+## Provider management
+
+A dedicated "Providers" tab manages relay stations and official platforms:
+balances, available models, and one-click sync into the DSH model config.
+
+### Adding a provider
+
+Pick a **service** first — the URL and protocol fill in automatically, which avoids
+the classic mistake of pairing an Anthropic URL with the OpenAI protocol.
+
+**32 presets**, ordered China → international → custom:
+
+| Group | Includes |
+| --- | --- |
+| China models | DeepSeek, Kimi, Zhipu GLM, MiniMax, Alibaba Bailian, Volcano Ark, Baidu Qianfan, Tencent Hunyuan, Baichuan, StepFun, SiliconFlow |
+| China coding plans | Zhipu, Kimi, MiniMax, Alibaba, Volcano |
+| International | OpenAI, Anthropic, Gemini, xAI, Groq, Mistral, Together, Fireworks, DeepInfra, Cerebras, OpenRouter, Novita |
+| Custom relays | Sub2API, new-api, one-api, no balance query |
+
+After picking a service the form shows what that platform supports: whether its
+balance can be queried with an API key, and which credential it needs.
+
+### Balance vs subscription
+
+Two kinds of data, shown differently because they mean different things:
+
+| Kind | Billing model | Display |
+| --- | --- | --- |
+| Balance | Prepaid, deducted by usage | `Balance · USD $60.09`, click to switch to RMB |
+| Subscription | Rate-limited by time window | Progress bar + `60% left` + `resets in 2h 15m` |
+
+### Balance endpoints
+
+Relays are distinguished by gateway type, so the plugin hits the right endpoint
+immediately instead of probing blindly:
+
+| Type | Endpoint | Field |
+| --- | --- | --- |
+| Sub2API | `/v1/usage` | `balance` (already USD) |
+| new-api | `/api/user/self` | `quota` (divide by 500000) |
+| one-api | `/dashboard/billing/subscription` | `hard_limit_usd` |
+
+### Official platform adapters
+
+Detected by `baseURL` hostname, each hitting its own endpoint:
+
+| Platform | Endpoint | Kind |
+| --- | --- | --- |
+| DeepSeek | `/user/balance` | balance |
+| OpenRouter | `/api/v1/credits` | balance |
+| SiliconFlow | `/v1/user/info` | balance |
+| Novita | `/v3/user/balance` | balance |
+| StepFun | `/v1/accounts` | balance |
+| Kimi | `/coding/v1/usages` | quota |
+| Zhipu GLM | `/api/monitor/usage/quota/limit` | quota |
+| MiniMax | `/v1/usage` | quota |
+
+**Platforms that cannot be queried say so explicitly** instead of failing vaguely:
+
+- **ChatGPT / Codex**: subscription quota is bound to the account sign-in; API key
+  requests return 403 (verified)
+- **Gemini**: Google offers no public quota endpoint
+
+### Model sync
+
+The model list can be fetched from the endpoint (`GET {baseURL}/models`) and
+ticked, or IDs typed manually. Each model can carry an alias, context window,
+output limit, thinking levels, and attachment support.
+
+"Save and sync" writes the provider into the DSH `llm-pi-ai` config, after which
+its models appear in the model picker.
+
+### Key safety
+
+**The plugin never stores keys.** They live in DSH credentials; the config only
+carries a reference name (`apiKeyEnv`). Anything resembling
+`apiKey`/`token`/`secret` is filtered out before writing.
+
+## Bottom-right notifications
+
+State changes are surfaced as bottom-right toasts, the same place other DSH
+plugins use, so the user's attention does not have to move.
+
+### Mechanism
+
+Server-Sent Events: DSH has no notification service, but `webServer` lets a
+handler hold its response open, which is exactly what SSE needs. A comment
+heartbeat defeats idle timeouts; clients are dropped on disconnect.
+
+### Alert types
+
+| Type | Trigger | Level |
+| --- | --- | --- |
+| Low balance | balance < threshold (default $5) | warning |
+| Balance exhausted | balance ≤ $0 | error |
+| Quota running low | window left < threshold (default 10%) | warning |
+| Quota exhausted | window left = 0% | error |
+| Quota resetting soon | exhausted and resets within 10 min | ok |
+| Query failed | expired key / site down / wrong URL | error |
+| Plugin update | a newer version exists | ok |
+
+When an alert clears, a recovery toast is sent (balance recovered / quota
+recovered / query recovered). "Resetting soon" and "plugin update" are not
+failures, so their disappearance is silent.
+
+### Three layers against duplicate toasts
+
+| Layer | Mechanism |
+| --- | --- |
+| Server cooldown | balance/quota 30 min, query failure 2 h, update 24 h |
+| Persisted state | written to `alerts.json`, so a reload does not re-push |
+| Client memory | 6 h in `localStorage`, so a page refresh does not re-toast |
+
+Every type also has a 60-second hard floor, even when a rule asks for zero cooldown.
+
 ## Self-update and hot reload
 
 The plugin ships an update channel that does not depend on pnpm:

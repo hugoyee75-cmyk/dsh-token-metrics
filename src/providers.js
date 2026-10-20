@@ -72,35 +72,6 @@ export const PROVIDER_LABELS = {
   gemini: 'Google Gemini',
 }
 
-/**
- * 各家服务的预设连接信息。
- *
- * 让用户先选「服务」，再自动填好地址与协议——比让他手抄 baseURL 可靠得多，
- * 也避免把 Anthropic 的地址配成 OpenAI 协议这类低级错误。
- *
- * `keyHint` 说明该服务接受哪种凭据（有的只认账号登录态）。
- */
-export const SERVICE_PRESETS = [
-  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions', balance: 'admin', keyHint: 'sk- 开头；查询用量需要 sk-admin- 组织密钥' },
-  { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', balance: 'none', keyHint: 'sk-ant- 开头' },
-  { id: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'openai-completions', balance: 'none', keyHint: 'Google AI Studio 的 key' },
-  { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', balance: 'yes' },
-  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', balance: 'yes' },
-  { id: 'kimi', label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', balance: 'yes' },
-  { id: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
-  { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', balance: 'yes' },
-  { id: 'siliconflow', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', balance: 'yes' },
-  { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
-  { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
-  { id: 'codex', label: 'ChatGPT (Codex)', baseUrl: 'https://chatgpt.com/backend-api', api: 'openai-responses', balance: 'oauth', keyHint: '需账号登录态，API key 无法查询余额' },
-  { id: 'custom', label: '自定义端点', baseUrl: '', api: 'openai-completions', balance: 'auto' },
-]
-
-/** 按 id 取预设。 */
-export function servicePreset(id) {
-  return SERVICE_PRESETS.find((entry) => entry.id === id)
-}
-
 //#region 工具
 
 function num(value) {
