@@ -127,6 +127,15 @@ window.__ModuleLoader__.load({
       'supplier.added': '已添加',
       'supplier.discovered': '可添加',
       'supplier.models': '个模型',
+      'models.title': '可用模型',
+      'models.empty': '该供应商还没有配置模型。点「编辑」添加。',
+      'models.inDsh': '已写入 DSH',
+      'models.context': '上下文',
+      'models.maxOutput': '输出上限',
+      'models.thinking': '思考档位',
+      'models.copy': '复制 ID',
+      'models.copied': '已复制',
+      'models.viewTitle': '点击查看可用模型',
       'supplier.default': '默认',
       'supplier.current': '当前默认',
       'supplier.setDefault': '设为默认',
@@ -458,6 +467,15 @@ window.__ModuleLoader__.load({
       'supplier.added': 'Added',
       'supplier.discovered': 'Available',
       'supplier.models': 'models',
+      'models.title': 'Available models',
+      'models.empty': 'No models configured for this supplier yet. Click "Edit" to add some.',
+      'models.inDsh': 'in DSH',
+      'models.context': 'Context',
+      'models.maxOutput': 'Max output',
+      'models.thinking': 'Thinking',
+      'models.copy': 'Copy ID',
+      'models.copied': 'Copied',
+      'models.viewTitle': 'Click to view models',
       'supplier.default': 'Default',
       'supplier.current': 'Current default',
       'supplier.setDefault': 'Set default',
@@ -1755,6 +1773,50 @@ window.__ModuleLoader__.load({
   gap: 7px;
   flex-wrap: wrap;
 }
+/* 模型清单弹窗 */
+.tu-sheet-narrow { width: min(560px, 100%); }
+.tu-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tu-model-item {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 10px 12px;
+}
+.tu-model-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tu-model-item-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--dsw-alias-font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tu-btn-xs { padding: 3px 8px; font-size: 10.5px; }
+.tu-model-item-alias {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  margin-top: 3px;
+}
+.tu-model-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .tu-supcard-badge {
   font-size: 10.5px;
   font-weight: 400;
@@ -1762,6 +1824,18 @@ window.__ModuleLoader__.load({
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 999px;
   padding: 1px 7px;
+}
+/* 可点的模型数徽标：hover 时给出可交互的暗示 */
+.tu-supcard-badge-btn {
+  appearance: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.tu-supcard-badge-btn:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
 }
 .tu-supcard-url {
   font-size: 11.5px;
@@ -3526,6 +3600,8 @@ window.__ModuleLoader__.load({
       const [topView, setTopView] = useState('stats')
       // 供应商编辑表单：null 表示关闭
       const [supplierForm, setSupplierForm] = useState(null)
+      // 查看某个供应商的模型清单：{ siteId, label, models } 或 null
+      const [modelsDialog, setModelsDialog] = useState(null)
       const [supplierBusy, setSupplierBusy] = useState('')
       const [supplierNotice, setSupplierNotice] = useState({ kind: '', text: '' })
       const PAGE_SIZE = 20
@@ -4814,6 +4890,65 @@ window.__ModuleLoader__.load({
 
       // 添加/编辑供应商弹窗：名称、地址、密钥、接口格式，
       // 以及「该服务的模型」勾选与「模型设置」（别名 / 上下文 / 输出上限）。
+      // 模型清单弹窗：点供应商卡片上的「N 个模型」打开。
+      // 目的是快速确认「这个站点到底能用哪些模型」，而不是先点编辑再翻。
+      const modelsModal = modelsDialog === null ? null : h('div', {
+        className: 'tu-modal-backdrop',
+        onClick: (event) => { if (event?.target === event?.currentTarget) setModelsDialog(null) },
+      },
+      h('div', { className: 'tu-sheet tu-sheet-narrow', role: 'dialog', 'aria-modal': 'true' },
+        h('div', { className: 'tu-sheet-head' },
+          h('div', { className: 'tu-sheet-headings' },
+            h('h2', { className: 'tu-sheet-title' },
+              `${modelsDialog.label} · ${modelsDialog.models.length} ${t('supplier.models')}`),
+            h('p', { className: 'tu-sheet-sub' }, t('models.inDsh')),
+          ),
+        ),
+        h('div', { className: 'tu-sheet-body' },
+          modelsDialog.models.length === 0
+            ? h('p', { className: 'tu-hint' }, t('models.empty'))
+            : h('div', { className: 'tu-models-list' },
+              ...modelsDialog.models.map((model) => h('div', {
+                key: model.id, className: 'tu-model-item',
+              },
+              h('div', { className: 'tu-model-item-head' },
+                h('span', { className: 'tu-model-item-id', title: model.id }, model.id),
+                h('button', {
+                  type: 'button', className: 'tu-btn tu-btn-ghost tu-btn-xs',
+                  onClick: () => {
+                    // 复制模型 ID：配置别处时常用
+                    try { navigator.clipboard.writeText(model.id) } catch { /* 忽略 */ }
+                  },
+                }, t('models.copy')),
+              ),
+              model.name === undefined || model.name === ''
+                ? null
+                : h('div', { className: 'tu-model-item-alias' }, model.name),
+              h('div', { className: 'tu-model-item-meta' },
+                model.contextWindow === undefined
+                  ? null
+                  : h('span', null, `${t('models.context')} ${model.contextWindow}`),
+                model.maxOutput === undefined
+                  ? null
+                  : h('span', null, `${t('models.maxOutput')} ${model.maxOutput}`),
+                Array.isArray(model.thinkingLevels) && model.thinkingLevels.length > 0
+                  ? h('span', null, `${t('models.thinking')} ${model.thinkingLevels.join(' / ')}`)
+                  : null,
+              ),
+              )),
+            ),
+        ),
+        h('div', { className: 'tu-sheet-foot' },
+          h('span', { className: 'tu-sheet-foot-note' }, ''),
+          h('div', { className: 'tu-sheet-foot-actions' },
+            h('button', {
+              type: 'button', className: 'tu-btn',
+              onClick: () => setModelsDialog(null),
+            }, t('version.dialogOk')),
+          ),
+        ),
+      ))
+
       const supplierModal = supplierForm === null ? null : (() => {
         const form = supplierForm
         const available = form.available ?? []
@@ -5369,7 +5504,17 @@ window.__ModuleLoader__.load({
                     ? h('span', { className: 'tu-kindtag', 'data-kind': 'balance' }, t('kind.balance'))
                     : null),
                 modelCount > 0
-                  ? h('span', { className: 'tu-supcard-badge' }, `${modelCount} ${t('supplier.models')}`)
+                  // 徽标可点：直接看这批模型到底是什么，不用先进编辑弹窗
+                  ? h('button', {
+                    type: 'button',
+                    className: 'tu-supcard-badge tu-supcard-badge-btn',
+                    title: t('models.viewTitle'),
+                    onClick: () => setModelsDialog({
+                      siteId: site.id,
+                      label: site.label || site.id,
+                      models: Array.isArray(site.models) ? site.models : [],
+                    }),
+                  }, `${modelCount} ${t('supplier.models')}`)
                   : null,
               ),
               h('div', { className: 'tu-supcard-url' }, site.baseUrl),
@@ -5685,7 +5830,7 @@ window.__ModuleLoader__.load({
       // 供应商视图是完整页面，不叠在统计内容下面。
       if (topView === 'suppliers') {
         return h('div', { className: 'tu-root' },
-          head, viewTabs, supplierPage, supplierModal, versionModal)
+          head, viewTabs, supplierPage, supplierModal, modelsModal, versionModal)
       }
 
       return h('div', { className: 'tu-root' },
