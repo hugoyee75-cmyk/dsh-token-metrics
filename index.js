@@ -1879,8 +1879,19 @@ function acquireTracker(logger, buildId, config) {
     // 否则同一事件会被累加两次。
     if (existing.buildId === buildId) {
       if (logger !== undefined) existing.logger = logger
-      // 配置可能被用户改过（cordis.patch.yml 热更新），同步到现有实例。
-      if (config !== undefined) existing.config = config
+      /**
+       * 配置可能被用户改过（cordis.patch.yml 热更新），同步到现有实例。
+       *
+       * 预算还要额外重读 `budget.json`：页面保存的预算写在那里，
+       * 而 resolveConfig 只读 cordis.patch.yml。不重读的话，用户改了
+       * 预算、热重载后页面仍显示旧值（甚至显示为 0）。
+       */
+      if (config !== undefined) {
+        existing.config = {
+          ...config,
+          budget: loadSavedBudget(existing.home) ?? config.budget,
+        }
+      }
       // 复用实例时也要重读余额配置：它是「配置」不是「计数」，
       // 用户在插件外改过文件时，内存里留着旧值会一直显示已删除的站点。
       try {
