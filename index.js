@@ -2152,6 +2152,11 @@ export function apply(ctx, rawConfig) {
                   })
                 }
                 tracker.balanceBook.recordResult(id, result)
+                // 把识别出的平台存回站点：下次即使还没查询，
+                // 页面也能据此判断该站点是余额型还是订阅型。
+                if (platform !== undefined) {
+                  tracker.balanceBook.upsertSite({ ...site, provider: platform })
+                }
                 tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
                 sendJson(res, 200, {
                   ok: result.ok,

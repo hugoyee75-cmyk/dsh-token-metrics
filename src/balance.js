@@ -407,6 +407,7 @@ export class BalanceBook {
       // 后者是路由必须声明的模型清单。漏掉任何一个都会让同步失败。
       keyEnv: input.keyEnv ?? '',
       api: input.api ?? 'openai-completions',
+      provider: input.provider,
       models: input.models ?? [],
       kind: input.kind ?? 'auto',
       lastBalance: input.lastBalance,
@@ -475,6 +476,7 @@ export class BalanceBook {
         baseUrl: site.baseUrl,
         keyEnv: site.keyEnv ?? '',
         api: site.api ?? 'openai-completions',
+        provider: site.provider,
         models: site.models ?? [],
         kind: site.kind,
         lastBalance: site.lastBalance ?? null,
@@ -499,6 +501,11 @@ function sanitizeSite(input) {
     // 同步到 DSH 时会写进 provider 的 api 字段，选错请求格式就不对。
     api: typeof input?.api === 'string' && input.api !== '' ? input.api : 'openai-completions',
     kind: typeof input?.kind === 'string' ? input.kind : 'auto',
+    // 平台 id（deepseek / kimi / glm ...）。保存它是为了在「还没查询过」
+    // 时也能判断该站点是余额型还是订阅型，而不是等探测完才知道。
+    provider: typeof input?.provider === 'string' && input.provider !== ''
+      ? input.provider
+      : undefined,
     // 可用模型列表：同步到 DSH 模型配置时要用。
     // 早先漏了白名单，导致模型列表在保存时被剥掉、同步必然失败。
     models: Array.isArray(input?.models)

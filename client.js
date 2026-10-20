@@ -175,6 +175,10 @@ window.__ModuleLoader__.load({
       'quota.noPlan': '无订阅',
       'quota.official': '官方余额',
       'quota.balanceOnly': '余额',
+      'kind.balance': '余额',
+      'kind.quota': '订阅额度',
+      'kind.balanceHint': '预充值，按用量扣减',
+      'kind.quotaHint': '订阅制，按时间窗口限流',
       'supplier.balanceSaved': '余额已保存',
       'supplier.probeUnsupported': '该站点没有标准的余额接口，可手动填写余额',
       'balance.add': '添加站点',
@@ -481,6 +485,10 @@ window.__ModuleLoader__.load({
       'quota.noPlan': 'no plan',
       'quota.official': 'Official balance',
       'quota.balanceOnly': 'Balance',
+      'kind.balance': 'Balance',
+      'kind.quota': 'Subscription',
+      'kind.balanceHint': 'Prepaid, deducted by usage',
+      'kind.quotaHint': 'Subscription, rate-limited by time window',
       'supplier.balanceSaved': 'Balance saved',
       'supplier.probeUnsupported': 'This site has no standard balance endpoint; you can enter the balance manually',
       'balance.add': 'Add site',
@@ -1039,6 +1047,22 @@ window.__ModuleLoader__.load({
   font-variant-numeric: tabular-nums;
 }
 .tu-balmeta-time { margin-left: auto; }
+.tu-kindtag {
+  font-size: 10.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 1px 8px;
+  line-height: 15px;
+  flex: none;
+}
+.tu-kindtag[data-kind='balance'] {
+  color: var(--dsw-alias-state-success-primary);
+  border: 1px solid var(--dsw-alias-state-success-primary);
+}
+.tu-kindtag[data-kind='quota'] {
+  color: var(--dsw-alias-state-warn-primary);
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+}
 .tu-balprovider {
   font-size: 10.5px;
   color: var(--dsw-alias-brand-primary);
@@ -3272,11 +3296,34 @@ window.__ModuleLoader__.load({
         ? undefined
         : balance.provider)
       const hasQuota = Array.isArray(balance?.quotas) && balance.quotas.length > 0
+      // 未查询过时没有 lastBalance，用站点配置里的平台信息预判类型：
+      // Coding Plan 类平台（Kimi / GLM）本质是订阅制，余额型则不是。
+      const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax'])
+      const looksLikeQuota = hasQuota
+        || (balance?.provider !== undefined && QUOTA_PLATFORMS.has(balance.provider))
+        || (balance === undefined && QUOTA_PLATFORMS.has(site.provider))
 
       return h('div', { className: 'tu-balsite' },
         h('div', { className: 'tu-balsite-head' },
           h('div', null,
-            h('div', { className: 'tu-balsite-name' }, site.label || site.id),
+            h('div', { className: 'tu-balsite-name' },
+              site.label || site.id,
+              // 余额型与订阅制是两种不同的计费模式，卡片上直接标出来，
+              // 免得用户把「订阅额度」当成「账户余额」。
+              looksLikeQuota
+                ? h('span', {
+                  className: 'tu-kindtag',
+                  'data-kind': 'quota',
+                  title: t('kind.quotaHint'),
+                }, t('kind.quota'))
+                : (typeof balance?.usd === 'number'
+                  ? h('span', {
+                    className: 'tu-kindtag',
+                    'data-kind': 'balance',
+                    title: t('kind.balanceHint'),
+                  }, t('kind.balance'))
+                  : null),
+            ),
             h('div', { className: 'tu-balsite-url' }, site.baseUrl),
           ),
           h('div', { className: 'tu-balsite-actions' },

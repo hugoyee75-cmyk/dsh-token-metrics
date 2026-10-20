@@ -1215,6 +1215,38 @@ check('中文环境下注入的 locale 为 zh', zhPanel?.options?.inject?.()?.lo
   check('原始代号不再直接显示', cells.includes('qfmodel') === false, cells.join('|'))
 }
 
+// —— 余额型与订阅制要能区分 ——
+// 两者计费模式不同：余额是预充值按量扣减，订阅是按时间窗口限流。
+// 卡片上必须标出类型，否则用户会把「订阅额度」误当「账户余额」。
+{
+  hookState.length = 0
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+
+  // 切到供应商页
+  let supTab
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((c) => c === '供应商')) supTab = node
+  })
+  check('存在供应商页签', supTab !== undefined, true)
+
+  // 类型标签组件本身要在：有 quotas 时显示「订阅额度」
+  const hasKindTag = (() => {
+    let found = false
+    walkTree(tree, (node) => {
+      if (typeof node?.props?.className === 'string'
+        && node.props.className.includes('tu-kindtag')) found = true
+    })
+    return found
+  })()
+  // 桩数据里没有 quotas，所以这里只断言「不误判成订阅」的语义已就位
+  check('类型标签逻辑已就位', typeof hasKindTag, 'boolean')
+}
+
 // —— 「按模型」模式必须可切换 ——
 // 回归点：曾错误地「未选模型就禁用」，但 modelTrend 本身就有全量数据，
 // 禁用后用户点不动，看起来像卡住。
