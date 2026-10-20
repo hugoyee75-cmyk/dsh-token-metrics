@@ -41,9 +41,10 @@ import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
+import { probeOfficial, detectProvider } from './src/providers.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-token-metrics'
@@ -2132,11 +2133,24 @@ export function apply(ctx, rawConfig) {
                 }
                 // 密钥从凭据服务取，页面不传、也不回显。
                 const apiKey = await resolveSiteKey(ctx, site)
-                const result = await probeBalance({
-                  baseUrl: site.baseUrl,
-                  apiKey,
-                  fetchImpl: globalThis.fetch,
-                })
+                // 先看是不是已知的官方平台：它们的接口与中转站完全不同，
+                // 用通用探测只会得到 404。识别不出才回退到通用探测。
+                const platform = detectProvider(site.baseUrl)
+                let result
+                if (platform !== undefined) {
+                  result = await probeOfficial({
+                    baseUrl: site.baseUrl,
+                    apiKey,
+                    fetchImpl: globalThis.fetch,
+                    provider: platform,
+                  })
+                } else {
+                  result = await probeBalance({
+                    baseUrl: site.baseUrl,
+                    apiKey,
+                    fetchImpl: globalThis.fetch,
+                  })
+                }
                 tracker.balanceBook.recordResult(id, result)
                 tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
                 sendJson(res, 200, {

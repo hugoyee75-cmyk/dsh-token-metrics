@@ -167,6 +167,14 @@ window.__ModuleLoader__.load({
       'supplier.autoDispatch': '可供 AI 自动调度',
       'supplier.setBalance': '手动填写余额',
       'supplier.balanceUsd': '余额（USD）',
+      'quota.used': '已用',
+      'quota.left': '剩余',
+      'quota.resetsIn': '后重置',
+      'quota.resetAt': '重置于',
+      'quota.exhausted': '已用尽',
+      'quota.noPlan': '无订阅',
+      'quota.official': '官方余额',
+      'quota.balanceOnly': '余额',
       'supplier.balanceSaved': '余额已保存',
       'supplier.probeUnsupported': '该站点没有标准的余额接口，可手动填写余额',
       'balance.add': '添加站点',
@@ -465,6 +473,14 @@ window.__ModuleLoader__.load({
       'supplier.autoDispatch': 'Available for AI auto-dispatch',
       'supplier.setBalance': 'Set balance manually',
       'supplier.balanceUsd': 'Balance (USD)',
+      'quota.used': 'used',
+      'quota.left': 'left',
+      'quota.resetsIn': 'until reset',
+      'quota.resetAt': 'resets',
+      'quota.exhausted': 'used up',
+      'quota.noPlan': 'no plan',
+      'quota.official': 'Official balance',
+      'quota.balanceOnly': 'Balance',
       'supplier.balanceSaved': 'Balance saved',
       'supplier.probeUnsupported': 'This site has no standard balance endpoint; you can enter the balance manually',
       'balance.add': 'Add site',
@@ -1023,6 +1039,61 @@ window.__ModuleLoader__.load({
   font-variant-numeric: tabular-nums;
 }
 .tu-balmeta-time { margin-left: auto; }
+.tu-balprovider {
+  font-size: 10.5px;
+  color: var(--dsw-alias-brand-primary);
+  border: 1px solid var(--dsw-alias-brand-primary);
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 15px;
+}
+.tu-balnoplan {
+  color: var(--dsw-alias-label-secondary);
+  font-style: italic;
+}
+
+/* 配额窗口（Kimi / GLM 的 Coding Plan） */
+.tu-quotas {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 10px;
+}
+.tu-quota { display: flex; flex-direction: column; gap: 5px; }
+.tu-quota-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.tu-quota-label {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 600;
+}
+.tu-quota-pct {
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+.tu-quota-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+}
+.tu-quota-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+.tu-quota-fill[data-level='ok'] { background: var(--dsw-alias-brand-primary); }
+.tu-quota-fill[data-level='warn'] { background: var(--dsw-alias-state-warn-primary); }
+.tu-quota-fill[data-level='danger'] { background: var(--dsw-alias-state-error-primary); }
+.tu-quota-reset {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
 .tu-balerror {
   margin-top: 8px;
   font-size: 11.5px;
@@ -3126,6 +3197,55 @@ window.__ModuleLoader__.load({
     //#endregion
 
     /**
+     * 配额进度条：展示「已用 / 上限」与重置时间。
+     *
+     * Kimi 与 GLM 的 Coding Plan 用时间窗口限流（5 小时、每周），
+     * 只给一个百分比是不够的——用户更关心「什么时候恢复」。
+     */
+    function QuotaBar({ entry, t, locale }) {
+      const used = Number(entry.used)
+      const limit = Number(entry.limit)
+      if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return null
+      const ratio = Math.max(0, Math.min(1, used / limit))
+      const percent = Math.round(ratio * 100)
+      const left = Math.max(0, 100 - percent)
+
+      // 重置时间：给绝对时间 + 相对倒计时，两者互补
+      let resetText
+      if (Number.isFinite(entry.resetsAt) && entry.resetsAt > 0) {
+        const remainMs = entry.resetsAt - Date.now()
+        if (remainMs > 0) {
+          const hours = Math.floor(remainMs / 3_600_000)
+          const minutes = Math.floor((remainMs % 3_600_000) / 60_000)
+          const relative = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+          resetText = `${relative} ${t('quota.resetsIn')}`
+        } else {
+          // 已过重置点：说明数据过期，提示刷新
+          resetText = t('quota.resetAt')
+        }
+      }
+
+      return h('div', { className: 'tu-quota' },
+        h('div', { className: 'tu-quota-head' },
+          h('span', { className: 'tu-quota-label' }, entry.label ?? 'Quota'),
+          h('span', { className: 'tu-quota-pct' },
+            // 用「剩余」表述更直观；用尽时改用明确措辞
+            left === 0 ? t('quota.exhausted') : `${left}% ${t('quota.left')}`),
+        ),
+        h('div', { className: 'tu-quota-bar' },
+          h('div', {
+            className: 'tu-quota-fill',
+            'data-level': percent >= 95 ? 'danger' : percent >= 75 ? 'warn' : 'ok',
+            style: { width: `${percent}%` },
+          }),
+        ),
+        resetText === undefined
+          ? null
+          : h('div', { className: 'tu-quota-reset' }, resetText),
+      )
+    }
+
+    /**
      * 供应商余额卡片。
      *
      * 展示剩余额度与进度条：中转站的余额通常有总额度，用量占比一眼可见；
@@ -3140,9 +3260,18 @@ window.__ModuleLoader__.load({
         ? Math.max(0, Math.min(1, 1 - remaining / balance.limitUsd))
         : undefined
 
-      const money = (value) => (typeof value === 'number'
-        ? `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}`
-        : '—')
+      // 币种：官方平台可能返回 CNY，不能一律当美元
+      const currency = balance?.currency
+      const money = (value) => {
+        if (typeof value !== 'number') return '—'
+        const symbol = currency === 'CNY' ? '¥' : '$'
+        return `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}`
+      }
+      // 官方平台标注来源，让用户知道这是官方余额而不是中转站余额
+      const officialLabel = balance?.label ?? (balance?.provider === undefined
+        ? undefined
+        : balance.provider)
+      const hasQuota = Array.isArray(balance?.quotas) && balance.quotas.length > 0
 
       return h('div', { className: 'tu-balsite' },
         h('div', { className: 'tu-balsite-head' },
@@ -3163,6 +3292,16 @@ window.__ModuleLoader__.load({
           ),
         ),
 
+        // 官方平台的配额窗口（Kimi / GLM 的 Coding Plan）
+        Array.isArray(balance?.quotas) && balance.quotas.length > 0
+          ? h('div', { className: 'tu-quotas' },
+            ...balance.quotas.map((entry) => h(QuotaBar, {
+              key: entry.label, entry, t, locale,
+            })),
+          )
+          : null,
+
+        // 中转站的「已用 / 总额度」进度条
         hasLimit && usedRatio !== undefined
           ? h('div', { className: 'tu-balbar' },
             h('div', {
@@ -3175,7 +3314,12 @@ window.__ModuleLoader__.load({
           : null,
 
         h('div', { className: 'tu-balmeta' },
-          h('span', null, `${t('balance.remaining')} ${money(remaining)}`),
+          officialLabel === undefined
+            ? null
+            : h('span', { className: 'tu-balprovider' }, officialLabel),
+          site.noPlan === true
+            ? h('span', { className: 'tu-balnoplan' }, t('quota.noPlan'))
+            : h('span', null, `${t('balance.remaining')} ${money(remaining)}`),
           hasLimit ? h('span', null, `${t('balance.limit')} ${money(balance.limitUsd)}`) : null,
           typeof balance?.usedUsd === 'number'
             ? h('span', null, `${t('balance.used')} ${money(balance.usedUsd)}`)

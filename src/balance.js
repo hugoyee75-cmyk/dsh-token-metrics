@@ -447,10 +447,22 @@ export class BalanceBook {
         limitUsd: result.limitUsd,
         kind: result.kind,
         username: result.username,
+        // 官方平台的额外信息：币种、平台名、配额窗口
+        currency: result.currency,
+        provider: result.provider,
+        label: result.label,
+        // 配额型（Kimi / GLM 的 Coding Plan）：
+        // 每项 { label, used, limit, resetsAt, unit }
+        quotas: Array.isArray(result.quotas) ? result.quotas : undefined,
+        isAvailable: result.isAvailable,
       }
       site.error = ''
     } else {
       site.error = result?.error ?? '探测失败'
+      // 「没有订阅」是有效状态，不算故障，单独标记供页面换一种说法
+      site.lastBalance = site.lastBalance ?? null
+      if (result?.noPlan === true) site.noPlan = true
+      else delete site.noPlan
     }
   }
 
@@ -466,6 +478,7 @@ export class BalanceBook {
         models: site.models ?? [],
         kind: site.kind,
         lastBalance: site.lastBalance ?? null,
+        noPlan: site.noPlan === true,
         lastCheckedAt: site.lastCheckedAt ?? 0,
         error: site.error ?? '',
       })),
