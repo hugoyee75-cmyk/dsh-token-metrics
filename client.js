@@ -6435,7 +6435,9 @@ function formatMoneyText(value) {
           warnPercent: saved.warnPercent ?? 80,
           groups: (saved.groups ?? []).map((g) => ({ ...g, models: [...(g.models ?? [])] })),
         }
-        const models = (data?.modelOptions ?? []).slice().sort()
+        // 模型清单来自 modelOptions（由 byModelName 生成），不是 data 上的字段。
+        // 早先误写成 data?.modelOptions，永远为空，导致分组里选不到模型。
+        const models = (modelOptions ?? []).slice().sort()
 
         /** 字段标签（与弹窗里的同名函数一致，但作用域独立）。 */
         const fieldLabel = (text, required = false) => h('span', { className: 'tu-flabel' },
