@@ -35,7 +35,7 @@
     }
   },
   "scripts": {
-    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/balance-test.mjs && node test/sync-test.mjs && node test/metadata-test.mjs",
+    "test": "node test/host-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/balance-test.mjs && node test/providers-test.mjs && node test/sync-test.mjs && node test/metadata-test.mjs",
     "test:host": "node test/host-test.mjs",
     "test:client": "node test/client-test.mjs",
     "test:update": "node test/update-test.mjs",
@@ -45,7 +45,8 @@
     "prepack": "npm run check",
     "test:pricing": "node test/pricing-test.mjs",
     "test:balance": "node test/balance-test.mjs",
-    "test:sync": "node test/sync-test.mjs"
+    "test:sync": "node test/sync-test.mjs",
+    "test:providers": "node test/providers-test.mjs"
   },
   "license": "MIT",
   "repository": {
