@@ -143,9 +143,9 @@ window.__ModuleLoader__.load({
       'field.cost': '总成本',
       'balance.title': '供应商余额',
       'view.stats': '统计',
-      'view.suppliers': '供应商',
-      'supplier.title': '供应商管理',
-      'supplier.subtitle': '管理第三方中转站：余额、可用模型与同步到 DSH 模型配置',
+      'view.suppliers': '模型接入',
+      'supplier.title': '模型接入',
+      'supplier.subtitle': '接入第三方中转站与官方平台：余额、可用模型，并同步到 DSH 模型配置',
       'supplier.add': '添加供应商',
       'supplier.added': '已添加',
       'supplier.discovered': '可添加',
@@ -245,6 +245,24 @@ window.__ModuleLoader__.load({
       'supplier.noCapacity': '未声明',
       'supplier.modelCountHint': '勾选后会写入 DSH 模型配置；未勾选的模型不会出现在选择器里。',
       'supplier.pickOne': '在左侧选一个模型来设置它的参数',
+      'supplier.notPicked': '未勾选',
+      'supplier.picked': '已勾选（未配置参数）',
+      'supplier.ready': '已配置',
+      'supplier.autoDetected': '端点报告',
+      'supplier.fromCatalog': '目录',
+      'supplier.notReasoning': '该模型不是推理模型（目录判定）',
+      'supplier.levelsFromCatalog': '目录推荐的档位已勾选，也可自行增删',
+      'supplier.levelsRecommended': '目录推荐',
+      'supplier.levelsAll': '全部档位',
+      'supplier.levelsManual': '目录未给出档位，请按模型实际能力勾选',
+      'supplier.levelsShowAll': '显示全部档位',
+      'supplier.levelsHideAll': '只看推荐',
+      'supplier.wire': '协议值',
+      'supplier.wireHint': '网关不认档位名时，在这里填它实际接受的词（如 ultra）',
+      'supplier.wireSame': '同档位名',
+      'supplier.noCatalogEntry': '目录里没有这个模型，档位请手动确认',
+      'supplier.adopt': '采用',
+      'supplier.pickHint': '勾选后才会写入 DSH 配置',
       'supplier.contextHint': '模型能接受的最大输入长度',
       'supplier.outputHint': '单次回复的最大 token 数',
       'supplier.thinkingHint': '勾选模型支持的思考档位，对话里就能在这些档位间切换',
@@ -487,9 +505,9 @@ window.__ModuleLoader__.load({
       'field.cost': 'Cost',
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
-      'view.suppliers': 'Suppliers',
-      'supplier.title': 'Suppliers',
-      'supplier.subtitle': 'Manage relay stations: balance, available models, and syncing to DSH model config',
+      'view.suppliers': 'Model Access',
+      'supplier.title': 'Model Access',
+      'supplier.subtitle': 'Add relay stations and official platforms: balances, models, and DSH config sync',
       'supplier.add': 'Add supplier',
       'supplier.added': 'Added',
       'supplier.discovered': 'Available',
@@ -589,6 +607,24 @@ window.__ModuleLoader__.load({
       'supplier.noCapacity': 'not declared',
       'supplier.modelCountHint': 'Checked models are written to the DSH model config; unchecked ones never appear in the picker.',
       'supplier.pickOne': 'Pick a model on the left to configure it',
+      'supplier.notPicked': 'not selected',
+      'supplier.picked': 'selected (no params yet)',
+      'supplier.ready': 'configured',
+      'supplier.autoDetected': 'endpoint reports',
+      'supplier.fromCatalog': 'catalog',
+      'supplier.notReasoning': 'Not a reasoning model (per catalog)',
+      'supplier.levelsFromCatalog': 'Catalog-recommended levels are ticked; you can add or remove any',
+      'supplier.levelsRecommended': 'recommended',
+      'supplier.levelsAll': 'all levels',
+      'supplier.levelsManual': 'The catalog lists no levels; tick what the model actually supports',
+      'supplier.levelsShowAll': 'Show all levels',
+      'supplier.levelsHideAll': 'Recommended only',
+      'supplier.wire': 'Wire value',
+      'supplier.wireHint': 'If the gateway uses a different word (e.g. ultra), set it here',
+      'supplier.wireSame': 'same as level',
+      'supplier.noCatalogEntry': 'Not in the catalog — please set levels manually',
+      'supplier.adopt': 'use it',
+      'supplier.pickHint': 'Only checked models are written to the DSH config',
       'supplier.contextHint': 'Maximum input length the model accepts',
       'supplier.outputHint': 'Maximum tokens per reply',
       'supplier.thinkingHint': 'Tick the levels this model supports; chat will offer them',
@@ -836,7 +872,12 @@ window.__ModuleLoader__.load({
   --tu-c6: #2aa5b0;
   --tu-c7: #8a7f64;
 }
-[data-theme='dark'] .tu-root {
+/* 分类色在深色下另取一套。
+   选择器不只限定 .tu-root：弹窗与通知挂在 document.body 下，
+   虽然它们当前只用语义 token，但放宽选择器可避免以后加分类色时踩坑。 */
+[data-theme='dark'] .tu-root,
+[data-theme='dark'] .tu-modal-backdrop,
+[data-theme='dark'] .tu-toasts {
   --tu-c1: #66aaf0;
   --tu-c2: #47cf8c;
   --tu-c3: #f2b053;
@@ -1267,8 +1308,10 @@ window.__ModuleLoader__.load({
   margin: 10px 0 12px;
 }
 .tu-sheet {
-  width: min(920px, 100%);
-  max-height: min(88vh, 760px);
+  /* 之前 920x760 对「模型参数」这种信息量偏挤：左右两栏各自要塞下
+     列表与多个字段。放大到 1120x880 后每栏宽裕些，纵向也不再频繁滚动。 */
+  width: min(1120px, 96vw);
+  max-height: min(92vh, 880px);
   display: flex;
   flex-direction: column;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -1282,7 +1325,7 @@ window.__ModuleLoader__.load({
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 24px 15px;
+  padding: 22px 28px 16px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   flex: none;
 }
@@ -1296,7 +1339,7 @@ window.__ModuleLoader__.load({
   max-width: 600px;
 }
 .tu-sheet-body {
-  padding: 18px 24px 6px;
+  padding: 22px 28px 10px;
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
@@ -1306,7 +1349,7 @@ window.__ModuleLoader__.load({
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 13px 24px;
+  padding: 15px 28px;
   border-top: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-layer-1);
   flex: none;
@@ -1449,10 +1492,10 @@ window.__ModuleLoader__.load({
 /* 模型：左列表 + 右详情 */
 .tu-split {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 12px;
-  min-height: 300px;
-  max-height: 360px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 16px;
+  min-height: 340px;
+  max-height: 440px;
 }
 .tu-list-pane,
 .tu-detail-pane {
@@ -1526,12 +1569,12 @@ window.__ModuleLoader__.load({
 
 /* 详情面板 */
 .tu-detail {
-  padding: 12px 13px;
+  padding: 16px 18px;
   overflow-y: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   scrollbar-width: thin;
 }
 .tu-detail-head {
@@ -1607,6 +1650,51 @@ window.__ModuleLoader__.load({
   transition: all 110ms ease;
 }
 .tu-level:hover { border-color: var(--dsw-alias-border-l2); }
+/* 目录推荐的档位加一层淡背景，与「手动加的」区分开 */
+.tu-level[data-rec='true']:not([data-on='true']) {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent);
+}
+.tu-wire {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+  align-items: flex-start;
+}
+.tu-wire-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.tu-wire-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.tu-wire-level {
+  min-width: 56px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-wire-arrow { color: var(--dsw-alias-label-secondary); }
+.tu-wire-row .tu-input { width: 130px; }
+.tu-level-toggle {
+  appearance: none;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.tu-level-toggle:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
 .tu-level[data-on='true'] {
   border-color: var(--dsw-alias-brand-primary);
   color: var(--dsw-alias-label-primary);
@@ -1741,11 +1829,16 @@ window.__ModuleLoader__.load({
   .tu-list-pane { max-height: 240px; }
 }
 
+/* 顶层视图切换：与工具栏同排，做成分段控件而不是下划线标签——
+   下划线标签适合页面内的内容分区，工具栏里用分段控件更协调 */
 .tu-viewtabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  flex: none;
 }
 .tu-viewtab {
   appearance: none;
@@ -1753,16 +1846,20 @@ window.__ModuleLoader__.load({
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font-family: inherit;
-  font-size: 13px;
-  padding: 8px 14px;
+  font-size: 12.5px;
+  line-height: 1;
+  padding: 7px 13px;
+  border-radius: 7px;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  transition: background 120ms ease, color 120ms ease;
+  white-space: nowrap;
 }
+.tu-viewtab:hover { color: var(--dsw-alias-label-primary); }
 .tu-viewtab[data-active='true'] {
+  background: var(--dsw-alias-bg-overlay);
   color: var(--dsw-alias-label-primary);
-  border-bottom-color: var(--dsw-alias-brand-primary);
   font-weight: 600;
+  box-shadow: 0 1px 3px var(--dsw-alias-border-l2);
 }
 .tu-page { display: flex; flex-direction: column; gap: 18px; }
 .tu-page-head {
@@ -1883,6 +1980,48 @@ window.__ModuleLoader__.load({
 }
 @media (prefers-reduced-motion: reduce) {
   .tu-toast { animation: none; }
+}
+
+/* 模型列表的状态灯：绿点=已配置，空心点=只勾选未配置，无灯=未勾选 */
+.tu-mlist-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-left: 2px;
+}
+.tu-mlist-dot[data-state='ready'] { background: var(--dsw-alias-state-success-primary); }
+.tu-mlist-dot[data-state='picked'] {
+  background: transparent;
+  border: 1px solid var(--dsw-alias-border-l3);
+}
+/* 「端点报告了容量」的一键采用按钮 */
+.tu-autofill {
+  appearance: none;
+  align-self: flex-start;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.tu-autofill:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
+/* 未勾选模型的详情提示 */
+.tu-detail-warn {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent);
+  border-radius: 7px;
+  padding: 7px 10px;
 }
 
 .tu-sheet-narrow { width: min(560px, 100%); }
@@ -2067,6 +2206,32 @@ window.__ModuleLoader__.load({
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
 }
+/* 顶部工具栏：页签 + 未定价模型 + 价目表操作同排。
+   常驻显示（不再只在有未定价模型时出现），否则页签会跟着消失。 */
+.tu-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.tu-toolbar-spacer { flex: 1 1 auto; }
+.tu-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+  margin-left: auto;
+}
+/* 工具栏里的未定价条不再自带边框与背景，改由工具栏统一承载 */
+.tu-toolbar .tu-unpriced {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .tu-unpriced {
   display: flex;
   flex-wrap: wrap;
@@ -2789,6 +2954,29 @@ window.__ModuleLoader__.load({
       if (abs >= 1e4) return `${(value / 1e3).toFixed(1)}K`
       return formatNumber(value)
     }
+
+/**
+ * 格式化金额。
+ *
+ * 平台返回的余额常是高精度小数字符串（如 `10.00000000000000000`），
+ * 直接渲染会拖出一长串无意义的零。这里按数值大小取合理位数：
+ *   - 0：显示 `0`
+ *   - < 1：保留 4 位（小额余额需要精度，例如 $0.0082）
+ *   - 其余：保留 2 位
+ *
+ * 接受字符串或数字；无法解析时原样返回，避免丢信息。
+ */
+function formatMoneyText(value) {
+  if (value === null || value === undefined || value === '') return '0'
+  const n = Number(value)
+  if (!Number.isFinite(n)) return String(value)
+  if (n === 0) return '0'
+  const abs = Math.abs(n)
+  if (abs < 1) return n.toFixed(4)
+  if (abs < 1000) return n.toFixed(2)
+  // 大额也保留 2 位，但不加千分位（余额通常不会很大）
+  return n.toFixed(2)
+}
 
     function formatTime(timestamp, locale) {
       if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return '—'
@@ -4573,6 +4761,7 @@ window.__ModuleLoader__.load({
         ),
       )
 
+
       const scanBar = h(ScanProgress, { scan: data?.scan, t })
 
       if (status === 'loading') {
@@ -4594,8 +4783,8 @@ window.__ModuleLoader__.load({
 
       const empty = isEmpty(data?.totals?.all)
 
-      // 顶层视图切换：统计 / 供应商。供应商是完整页面而不是明细标签，
-      // 因为它管理的是「配置」而非「用量」，两者性质不同。
+
+      // 顶层视图切换：统计 / 模型接入。
       const viewTabs = h('div', { className: 'tu-viewtabs' },
         h('button', {
           type: 'button', className: 'tu-viewtab',
@@ -4776,7 +4965,9 @@ window.__ModuleLoader__.load({
           h('strong', { className: 'tu-account-name' }, account.name || account.id || '—'),
           (account.balance ?? []).map((wallet) =>
             h('span', { key: wallet.currency, className: 'tu-account-balance' },
-              `${t('account.balance')} ${wallet.balance} ${wallet.currency}`)),
+              // 平台返回的是高精度小数字符串，格式化后再显示，
+              // 否则会出现 10.00000000000000000 这种长尾
+              `${t('account.balance')} ${formatMoneyText(wallet.balance)} ${wallet.currency}`)),
           account.usageUrl !== null && account.usageUrl !== undefined
             ? h('a', {
               className: 'tu-link',
@@ -5043,7 +5234,16 @@ window.__ModuleLoader__.load({
                   ? null
                   : h('span', null, `${t('models.maxOutput')} ${model.maxOutput}`),
                 Array.isArray(model.thinkingLevels) && model.thinkingLevels.length > 0
-                  ? h('span', null, `${t('models.thinking')} ${model.thinkingLevels.join(' / ')}`)
+                  // 档位条目可能是 `{level, wire}` 对象，直接 join 会得到
+                  // [object Object]，这里取档位名；自定义拼写单独标注。
+                  ? h('span', null, `${t('models.thinking')} ${model.thinkingLevels
+                    .map((item) => {
+                      const level = typeof item === 'string' ? item : item?.level
+                      const wire = typeof item === 'string' ? undefined : item?.wire
+                      return wire !== undefined && wire !== level ? `${level}→${wire}` : level
+                    })
+                    .filter((x) => x !== undefined)
+                    .join(' / ')}`)
                   : null,
               ),
               )),
@@ -5092,14 +5292,20 @@ window.__ModuleLoader__.load({
             ...current,
             models: exists
               ? models.filter((entry) => entry.id !== model.id)
-              : [...models, {
-                id: model.id,
-                name: model.name ?? '',
-                contextWindow: model.contextWindow,
-                maxOutput: model.maxOutput,
-                thinking: false,
-                image: true,
-              }],
+              : [...models, (() => {
+                // 优先级：端点返回 > 模型目录 > 留空让用户填。
+                // 目录是权威数据，能省掉「这个模型到底支持哪几档」的猜测。
+                const cap = catalogEntry(model.id)
+                return {
+                  id: model.id,
+                  name: model.name ?? '',
+                  contextWindow: model.contextWindow ?? cap?.contextWindow,
+                  maxOutput: model.maxOutput ?? cap?.maxTokens,
+                  // 目录给了档位就直接填好；不是推理模型则明确留空
+                  thinkingLevels: cap?.thinkingLevels ?? [],
+                  image: cap?.input === undefined ? true : cap.input.includes('image'),
+                }
+              })()],
           }
         })
         const patchModel = (id, patch) => setSupplierForm((current) => (current === null ? null : {
@@ -5109,6 +5315,35 @@ window.__ModuleLoader__.load({
         }))
 
         /** 字段标题；required 为 true 时带红色星号。 */
+        /**
+         * 查模型目录里该模型的能力。
+         *
+         * 目录由 Host 从 pi-ai 的 providers/data 读取，含推理能力、支持的
+         * 思考档位、上下文与输出上限、输入类型。拿不到返回 undefined。
+         */
+        /**
+         * 取档位条目里的档位名。
+         *
+         * 历史数据是字符串（'high'），新数据是 `{ level, wire }` 对象。
+         * 两种都要能读，否则旧配置会失效。
+         */
+        const levelOf = (item) => (typeof item === 'string' ? item : item?.level)
+
+        /**
+         * 取档位条目的协议拼写值。没有自定义时与档位名相同。
+         */
+        const wireOf = (item) => {
+          if (typeof item === 'string') return item
+          const wire = item?.wire
+          return typeof wire === 'string' && wire !== '' ? wire : item?.level
+        }
+
+        const catalogEntry = (id) => {
+          const catalog = data?.modelCatalog
+          if (catalog === null || catalog === undefined) return undefined
+          return catalog[id]
+        }
+
         const fieldLabel = (text, required = false) => h('span', { className: 'tu-flabel' },
           text,
           required ? h('span', { className: 'tu-req', title: t('supplier.required') }, '*') : null,
@@ -5318,6 +5553,24 @@ window.__ModuleLoader__.load({
                           onChange: () => toggleModel(model),
                         }),
                         h('span', { className: 'tu-mlist-id', title: model.id }, model.id),
+                        // 状态灯：勾选并配过参数的显示绿点，只勾选的显示空心点，
+                        // 未勾选的不显示——一眼看出哪些已经配好了。
+                        //
+                        // 注意：这里必须用本行的 selected.find 取当前模型。
+                        // 早先误用了下方详情区的 `picked`，它在另一个作用域且尚未
+                        // 初始化，触发 ReferenceError 导致整个弹窗渲染失败（黑屏）。
+                        (() => {
+                          if (!on) return null
+                          const entry = selected.find((item) => item.id === model.id)
+                          const configured = entry !== undefined
+                            && (entry.contextWindow !== undefined || entry.maxOutput !== undefined
+                              || (entry.name ?? '') !== '' || (entry.thinkingLevels ?? []).length > 0)
+                          return h('span', {
+                            className: 'tu-mlist-dot',
+                            'data-state': configured ? 'ready' : 'picked',
+                            title: configured ? t('supplier.ready') : t('supplier.picked'),
+                          })
+                        })(),
                         )
                       },
                       ),
@@ -5362,22 +5615,59 @@ window.__ModuleLoader__.load({
                 // ── 右：选中模型的详情 ──
                 h('div', { className: 'tu-detail-pane' },
                   (() => {
-                    const active = selected.find((entry) => entry.id === form.activeModel) ?? selected[0]
+                    // 先按 activeModel 找；找不到再退回第一个已选。
+                    // 注意：点了未勾选的行时，activeModel 指向的是一个「还没加入
+                    // selected」的模型——这时要能显示它的详情，否则用户会觉得
+                    // 点了没反应。
+                    const active = selected.find((entry) => entry.id === form.activeModel)
+                      ?? (form.activeModel !== undefined
+                        ? available.find((entry) => entry.id === form.activeModel)
+                        : undefined)
+                      ?? selected[0]
                     if (active === undefined) {
                       return h('div', { className: 'tu-empty-block tu-empty-inline' },
                         h('div', { className: 'tu-empty-hint' }, t('supplier.pickOne')),
                       )
                     }
                     const patch = (value) => patchModel(active.id, value)
+                    // 这个模型可能还没勾选：右侧照样显示它的参数（只读预览），
+                    // 但给出提示并提供一个「加入已选」的按钮。
+                    const picked = selected.some((entry) => entry.id === active.id)
+                    const ensurePicked = () => {
+                      if (picked) return
+                      setSupplierForm((current) => {
+                        if (current === null) return null
+                        if ((current.models ?? []).some((entry) => entry.id === active.id)) return current
+                        return {
+                          ...current,
+                          models: [...(current.models ?? []), {
+                            id: active.id,
+                            name: active.name ?? '',
+                            contextWindow: active.contextWindow,
+                            maxOutput: active.maxOutput,
+                            thinkingLevels: [],
+                            image: true,
+                          }],
+                        }
+                      })
+                    }
                     return h('div', { className: 'tu-detail' },
                       h('div', { className: 'tu-detail-head' },
                         h('span', { className: 'tu-detail-id' }, active.id),
-                        h('button', {
-                          type: 'button', className: 'tu-icon-btn',
-                          title: t('supplier.remove'),
-                          onClick: () => toggleModel({ id: active.id }),
-                        }, '×'),
+                        picked
+                          ? h('button', {
+                            type: 'button', className: 'tu-icon-btn',
+                            title: t('supplier.remove'),
+                            onClick: () => toggleModel({ id: active.id }),
+                          }, '×')
+                          : h('button', {
+                            type: 'button', className: 'tu-btn tu-btn-primary tu-btn-xs',
+                            onClick: ensurePicked,
+                          }, '+ ' + t('supplier.selected')),
                       ),
+                      picked
+                        ? null
+                        : h('p', { className: 'tu-detail-warn' }, t('supplier.pickHint')),
 
                       // 别名
                       h('div', { className: 'tu-dfield' },
@@ -5391,6 +5681,15 @@ window.__ModuleLoader__.load({
                           t('supplier.context'),
                           h('span', { className: 'tu-dfield-hint' }, t('supplier.contextHint')),
                         ),
+                        // 端点报过容量但用户还没设时，给出「采用探测值」的提示
+                        (() => {
+                          const detected = available.find((m) => m.id === active.id)?.contextWindow
+                          if (detected === undefined || active.contextWindow === detected) return null
+                          return h('button', {
+                            type: 'button', className: 'tu-autofill',
+                            onClick: () => patch({ contextWindow: detected }),
+                          }, `${t('supplier.autoDetected')} ${detected} · ${t('supplier.adopt')}`)
+                        })(),
                         h('div', { className: 'tu-segmented' },
                           ...CONTEXT_PRESETS.map((preset) => h('button', {
                             key: preset,
@@ -5415,6 +5714,14 @@ window.__ModuleLoader__.load({
                           t('supplier.maxOutput'),
                           h('span', { className: 'tu-dfield-hint' }, t('supplier.outputHint')),
                         ),
+                        (() => {
+                          const detected = available.find((m) => m.id === active.id)?.maxOutput
+                          if (detected === undefined || active.maxOutput === detected) return null
+                          return h('button', {
+                            type: 'button', className: 'tu-autofill',
+                            onClick: () => patch({ maxOutput: detected }),
+                          }, `${t('supplier.autoDetected')} ${detected} · ${t('supplier.adopt')}`)
+                        })(),
                         h('div', { className: 'tu-segmented' },
                           ...[4_096, 8_192, 16_384, 32_768, 65_536].map((preset) => h('button', {
                             key: preset,
@@ -5433,42 +5740,130 @@ window.__ModuleLoader__.load({
                         }),
                       ),
 
-                      // 思考等级：多选该模型支持的档位
+                      // 思考等级。
+                      //
+                      // 目录（pi-ai 的 thinkingLevelMap）给出「推荐档位」，勾选时
+                      // 自动填好；但目录未必覆盖自定义模型或中转站别名，所以
+                      // **全部 7 档都保留可手动勾选**——推荐只是默认值，不是限制。
                       h('div', { className: 'tu-dfield' },
-                        h('div', { className: 'tu-dfield-label' },
-                          t('supplier.thinking'),
-                          h('span', { className: 'tu-dfield-hint' }, t('supplier.thinkingHint')),
-                        ),
-                        h('div', { className: 'tu-levels' },
-                          ...THINKING_LEVELS.map((level) => {
-                            const checked = (active.thinkingLevels ?? []).includes(level)
-                            return h('label', {
-                              key: level,
-                              className: 'tu-level',
-                              'data-on': checked ? 'true' : 'false',
-                            },
-                            h('input', {
-                              type: 'checkbox',
-                              className: 'tu-checkbox',
-                              checked,
-                              onChange: () => {
-                                const current = active.thinkingLevels ?? []
-                                const next = checked
-                                  ? current.filter((item) => item !== level)
-                                  : [...current, level]
-                                // 保持与 DSH 的等级顺序一致，便于阅读
-                                patch({
-                                  thinkingLevels: THINKING_LEVELS.filter((item) => next.includes(item)),
-                                })
-                              },
-                            }),
-                            h('span', null, t(`level.${level}`)),
+                        (() => {
+                          const cap = catalogEntry(active.id)
+                          if (cap === undefined) {
+                            return h('div', { className: 'tu-dfield-label' },
+                              t('supplier.thinking'),
+                              h('span', { className: 'tu-dfield-hint' }, t('supplier.noCatalogEntry')),
                             )
-                          }),
-                        ),
+                          }
+                          if (cap.reasoning !== true) {
+                            return h('div', { className: 'tu-dfield-label' },
+                              t('supplier.thinking'),
+                              h('span', { className: 'tu-dfield-hint' }, t('supplier.notReasoning')),
+                            )
+                          }
+                          return h('div', { className: 'tu-dfield-label' },
+                            t('supplier.thinking'),
+                            h('span', { className: 'tu-dfield-hint' },
+                              (cap.thinkingLevels ?? []).length > 0
+                                ? t('supplier.levelsFromCatalog')
+                                : t('supplier.levelsManual')),
+                          )
+                        })(),
+                        (() => {
+                          // 推荐档位（目录给出的）；没有则视为「全部可填」
+                          const recommended = catalogEntry(active.id)?.thinkingLevels ?? []
+                          const hasRecommended = recommended.length > 0
+                          // 用户展开「全部档位」时列出 7 档，否则只列推荐档位。
+                          // 手动加过一个非推荐档位时也自动展开，免得刚加的档位看不见。
+                          const chosen = active.thinkingLevels ?? []
+                          const showAll = form.showAllLevels === true
+                            || chosen.some((item) => !recommended.includes(levelOf(item)))
+                          const list = showAll || !hasRecommended ? THINKING_LEVELS : recommended
+                          return h('div', { className: 'tu-levels' },
+                            ...list.map((level) => {
+                              const checked = chosen.some((item) => levelOf(item) === level)
+                              const isRecommended = recommended.includes(level)
+                              return h('label', {
+                                key: level,
+                                className: 'tu-level',
+                                'data-on': checked ? 'true' : 'false',
+                                // 推荐的档位加个标记，让用户知道目录建议值
+                                'data-rec': isRecommended ? 'true' : 'false',
+                              },
+                              h('input', {
+                                type: 'checkbox',
+                                className: 'tu-checkbox',
+                                checked,
+                                onChange: () => {
+                                  // 用 { level, wire } 形式记录，便于后续在界面上
+                                  // 单独改「协议值」；wire 默认与档位名相同。
+                                  const next = checked
+                                    ? chosen.filter((item) => levelOf(item) !== level)
+                                    : [...chosen, { level, wire: level }]
+                                  const order = THINKING_LEVELS
+                                  patch({
+                                    thinkingLevels: order
+                                      .map((item) => next.find((x) => levelOf(x) === item))
+                                      .filter((x) => x !== undefined),
+                                  })
+                                },
+                              }),
+                              h('span', null, t(`level.${level}`)),
+                              )
+                            }),
+                            // 展开/收起：目录有推荐值时给个开关，看全 7 档
+                            hasRecommended
+                              ? h('button', {
+                                type: 'button',
+                                className: 'tu-level-toggle',
+                                onClick: () => setField('showAllLevels', !showAll),
+                              }, showAll ? t('supplier.levelsHideAll') : t('supplier.levelsShowAll'))
+                              : null,
+                          )
+                        })(),
                         (active.thinkingLevels ?? []).length === 0
                           ? h('span', { className: 'tu-dfield-hint' }, t('supplier.thinkingNone'))
                           : null,
+
+                        // 协议值编辑：只有当某个档位的「拼写」与档位名不同
+                        // 才有意义，所以默认折叠，需要时展开。
+                        (active.thinkingLevels ?? []).length === 0 ? null : h('div', { className: 'tu-wire' },
+                          h('button', {
+                            type: 'button',
+                            className: 'tu-level-toggle',
+                            onClick: () => setField('showWire', form.showWire !== true),
+                          }, form.showWire === true ? t('supplier.levelsHideAll') : t('supplier.wire')),
+                          form.showWire !== true
+                            ? null
+                            : h('div', null,
+                              h('span', { className: 'tu-dfield-hint' }, t('supplier.wireHint')),
+                              h('div', { className: 'tu-wire-rows' },
+                                ...(active.thinkingLevels ?? []).map((item) => {
+                                  const level = levelOf(item)
+                                  if (level === undefined) return null
+                                  return h('div', { key: level, className: 'tu-wire-row' },
+                                    h('span', { className: 'tu-wire-level' }, t(`level.${level}`)),
+                                    h('span', { className: 'tu-wire-arrow' }, '→'),
+                                    h('input', {
+                                      type: 'text',
+                                      className: 'tu-input tu-input-xs',
+                                      // 占位符显示档位名，表示「不填就与档位名相同」
+                                      placeholder: level,
+                                      value: typeof item === 'object' && typeof item.wire === 'string'
+                                        && item.wire !== level ? item.wire : '',
+                                      onChange: (event) => {
+                                        const next = (active.thinkingLevels ?? []).map((entry) => {
+                                          if (levelOf(entry) !== level) return entry
+                                          const wire = event.target.value
+                                          return { level, wire: wire === '' ? level : wire }
+                                        })
+                                        patch({ thinkingLevels: next })
+                                      },
+                                    }),
+                                  )
+                                }),
+                              ),
+                            ),
+                        ),
                       ),
 
                       // 附件
@@ -5812,25 +6207,38 @@ window.__ModuleLoader__.load({
         )
       })()
 
-      // 未定价模型：给出可点击入口，而不是静默算成 0
+      // 顶部工具栏：左侧是视图切换，右侧是价目表相关操作。
+      //
+      // 把「未定价模型」与「刷新价目表」收进这一行、与页签同排：
+      // 它们都属于「当前视图的辅助操作」，单独占一行既零散又浪费高度。
+      // 工具栏**常驻**（不再只在有未定价模型时出现），否则页签会跟着消失，
+      // 用户就没法从统计页切到模型接入页了。
       const unpriced = data?.cost?.unpriced ?? []
-      const unpricedBar = unpriced.length === 0 ? null : h('div', { className: 'tu-unpriced' },
-        h('span', { className: 'tu-unpriced-label' }, `${t('cost.unpriced')} ${unpriced.length}`),
-        ...unpriced.slice(0, 8).map((entry) => h('button', {
-          key: entry.model,
-          type: 'button',
-          className: 'tu-unpriced-item',
-          onClick: () => setPriceDialog({ model: entry.model, input: '', output: '' }),
-        }, entry.model)),
-        h('button', {
-          type: 'button', className: 'tu-button',
-          onClick: () => setAliasForm({}),
-        }, t('alias.manage')),
-        h('button', {
-          type: 'button', className: 'tu-button tu-unpriced-refresh',
-          title: t('cost.refreshHint'),
-          onClick: () => { void refreshPricing() },
-        }, t('cost.refresh')),
+      const toolbar = h('div', { className: 'tu-toolbar' },
+        viewTabs,
+        // 中间留给未定价模型（有才显示）
+        unpriced.length === 0
+          ? h('span', { className: 'tu-toolbar-spacer' })
+          : h('div', { className: 'tu-unpriced' },
+            h('span', { className: 'tu-unpriced-label' }, `${t('cost.unpriced')} ${unpriced.length}`),
+            ...unpriced.slice(0, 6).map((entry) => h('button', {
+              key: entry.model,
+              type: 'button',
+              className: 'tu-unpriced-item',
+              onClick: () => setPriceDialog({ model: entry.model, input: '', output: '' }),
+            }, entry.model)),
+          ),
+        h('div', { className: 'tu-toolbar-actions' },
+          h('button', {
+            type: 'button', className: 'tu-button',
+            onClick: () => setAliasForm({}),
+          }, t('alias.manage')),
+          h('button', {
+            type: 'button', className: 'tu-button',
+            title: t('cost.refreshHint'),
+            onClick: () => { void refreshPricing() },
+          }, t('cost.refresh')),
+        ),
       )
 
       // 别名管理弹窗：列出「看起来像内部代号」的模型，供用户确认真实名称。
@@ -5969,11 +6377,11 @@ window.__ModuleLoader__.load({
       // 供应商视图是完整页面，不叠在统计内容下面。
       if (topView === 'suppliers') {
         return h('div', { className: 'tu-root' },
-          head, viewTabs, supplierPage, supplierModal, modelsModal, versionModal)
+          head, toolbar, supplierPage, supplierModal, modelsModal, versionModal)
       }
 
       return h('div', { className: 'tu-root' },
-        head, viewTabs, scanBar, tabs, accountBar, cards, unpricedBar, charts, sections,
+        head, scanBar, toolbar, tabs, accountBar, cards, charts, sections,
         warn, note, versionModal, priceModal, aliasModal)
     }
 

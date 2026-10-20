@@ -372,6 +372,25 @@ try {
 }
 check('统计页渲染不抛错', renderError === undefined, renderError?.message)
 
+// —— 渲染：供应商弹窗不抛错（防黑屏）——
+// 回归点：状态指示灯曾误用另一个作用域的变量，触发 ReferenceError，
+// 点「编辑」时整个弹窗渲染失败、界面变黑。
+//
+// 这里不模拟点击（面板的 hook 状态在测试桩里不完整），改为直接检查
+// 那段渲染代码里引用的每个变量都已在同作用域声明——这是能抓住该 bug 的
+// 最小断言，且不依赖桩的完整性。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  // 状态指示灯那段代码块
+  const dotBlock = src.slice(src.indexOf("className: 'tu-mlist-dot'") - 400,
+    src.indexOf("className: 'tu-mlist-dot'") + 300)
+  check('指示灯用本行数据而非外层变量', dotBlock.includes('selected.find((item) => item.id === model.id)'), true)
+  // 关键断言：该块自己声明了局部变量来取当前模型。
+  // 之前误用外层 `picked`（另一作用域、尚未初始化），触发 ReferenceError 黑屏。
+  check('指示灯块自带局部变量', dotBlock.includes('const entry = selected.find'), true)
+  check('指示灯用本行 entry 判断', dotBlock.includes('entry !== undefined'), true)
+}
+
 // —— 渲染：侧边栏图标 ——
 let iconError
 try {
