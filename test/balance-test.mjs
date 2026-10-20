@@ -233,6 +233,23 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   check('多余字段被丢弃', withModels.models[0].junk, undefined)
   check('keyEnv 被保留', withModels.keyEnv, 'MY_KEY')
 
+  // 自定义协议值必须能存下来（否则同步时映射会丢）
+  reloaded.upsertSite({
+    id: 'wire-test', label: 'W', baseUrl: 'https://w.test/v1',
+    models: [{
+      id: 'm', thinkingLevels: [
+        'low',
+        { level: 'max', wire: 'ultra' },
+        { level: 'high', wire: 'high' },  // 同档位名 -> 退化成字符串
+        { level: '' },                     // 非法 -> 丢弃
+      ],
+    }],
+  })
+  const wireSite = reloaded.sites.find((s) => s.id === 'wire-test')
+  check('自定义协议值被保留', wireSite.models[0].thinkingLevels[1], { level: 'max', wire: 'ultra' })
+  check('同档位名退化为字符串', wireSite.models[0].thinkingLevels[2], 'high')
+  check('非法条目被丢弃', wireSite.models[0].thinkingLevels.length, 3)
+
   // 重启后仍在（持久化不能丢）
   reloaded.saveTo(path)
   const afterSave = new BalanceBook({ dataDir: dir }).loadFrom(path)
@@ -240,8 +257,9 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   check('模型列表可持久化', roundTrip.models.length, 2)
   check('keyEnv 可持久化', roundTrip.keyEnv, 'MY_KEY')
 
-  // 删除（此时有三个：relay-a、relay-b、with-models）
+  // 删除（此时有四个：relay-a、relay-b、with-models、wire-test）
   check('删除存在站点', reloaded.removeSite('with-models'), true)
+  check('删除自定义协议值站点', reloaded.removeSite('wire-test'), true)
   check('删除不存在的返回 false', reloaded.removeSite('nope'), false)
   check('删除后数量', reloaded.sites.length, 2)
 

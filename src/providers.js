@@ -1,3 +1,8 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { homedir as homedirPath } from 'node:os'
+
 /**
  * 官方平台的余额与配额查询。
  *
@@ -70,6 +75,127 @@ export const PROVIDER_LABELS = {
   openai: 'OpenAI',
   codex: 'ChatGPT (Codex)',
   gemini: 'Google Gemini',
+}
+
+/**
+ * 从 pi-ai 的模型目录读取模型能力。
+ *
+ * 目录文件在 `@earendil-works/pi-ai/dist/providers/data/*.json`，每个模型带：
+ *   - `reasoning`：是否推理模型
+ *   - `thinkingLevelMap`：支持的思考档位（值为 null 表示该档不支持）
+ *   - `contextWindow` / `maxTokens`：容量
+ *   - `input`：接受的输入类型（text / image）
+ *
+ * 这些是权威数据，比让用户逐个手填准确得多，也省掉二次配置。
+ *
+ * 读取失败不抛异常——目录是可选增强，读不到就返回空映射，页面退回手填。
+ */
+export function loadModelCatalog({ dataDir, home } = {}) {
+  const catalog = {}
+  try {
+    
+    const dir = dataDir ?? findCatalogDir({ home })
+    if (dir === null) return catalog
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue
+      let parsed
+      try { parsed = JSON.parse(readFileSync(join(dir, name), 'utf8')) } catch { continue }
+      // 结构：{ <api>: { 'chat:<id>': { id, reasoning, thinkingLevelMap, ... } } }
+      for (const models of Object.values(parsed)) {
+        if (models === null || typeof models !== 'object') continue
+        for (const entry of Object.values(models)) {
+          if (entry === null || typeof entry !== 'object' || typeof entry.id !== 'string') continue
+          // 同一个 id 可能在多个 provider 下出现，合并时以「能力更全」的为准
+          const existing = catalog[entry.id]
+          const info = {
+            reasoning: entry.reasoning === true,
+            thinkingLevels: levelsFromMap(entry.thinkingLevelMap),
+            contextWindow: numberOrUndefined(entry.contextWindow),
+            maxTokens: numberOrUndefined(entry.maxTokens),
+            input: Array.isArray(entry.input) ? entry.input : undefined,
+          }
+          catalog[entry.id] = existing === undefined ? info : mergeCapability(existing, info)
+        }
+      }
+    }
+  } catch { /* 目录不可读时返回空映射 */ }
+  return catalog
+}
+
+/** 把 thinkingLevelMap 转成「支持哪些档位」。 */
+function levelsFromMap(map) {
+  if (map === null || map === undefined || typeof map !== 'object') return undefined
+  // 值为 null 表示该档不支持；有非 null 值才算支持。
+  // `off` 特殊：值为 'none' 之类也算支持（能关掉推理）。
+  return Object.entries(map)
+    .filter(([, wire]) => wire !== null && wire !== undefined)
+    .map(([level]) => level)
+}
+
+/** 合并两个能力信息，取更完整的。 */
+function mergeCapability(a, b) {
+  return {
+    reasoning: a.reasoning || b.reasoning,
+    thinkingLevels: a.thinkingLevels ?? b.thinkingLevels,
+    contextWindow: a.contextWindow ?? b.contextWindow,
+    maxTokens: a.maxTokens ?? b.maxTokens,
+    input: a.input ?? b.input,
+  }
+}
+
+function numberOrUndefined(value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/**
+ * 定位 pi-ai 的模型目录。
+ *
+ * 不能只靠 `createRequire` 从插件目录解析：pi-ai 装在 DSH profile 的
+ * node_modules 下，插件目录里看不到它。所以按优先级依次尝试：
+ *   1. 插件自己的解析路径
+ *   2. `$DSH_HOME/profiles/<profile>/node_modules/...`
+ *   3. `$DSH_HOME/node_modules/...`
+ *
+ * @param {object} [options]
+ * @param {string} [options.home] DSH home，默认读环境变量
+ * @returns {string|null}
+ */
+export function findCatalogDir({ home } = {}) {
+  const candidates = []
+  try {
+    const requireFn = createRequire(import.meta.url)
+    for (const spec of ['@earendil-works/pi-ai/package.json', 'pi-ai/package.json']) {
+      try {
+        candidates.push(join(dirname(requireFn.resolve(spec)), 'dist/providers/data'))
+        break
+      } catch { /* 换下一个 spec */ }
+    }
+  } catch { /* 无 createRequire */ }
+
+  const root = home ?? process.env.DSH_HOME ?? join(homedirPath(), '.dsh')
+  const rel = 'node_modules/@earendil-works/pi-ai/dist/providers/data'
+  const profileName = process.env.DSH_PROFILE
+  if (profileName !== undefined && profileName !== '') {
+    candidates.push(join(root, 'profiles', profileName, rel))
+  }
+  // 环境变量没给 profile 时，直接扫 profiles 目录下的每个 profile。
+  // 宿主不一定把 DSH_PROFILE 传进来，靠环境变量会漏。
+  try {
+    const profilesDir = join(root, 'profiles')
+    if (existsSync(profilesDir)) {
+      for (const name of readdirSync(profilesDir)) {
+        const candidate = join(profilesDir, name, rel)
+        if (existsSync(candidate)) candidates.push(candidate)
+      }
+    }
+  } catch { /* 没有 profiles 目录 */ }
+  candidates.push(join(root, rel))
+
+  for (const candidate of candidates) {
+    try { if (existsSync(candidate)) return candidate } catch { /* 继续 */ }
+  }
+  return null
 }
 
 //#region 工具
