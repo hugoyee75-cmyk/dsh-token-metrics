@@ -139,6 +139,23 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   const r5 = await probeBalance({ baseUrl: 'https://relay.test', apiKey: 'sk-x', fetchImpl: notJson })
   check('非 JSON 响应被处理', r5.ok, false)
 
+  // 指定 balanceKind 时只试对应端点，不在错误端点上白等
+  {
+    const tried = []
+    const spy = async (url) => {
+      tried.push(String(url))
+      return { ok: false, status: 404, async json() { return {} } }
+    }
+    await probeBalance({ baseUrl: 'https://r.test', apiKey: 'k', fetchImpl: spy, balanceKind: 'sub2api' })
+    check('只请求 sub2api 端点', tried.length, 1)
+    checkTrue('请求的是 /v1/usage', tried[0].endsWith('/v1/usage'), tried[0])
+
+    tried.length = 0
+    await probeBalance({ baseUrl: 'https://r.test', apiKey: 'k', fetchImpl: spy, balanceKind: 'newapi' })
+    check('只请求 new-api 端点', tried.length, 1)
+    checkTrue('请求的是 /api/user/self', tried[0].endsWith('/api/user/self'), tried[0])
+  }
+
   // 缺参数时直接拒绝，不发请求
   let called = false
   const spy = async () => { called = true; return { ok: false } }

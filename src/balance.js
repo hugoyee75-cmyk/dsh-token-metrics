@@ -148,7 +148,7 @@ export function parseOneApiUsage(body) {
  * @returns {Promise<{ok:boolean, usd?:number, usedUsd?:number, limitUsd?:number,
  *   kind?:string, username?:string, error?:string}>}
  */
-export async function probeBalance({ baseUrl, apiKey, fetchImpl, signal, timeoutMs = 10_000 }) {
+export async function probeBalance({ baseUrl, apiKey, fetchImpl, signal, timeoutMs = 10_000, balanceKind }) {
   const base = normalizeBaseUrl(baseUrl)
   if (base === '') return { ok: false, error: '没有填写站点地址' }
   if (typeof apiKey !== 'string' || apiKey === '') {
@@ -163,8 +163,21 @@ export async function probeBalance({ baseUrl, apiKey, fetchImpl, signal, timeout
     'user-agent': 'dsh-token-metrics',
   }
 
+  // 用户明确指定了接口类型就只试那一种，省得在错误的端点上白等。
+  const KIND_MAP = {
+    sub2api: ['sub2api'],
+    newapi: ['new-api'],
+    oneapi: ['one-api'],
+  }
+  const endpoints = balanceKind !== undefined && KIND_MAP[balanceKind] !== undefined
+    ? BALANCE_ENDPOINTS.filter((entry) => KIND_MAP[balanceKind].includes(entry.kind))
+    : BALANCE_ENDPOINTS
+  if (endpoints.length === 0) {
+    return { ok: false, error: '指定的余额接口类型没有可用端点' }
+  }
+
   let lastError = ''
-  for (const endpoint of BALANCE_ENDPOINTS) {
+  for (const endpoint of endpoints) {
     try {
       // 每个请求单独设超时：某个端点挂住不该拖死整个探测。
       const controller = typeof AbortController === 'function' ? new AbortController() : undefined
@@ -407,6 +420,7 @@ export class BalanceBook {
       // 后者是路由必须声明的模型清单。漏掉任何一个都会让同步失败。
       keyEnv: input.keyEnv ?? '',
       api: input.api ?? 'openai-completions',
+      balanceKind: input.balanceKind ?? 'auto',
       provider: input.provider,
       models: input.models ?? [],
       kind: input.kind ?? 'auto',
@@ -476,6 +490,7 @@ export class BalanceBook {
         baseUrl: site.baseUrl,
         keyEnv: site.keyEnv ?? '',
         api: site.api ?? 'openai-completions',
+        balanceKind: site.balanceKind ?? 'auto',
         provider: site.provider,
         models: site.models ?? [],
         kind: site.kind,
@@ -500,6 +515,11 @@ function sanitizeSite(input) {
     // 上游协议：openai-completions / openai-responses / anthropic-messages。
     // 同步到 DSH 时会写进 provider 的 api 字段，选错请求格式就不对。
     api: typeof input?.api === 'string' && input.api !== '' ? input.api : 'openai-completions',
+    // 余额接口类型：auto / sub2api / newapi / oneapi / none。
+    // 明确指定能避免在错误端点上白等。
+    balanceKind: typeof input?.balanceKind === 'string' && input.balanceKind !== ''
+      ? input.balanceKind
+      : 'auto',
     kind: typeof input?.kind === 'string' ? input.kind : 'auto',
     // 平台 id（deepseek / kimi / glm ...）。保存它是为了在「还没查询过」
     // 时也能判断该站点是余额型还是订阅型，而不是等探测完才知道。
