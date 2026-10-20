@@ -64,11 +64,38 @@ Restart DSH and a "Token Usage Stats" icon appears in the sidebar.
 
 The first time you open the panel, the plugin backfills your existing session logs so your earlier usage shows up too.
 
-## Screenshot
+## Screenshots
 
-The "Token Usage Stats" page in the sidebar: time range and model filters on top, eight summary metrics below them, then the trend chart and model-share donut, and finally a detail table you can switch between model / origin / project / provider / account / date views.
+### Stats page (dark theme)
 
-![Token usage stats page](docs/images/panel.png)
+Time range and model filters on top, eight summary metrics below them, then the
+trend chart and model-share donut, and finally a detail table you can switch
+between model / origin / project / provider / account / date views. Switching
+between today / last 7 days / all time updates the cards, charts, tables and
+cost together.
+
+![Stats page (dark theme)](docs/images/stats-dark.png)
+
+### Model access
+
+The "Model Access" tab manages relay stations and official platforms: balances,
+available models, subscription quota windows and reset countdowns. Balances are
+clickable to switch between USD and RMB.
+
+![Model access](docs/images/model-access.png)
+
+Subscription platforms (such as Zhipu GLM Coding Plan and Kimi Coding Plan) have
+no "balance" concept; what is shown is each time window's remaining share and
+reset countdown.
+
+### Bottom-right notifications
+
+State changes — low balance, quota running low, quota resetting soon, query
+failed, a newer plugin version — are pushed to the bottom-right. Alerts are
+de-duplicated in three layers (server cooldown, persisted state, client memory)
+so they do not pop up repeatedly.
+
+![Bottom-right notifications](docs/images/notifications.png)
 
 ## What the panel shows
 
@@ -525,6 +552,10 @@ Issues and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). For security reports, see [SECURITY.md](SECURITY.md).
 
 If this plugin is useful to you, a Star ⭐ is the most direct way to support the project.
+
+## Acknowledgements
+
+- [LINUX DO](https://linux.do/) — a sincere, friendly, united and professional open-source and technology discussion community.
 
 ## License
 
