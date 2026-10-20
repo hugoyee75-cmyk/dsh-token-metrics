@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   PriceBook, resolvePrice, costOf, extractChatPrices, normalizeModelName,
-  channelTrust, BUILTIN_PRICES, DEFAULT_USD_CNY,
+  channelTrust, BUILTIN_PRICES, DEFAULT_USD_CNY, isOffPeak,
 } from '../src/pricing.js'
 
 const failures = []
@@ -30,6 +30,55 @@ check('去掉渠道前缀', normalizeModelName('z-ai/glm-5.3-flash'), 'glm-5-3-f
 check('统一大小写与分隔符', normalizeModelName('DeepSeek_V4.1_Flash'), 'deepseek-v4-1-flash')
 check('空名安全', normalizeModelName(''), '')
 check('非字符串安全', normalizeModelName(null), '')
+
+// —— 峰谷定价 ——
+// DeepSeek 分时段计价，谷时是峰时的一半。LiteLLM 用 off_peak_pricing 表达，
+// 并带 windows 时段定义。不区分会让谷时调用被高估最多一倍。
+{
+  const table = extractChatPrices({
+    'ds': {
+      mode: 'chat',
+      input_cost_per_token: 3e-7,
+      output_cost_per_token: 1.2e-6,
+      cache_read_input_token_cost: 6e-9,
+      off_peak_pricing: {
+        input_cost_per_token: 1.5e-7,
+        output_cost_per_token: 6e-7,
+        cache_read_input_token_cost: 3e-9,
+        windows: [
+          { hours_utc: ['00:00-01:00', '04:00-06:00', '10:00-00:00'], weekdays: [1, 2, 3, 4, 5] },
+          { hours_utc: '00:00-00:00', weekdays: [6, 7] },
+        ],
+      },
+    },
+  })
+  const price = table.ds
+  check('谷时价被解析', price.offPeak?.input, 1.5e-7)
+  check('谷时窗口被保留', price.offPeak?.windows?.length, 2)
+
+  // 工作日 01:00-04:00 是峰时，04:00-06:00 是谷时
+  check('工作日 02:00 非谷时', isOffPeak(new Date('2026-10-19T02:00:00Z'), price.offPeak.windows), false)
+  check('工作日 04:30 是谷时', isOffPeak(new Date('2026-10-19T04:30:00Z'), price.offPeak.windows), true)
+  // 周末全天谷时
+  check('周六全天谷时', isOffPeak(new Date('2026-10-24T02:00:00Z'), price.offPeak.windows), true)
+
+  // 跨零点区间
+  const wrap = [{ hours_utc: ['22:00-02:00'], weekdays: [1, 2, 3, 4, 5, 6, 7] }]
+  check('跨零点命中 23:00', isOffPeak(new Date('2026-10-19T23:00:00Z'), wrap), true)
+  check('跨零点不命中 03:00', isOffPeak(new Date('2026-10-19T03:00:00Z'), wrap), false)
+
+  // 计价：谷时恰为峰时的一半
+  const counters = { inputTokens: 1e6, outputTokens: 1e6, cacheReadTokens: 0 }
+  check('峰时计价', Number(costOf(counters, price, 1, { at: new Date('2026-10-19T02:00:00Z') }).toFixed(6)), 1.5)
+  check('谷时计价为一半', Number(costOf(counters, price, 1, { at: new Date('2026-10-19T04:30:00Z') }).toFixed(6)), 0.75)
+  check('强制谷时', Number(costOf(counters, price, 1, { offPeak: true }).toFixed(6)), 0.75)
+  // 没给时刻时按峰时——宁可偏高也不要漏算
+  check('无时刻按峰时', Number(costOf(counters, price, 1).toFixed(6)), 1.5)
+  // 普通模型不受影响
+  const plain = extractChatPrices({ 'p': { mode: 'chat', input_cost_per_token: 1e-6, output_cost_per_token: 2e-6 } })
+  check('普通模型无谷时价', plain.p.offPeak, undefined)
+  checkTrue('无谷时价时按原价算', Number(costOf(counters, plain.p, 1).toFixed(6)) === 3)
+}
 
 //#endregion
 

@@ -76,7 +76,7 @@ export function extractChatPrices(raw) {
     const input = numberOrUndefined(entry.input_cost_per_token)
     const output = numberOrUndefined(entry.output_cost_per_token)
     if (input === undefined || output === undefined) continue
-    out[name] = {
+    const price = {
       input,
       output,
       cacheRead: numberOrUndefined(entry.cache_read_input_token_cost) ?? input,
@@ -84,6 +84,12 @@ export function extractChatPrices(raw) {
       // 比当作 0（免费）更接近真实账单。
       cacheWrite: numberOrUndefined(entry.cache_creation_input_token_cost) ?? input,
     }
+    // 峰谷定价：少数厂商（目前只有 DeepSeek 系）分时段计价，
+    // 谷时价通常是峰时的一半。LiteLLM 用 off_peak_pricing 表达，
+    // 附带 windows 时段定义，这里原样保留供成本计算按调用时刻取用。
+    const offPeak = parseOffPeak(entry.off_peak_pricing)
+    if (offPeak !== undefined) price.offPeak = offPeak
+    out[name] = price
   }
   return out
 }
@@ -144,6 +150,89 @@ export function channelTrust(name) {
   if (slash === -1) return 60  // 无前缀：多半是官方价
   const provider = name.slice(0, slash).toLowerCase()
   return CHANNEL_TRUST[provider] ?? 20
+}
+
+/**
+ * 解析 LiteLLM 的 `off_peak_pricing`。
+ *
+ * 结构：
+ *   {
+ *     input_cost_per_token, output_cost_per_token,
+ *     cache_read_input_token_cost,
+ *     windows: [{ hours_utc: ["00:00-01:00", ...] | "00:00-00:00",
+ *                 weekdays: [1..7] }]
+ *   }
+ *
+ * `hours_utc` 为单个字符串 `"00:00-00:00"` 表示全天（周末就是这种写法）。
+ *
+ * @returns {{input,output,cacheRead,cacheWrite,windows}|undefined}
+ */
+export function parseOffPeak(raw) {
+  if (raw === null || raw === undefined || typeof raw !== 'object') return undefined
+  const input = numberOrUndefined(raw.input_cost_per_token)
+  const output = numberOrUndefined(raw.output_cost_per_token)
+  if (input === undefined || output === undefined) return undefined
+  return {
+    input,
+    output,
+    cacheRead: numberOrUndefined(raw.cache_read_input_token_cost) ?? input,
+    cacheWrite: numberOrUndefined(raw.cache_creation_input_token_cost) ?? input,
+    windows: Array.isArray(raw.windows) ? raw.windows : [],
+  }
+}
+
+/**
+ * 判断某个 UTC 时刻是否落在谷时窗口内。
+ *
+ * 模型可能有多组窗口（工作日若干时段 + 周末全天），命中任一即算谷时。
+ * 没有窗口定义时返回 false——宁可按峰时（较贵）估算，也不要漏算。
+ *
+ * @param {Date} at UTC 时刻
+ * @param {object[]} windows
+ */
+export function isOffPeak(at, windows) {
+  if (!Array.isArray(windows) || windows.length === 0) return false
+  const weekday = at.getUTCDay() === 0 ? 7 : at.getUTCDay()  // ISO：周一=1，周日=7
+  const minutes = at.getUTCHours() * 60 + at.getUTCMinutes()
+  for (const window of windows) {
+    if (window === null || typeof window !== 'object') continue
+    const days = Array.isArray(window.weekdays) ? window.weekdays : []
+    if (days.length > 0 && !days.includes(weekday)) continue
+    const hours = window.hours_utc
+    // 单字符串且首尾相同 -> 表示全天
+    if (typeof hours === 'string') {
+      const [from, to] = hours.split('-')
+      if (from === to) return true
+      if (within(minutes, from, to)) return true
+      continue
+    }
+    if (Array.isArray(hours)) {
+      for (const range of hours) {
+        const [from, to] = String(range).split('-')
+        if (within(minutes, from, to)) return true
+      }
+    }
+  }
+  return false
+}
+
+/** 判断分钟数是否落在 [from, to) 区间内（跨零点也支持）。 */
+function within(minutes, from, to) {
+  const a = toMinutes(from)
+  const b = toMinutes(to)
+  if (a === null || b === null) return false
+  if (a <= b) return minutes >= a && minutes < b
+  // 跨零点，例如 22:00-02:00
+  return minutes >= a || minutes < b
+}
+
+function toMinutes(text) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(text).trim())
+  if (match === null) return null
+  const hours = Number(match[1])
+  const mins = Number(match[2])
+  if (hours > 24 || mins > 59) return null
+  return hours * 60 + mins
 }
 
 function numberOrUndefined(value) {
@@ -226,19 +315,26 @@ export function resolvePrice(modelName, priceTable, overrides = {}) {
  * `multiplier` 是给中转站加价用的：同一个模型在不同渠道可能按官方价的
  * 不同倍率计费，这是用户明确提出的需求。
  */
-export function costOf(counters, price, multiplier = 1) {
+export function costOf(counters, price, multiplier = 1, options = {}) {
   if (price === undefined || price === null) return 0
+  // 峰谷定价：分时段计价的厂商（目前是 DeepSeek 系）在谷时按另一套低价算。
+  // 调用方通过 `at`（UTC 时刻）告知这批用量发生在什么时候；未给出时按峰时
+  // 估算——宁可偏高也不要漏算。
+  const useOffPeak = price.offPeak !== undefined
+    && (options.offPeak === true
+      || (options.at !== undefined && isOffPeak(options.at, price.offPeak.windows)))
+  const effective = useOffPeak ? price.offPeak : price
   const input = counters?.inputTokens ?? 0
   const output = counters?.outputTokens ?? 0
   const cacheRead = counters?.cacheReadTokens ?? 0
   const cacheWrite = counters?.cacheWriteTokens ?? 0
   const reasoning = counters?.reasoningTokens ?? 0
-  const raw = input * (price.input ?? 0)
-    + output * (price.output ?? 0)
-    + cacheRead * (price.cacheRead ?? 0)
-    + cacheWrite * (price.cacheWrite ?? 0)
+  const raw = input * (effective.input ?? 0)
+    + output * (effective.output ?? 0)
+    + cacheRead * (effective.cacheRead ?? 0)
+    + cacheWrite * (effective.cacheWrite ?? 0)
     // 推理 token 没有独立公布价时按输出价计——它们本质上是被生成的 token
-    + reasoning * (price.output ?? 0)
+    + reasoning * (effective.output ?? 0)
   const factor = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1
   return raw * factor
 }
