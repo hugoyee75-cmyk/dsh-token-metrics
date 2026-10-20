@@ -49,6 +49,9 @@ check('另一个中转站', detectProvider('https://cmd.mrhear.us.ci'), undefine
 check('空值安全', detectProvider(''), undefined)
 
 check('官方平台标记为支持', isSupportedProvider('https://api.deepseek.com'), true)
+// 能识别但不支持查询：识别是为了给出准确说明
+check('Codex 能被识别', detectProvider('https://chatgpt.com/backend-api'), 'codex')
+check('Codex 标记为不支持查询', isSupportedProvider('https://chatgpt.com/backend-api'), false)
 check('中转站标记为不支持', isSupportedProvider('https://relay.test'), false)
 check('有展示名', PROVIDER_LABELS.deepseek, 'DeepSeek')
 
@@ -225,56 +228,38 @@ check('null 安全', windowLabel(null), 'Quota')
 
 //#endregion
 
-//#region 配额型：Codex / ChatGPT
+//#region 不支持的平台：要给出准确原因，而不是含糊失败
 
+// ChatGPT 订阅额度绑定在账号 OAuth 上，API key 请求实测返回 403。
+// Gemini 没有公开配额接口。两者都必须明确说明，不能假装支持。
 {
   const codex = await probeOfficial({
     baseUrl: 'https://chatgpt.com/backend-api',
-    apiKey: 'oauth-token',
-    fetchImpl: respond({
-      '/backend-api/codex/usage': {
-        rate_limit: {
-          primary: { used_percent: 35, limit_window_seconds: 18_000, resets_at: 1_900_000_000_000 },
-          secondary: { used_percent: 72, limit_window_seconds: 604_800 },
-        },
-      },
-    }),
+    apiKey: 'sk-test',
+    fetchImpl: respond({}),
   })
-  check('Codex 平台识别', codex.provider, 'codex')
-  check('Codex 两个窗口', codex.quotas.length, 2)
-  check('Codex 5小时标签', codex.quotas[0].label, '5-hour')
-  check('Codex 5小时已用', codex.quotas[0].used, 35)
-  check('Codex 周窗口标签', codex.quotas[1].label, 'Weekly')
-  check('Codex 周窗口已用', codex.quotas[1].used, 72)
+  check('Codex 标记为不支持', codex.unsupported, true)
+  check('Codex 不算成功', codex.ok, false)
+  checkTrue('Codex 说明绑定登录态', codex.error.includes('登录态'), codex.error)
 
-  // 只有 credit 余额的形态
-  const credits = await probeOfficial({
-    baseUrl: 'https://chatgpt.com/backend-api',
-    apiKey: 't',
-    fetchImpl: respond({ '/backend-api/codex/usage': { credits: 12.5 } }),
-  })
-  check('Codex credit 余额', credits.usd, 12.5)
-  check('Codex credit 类型', credits.kind, 'balance')
-}
-
-//#endregion
-
-//#region Gemini
-
-{
   const gemini = await probeOfficial({
     baseUrl: 'https://generativelanguage.googleapis.com',
     apiKey: 'k',
-    fetchImpl: respond({ '/v1beta/models': { models: [] } }),
+    fetchImpl: respond({}),
   })
-  // Gemini 没有公开配额接口，如实说明而不是编数字
-  check('Gemini 不谎报余额', gemini.ok, false)
-  checkTrue('Gemini 说明原因', gemini.error.includes('配额'), gemini.error)
+  check('Gemini 标记为不支持', gemini.unsupported, true)
+  checkTrue('Gemini 说明无公开接口', gemini.error.includes('配额'), gemini.error)
+
+  // 关键：不支持时**绝不能发请求**——发了也只是白费并可能触发风控
+  let called = false
+  const spy = async () => { called = true; return { ok: false, status: 403, async json() { return {} } } }
+  await probeOfficial({ baseUrl: 'https://chatgpt.com/backend-api', apiKey: 'k', fetchImpl: spy })
+  check('不支持时零请求', called, false)
 }
 
 //#endregion
 
-//#region 配额型：MiniMax
+//#region 配额型：MiniMax//#region 配额型：MiniMax
 
 {
   const mm = await probeOfficial({

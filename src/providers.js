@@ -29,7 +29,10 @@ const HOST_PATTERNS = [
   { id: 'stepfun', test: /(^|\.)api\.stepfun\.(ai|com)$/ },
   { id: 'anthropic', test: /(^|\.)api\.anthropic\.com$/ },
   { id: 'openai', test: /(^|\.)api\.openai\.com$/ },
-  // Codex / ChatGPT 订阅的用量接口在 chatgpt.com 上，不在 api.openai.com
+  // 下面两个能识别但**不支持查询**，识别它们只是为了给出准确说明，
+  // 而不是让用户对着一个含糊的 404 猜。
+  // ChatGPT 订阅额度绑定在账号 OAuth token 上，API key 请求会返回 403；
+  // Gemini 没有公开的配额接口。
   { id: 'codex', test: /(^|\.)(chatgpt\.com|chat\.openai\.com)$/ },
   { id: 'gemini', test: /(^|\.)(generativelanguage\.googleapis\.com|aistudio\.google\.com)$/ },
 ]
@@ -67,6 +70,35 @@ export const PROVIDER_LABELS = {
   openai: 'OpenAI',
   codex: 'ChatGPT (Codex)',
   gemini: 'Google Gemini',
+}
+
+/**
+ * 各家服务的预设连接信息。
+ *
+ * 让用户先选「服务」，再自动填好地址与协议——比让他手抄 baseURL 可靠得多，
+ * 也避免把 Anthropic 的地址配成 OpenAI 协议这类低级错误。
+ *
+ * `keyHint` 说明该服务接受哪种凭据（有的只认账号登录态）。
+ */
+export const SERVICE_PRESETS = [
+  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions', balance: 'admin', keyHint: 'sk- 开头；查询用量需要 sk-admin- 组织密钥' },
+  { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', balance: 'none', keyHint: 'sk-ant- 开头' },
+  { id: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'openai-completions', balance: 'none', keyHint: 'Google AI Studio 的 key' },
+  { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', balance: 'yes' },
+  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', balance: 'yes' },
+  { id: 'kimi', label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', balance: 'yes' },
+  { id: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
+  { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', balance: 'yes' },
+  { id: 'siliconflow', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', balance: 'yes' },
+  { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
+  { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
+  { id: 'codex', label: 'ChatGPT (Codex)', baseUrl: 'https://chatgpt.com/backend-api', api: 'openai-responses', balance: 'oauth', keyHint: '需账号登录态，API key 无法查询余额' },
+  { id: 'custom', label: '自定义端点', baseUrl: '', api: 'openai-completions', balance: 'auto' },
+]
+
+/** 按 id 取预设。 */
+export function servicePreset(id) {
+  return SERVICE_PRESETS.find((entry) => entry.id === id)
 }
 
 //#region 工具
@@ -181,7 +213,8 @@ async function probeSiliconflow({ baseUrl, apiKey, fetchImpl }) {
 /** Novita：/v1/user/balance 返回 balance_infos 或可用余额。 */
 async function probeNovita({ baseUrl, apiKey, fetchImpl }) {
   const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
-  for (const path of ['/v1/user/balance', '/user/balance']) {
+  // Novita 的余额接口在 v3 下（实测自 CC Switch 的实现）
+  for (const path of ['/v3/user/balance', '/v1/user/balance', '/user/balance']) {
     const result = await getJson(`${origin}${path}`, apiKey, fetchImpl)
     const body = result.body
     if (body === undefined) continue
@@ -203,7 +236,8 @@ async function probeNovita({ baseUrl, apiKey, fetchImpl }) {
 /** 阶跃星辰：/v1/accounts 或 /user/balance。 */
 async function probeStepfun({ baseUrl, apiKey, fetchImpl }) {
   const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
-  for (const path of ['/v1/user/balance', '/user/balance']) {
+  // 阶跃星辰的余额在 /v1/accounts 下（实测自 CC Switch 的实现）
+  for (const path of ['/v1/accounts', '/v1/user/balance', '/user/balance']) {
     const result = await getJson(`${origin}${path}`, apiKey, fetchImpl)
     const data = result.body?.data ?? result.body
     const total = num(data?.balance ?? data?.total_balance)
@@ -415,62 +449,6 @@ async function probeMinimax({ baseUrl, apiKey, fetchImpl }) {
 //#endregion
 
 /**
- * ChatGPT / Codex 订阅用量。
- *
- * 结构与 CC Switch 里的 `CodexUsageResponse` 一致：
- *   { rate_limit: { primary: { used_percent, limit_window_seconds, resets_at },
- *                   secondary: {...} } }
- * primary 通常是 5 小时窗口，secondary 是周窗口。
- *
- * 注意：这个接口需要 ChatGPT 的 OAuth token，不是普通的 API key。
- */
-async function probeCodex({ baseUrl, apiKey, fetchImpl }) {
-  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
-  const result = await getJson(`${origin}/backend-api/codex/usage`, apiKey, fetchImpl)
-  if (result.body === undefined) {
-    return { ok: false, error: result.error ?? `HTTP ${result.status}` }
-  }
-  const rateLimit = result.body.rate_limit ?? result.body
-  const quotas = []
-
-  /** 把一个 CodexRateLimitWindow 转成配额条目。 */
-  const toQuota = (window, fallbackLabel) => {
-    if (window === null || typeof window !== 'object') return undefined
-    const usedPercent = num(window.used_percent)
-    if (usedPercent === undefined) return undefined
-    // 窗口长度换算成可读标签
-    const seconds = num(window.limit_window_seconds)
-    let label = fallbackLabel
-    if (seconds !== undefined && seconds > 0) {
-      if (seconds <= 6 * 3600) label = '5-hour'
-      else if (seconds <= 8 * 86400) label = 'Weekly'
-      else if (seconds <= 32 * 86400) label = 'Monthly'
-    }
-    // used_percent 是「已用百分比」，转成 used/limit 的 100 分制
-    return quota(
-      label,
-      usedPercent,
-      100,
-      num(window.resets_at ?? window.resets_in_seconds),
-      '%',
-    )
-  }
-
-  const primary = toQuota(rateLimit?.primary, '5-hour')
-  const secondary = toQuota(rateLimit?.secondary, 'Weekly')
-  if (primary !== undefined) quotas.push(primary)
-  if (secondary !== undefined) quotas.push(secondary)
-
-  if (quotas.length === 0) {
-    // 也可能是 credit 余额形式
-    const credits = num(result.body.credits ?? result.body.balance)
-    if (credits !== undefined) return { ok: true, kind: 'balance', usd: credits }
-    return { ok: false, error: '响应里没有用量窗口' }
-  }
-  return { ok: true, kind: 'quota', quotas }
-}
-
-/**
  * OpenAI 平台余额。
  *
  * 官方没有公开的「查询账户余额」接口，只有用量接口（需要 organization
@@ -502,27 +480,15 @@ async function probeOpenai({ baseUrl, apiKey, fetchImpl }) {
 }
 
 /**
- * Google Gemini 配额。
+ * 已知无法用 API key 查询余额的平台，以及原因。
  *
- * 结构与 CC Switch 的 `GeminiQuotaResponse` 一致：
- *   { buckets: [{ remainingFraction, resetTime, modelId }] }
- * `remainingFraction` 是「剩余比例」，要转成已用。
+ * 这些平台的额度绑定在**账号登录态**（OAuth / 订阅）上，而不是 API key。
+ * 用 key 去请求只会得到 403 或登录页——与其让用户以为「插件坏了」，
+ * 不如直接说明为什么查不了。
  */
-async function probeGemini({ baseUrl, apiKey, fetchImpl }) {
-  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
-  const result = await getJson(
-    `${origin}/v1beta/models?key=${encodeURIComponent(apiKey)}`, '', fetchImpl,
-  )
-  // Gemini 没有统一的配额查询接口；能查到模型列表说明 key 有效，
-  // 但拿不到额度。这里如实说明，而不是编一个数字。
-  if (result.body !== undefined) {
-    return {
-      ok: false,
-      error: 'Gemini 未提供公开的配额查询接口，仅能确认密钥有效',
-      keyValid: true,
-    }
-  }
-  return { ok: false, error: result.error ?? `HTTP ${result.status}` }
+const UNSUPPORTED_REASONS = {
+  codex: 'ChatGPT 订阅额度绑定在账号登录态上，API key 无法查询。请在 ChatGPT 官网查看用量。',
+  gemini: 'Google 未提供公开的配额查询接口，API key 无法查询余额。',
 }
 
 /** 平台 id -> 探测函数。 */
@@ -535,9 +501,7 @@ const ADAPTERS = {
   siliconflow: probeSiliconflow,
   novita: probeNovita,
   stepfun: probeStepfun,
-  codex: probeCodex,
   openai: probeOpenai,
-  gemini: probeGemini,
 }
 
 /**
@@ -554,8 +518,10 @@ export async function probeOfficial({ baseUrl, apiKey, fetchImpl, provider }) {
     return {
       ok: false,
       unsupported: true,
-      error: `${PROVIDER_LABELS[id] ?? id} 暂不支持余额查询`,
+      error: UNSUPPORTED_REASONS[id]
+        ?? `${PROVIDER_LABELS[id] ?? id} 暂不支持余额查询`,
       provider: id,
+      label: PROVIDER_LABELS[id] ?? id,
     }
   }
   const doFetch = fetchImpl ?? globalThis.fetch

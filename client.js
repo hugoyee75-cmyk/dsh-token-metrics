@@ -50,6 +50,29 @@ window.__ModuleLoader__.load({
   const BALANCE_REMOVE_ROUTE = '/api/dsh-token-metrics/balance/remove'
   const BALANCE_PROBE_ROUTE = '/api/dsh-token-metrics/balance/probe'
   const PRICING_ALIAS_ROUTE = '/api/dsh-token-metrics/pricing/alias'
+  /**
+   * 各家服务的预设连接信息。
+   *
+   * 客户端独立维护一份：让用户先选「服务」，自动填好地址与协议，
+   * 避免把 Anthropic 的地址配成 OpenAI 协议这类错误。
+   * `balance` 说明该服务的余额能否用 API key 查询。
+   */
+  const SERVICE_PRESETS = [
+    { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions', balance: 'admin', keyHint: 'sk- 开头；查用量需 sk-admin- 组织密钥' },
+    { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', balance: 'no', keyHint: 'sk-ant- 开头' },
+    { id: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'openai-completions', balance: 'no', keyHint: 'Google AI Studio 的 key' },
+    { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', balance: 'yes' },
+    { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'kimi', label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
+    { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'siliconflow', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
+    { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'codex', label: 'ChatGPT (Codex)', baseUrl: 'https://chatgpt.com/backend-api', api: 'openai-responses', balance: 'oauth', keyHint: '需账号登录态，API key 无法查余额' },
+    { id: 'custom', label: '自定义端点', baseUrl: '', api: 'openai-completions', balance: 'auto' },
+  ]
+
   const SUPPLIER_MODELS_ROUTE = '/api/dsh-token-metrics/supplier/models'
   const SUPPLIER_SYNC_ROUTE = '/api/dsh-token-metrics/supplier/sync'
   const PRICING_MULTIPLIER_ROUTE2 = '/api/dsh-token-metrics/pricing/multiplier'
@@ -124,6 +147,16 @@ window.__ModuleLoader__.load({
       'supplier.fetchFail': '获取模型列表失败',
       'supplier.probeAll': '刷新全部余额',
       'supplier.groupBasic': '基础信息',
+      'supplier.service': '服务',
+      'supplier.serviceHint': '选择服务后会自动填好地址与接口格式',
+      'supplier.servicePick': '选择服务',
+      'supplier.customEndpoint': '自定义端点',
+      'supplier.balanceCap': '余额查询',
+      'supplier.balanceYes': '支持',
+      'supplier.balanceNo': '不支持',
+      'supplier.balanceAdmin': '需管理员密钥',
+      'supplier.balanceOauth': '需账号登录态',
+      'supplier.keyHintLabel': '凭据要求',
       'supplier.groupService': '服务与凭据',
       'supplier.groupModels': '模型选择',
       'supplier.optional': '可选',
@@ -437,6 +470,16 @@ window.__ModuleLoader__.load({
       'supplier.fetchFail': 'Could not fetch model list',
       'supplier.probeAll': 'Refresh all balances',
       'supplier.groupBasic': 'Basics',
+      'supplier.service': 'Service',
+      'supplier.serviceHint': 'Picking a service fills in the URL and protocol',
+      'supplier.servicePick': 'Select a service',
+      'supplier.customEndpoint': 'Custom endpoint',
+      'supplier.balanceCap': 'Balance',
+      'supplier.balanceYes': 'supported',
+      'supplier.balanceNo': 'not supported',
+      'supplier.balanceAdmin': 'needs admin key',
+      'supplier.balanceOauth': 'needs sign-in',
+      'supplier.keyHintLabel': 'Credential',
       'supplier.groupService': 'Service & credentials',
       'supplier.groupModels': 'Model selection',
       'supplier.optional': 'optional',
@@ -1077,6 +1120,29 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
+.tu-serviceinfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+  font-size: 11.5px;
+}
+.tu-captag {
+  border-radius: 999px;
+  padding: 1px 8px;
+  line-height: 16px;
+  font-size: 11px;
+}
+.tu-captag-ok {
+  color: var(--dsw-alias-state-success-primary);
+  border: 1px solid var(--dsw-alias-state-success-primary);
+}
+.tu-captag-no {
+  color: var(--dsw-alias-label-secondary);
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+.tu-servicehint { color: var(--dsw-alias-label-secondary); }
 .tu-balnoplan-note {
   margin-top: 8px;
   font-size: 11.5px;
@@ -4769,12 +4835,56 @@ window.__ModuleLoader__.load({
 
           h('div', { className: 'tu-sheet-body' },
 
-            // ① 连接信息：一气呵成，不再分成两块
+            // ① 先选服务：选完自动填地址与协议，比手抄 baseURL 可靠
             h('div', { className: 'tu-row' },
+              h('div', { className: 'tu-col tu-col-grow' },
+                fieldLabel(t('supplier.service')),
+                h('select', {
+                  className: 'tu-input tu-select',
+                  value: form.service ?? 'custom',
+                  onChange: (event) => {
+                    const preset = SERVICE_PRESETS.find((entry) => entry.id === event.target.value)
+                    if (preset === undefined) return
+                    // 选中服务时把地址、协议、显示名一起填好；
+                    // 自定义端点则保留用户已填内容。
+                    setSupplierForm((current) => (current === null ? null : {
+                      ...current,
+                      service: preset.id,
+                      baseUrl: preset.id === 'custom' ? current.baseUrl : preset.baseUrl,
+                      api: preset.api,
+                      label: current.label || (preset.id === 'custom' ? '' : preset.label),
+                    }))
+                  },
+                },
+                h('option', { value: 'custom' }, t('supplier.customEndpoint')),
+                ...SERVICE_PRESETS.filter((entry) => entry.id !== 'custom')
+                  .map((entry) => h('option', { key: entry.id, value: entry.id }, entry.label)),
+                ),
+              ),
               h('div', { className: 'tu-col tu-col-wide' },
                 fieldLabel(t('supplier.name')),
                 input(form.label, t('supplier.namePlaceholder'), (value) => setField('label', value)),
               ),
+            ),
+
+            // 选完服务后展示它的能力提示：余额能不能查、要什么凭据
+            (() => {
+              const preset = SERVICE_PRESETS.find((entry) => entry.id === (form.service ?? 'custom'))
+              if (preset === undefined || preset.id === 'custom') return null
+              const balanceText = preset.balance === 'yes' ? t('supplier.balanceYes')
+                : preset.balance === 'admin' ? t('supplier.balanceAdmin')
+                  : preset.balance === 'oauth' ? t('supplier.balanceOauth')
+                    : t('supplier.balanceNo')
+              return h('p', { className: 'tu-serviceinfo' },
+                h('span', { className: `tu-captag ${preset.balance === 'yes' ? 'tu-captag-ok' : 'tu-captag-no'}` },
+                  `${t('supplier.balanceCap')}：${balanceText}`),
+                preset.keyHint === undefined
+                  ? null
+                  : h('span', { className: 'tu-servicehint' }, `${t('supplier.keyHintLabel')}：${preset.keyHint}`),
+              )
+            })(),
+
+            h('div', { className: 'tu-row' },
               h('div', { className: 'tu-col tu-col-grow' },
                 fieldLabel(t('supplier.baseUrl')),
                 input(form.baseUrl, t('supplier.urlPlaceholder'), (value) => setField('baseUrl', value), { type: 'url' }),
@@ -5094,6 +5204,7 @@ window.__ModuleLoader__.load({
             baseUrl: form.baseUrl,
             keyEnv: form.keyEnv,
             api: form.api ?? 'openai-completions',
+            service: form.service ?? 'custom',
             // 手填余额：保存成 lastBalance，页面就按它显示
             ...(form.manualBalance !== undefined && form.manualBalance !== ''
               ? { lastBalance: { usd: Number(form.manualBalance) }, lastCheckedAt: Date.now() }
@@ -5229,6 +5340,7 @@ window.__ModuleLoader__.load({
                 type: 'button', className: 'tu-btn tu-btn-primary',
                 onClick: () => setSupplierForm({
                   id: '', label: '', baseUrl: '', apiKey: '', keyEnv: '',
+                  service: 'custom', api: 'openai-completions',
                   models: [], available: [], editing: false,
                 }),
               }, t('supplier.add')),
@@ -5273,6 +5385,7 @@ window.__ModuleLoader__.load({
                       label: entry.label ?? entry.id,
                       baseUrl: entry.baseUrl ?? '',
                       apiKey: '', keyEnv: '',
+                      service: 'custom', api: 'openai-completions',
                       models: [], available: [], editing: false,
                     }),
                   }, t('supplier.add')),
