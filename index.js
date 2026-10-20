@@ -56,7 +56,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.3.0'
+export const version = '3.0.0'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -1907,7 +1907,10 @@ export function apply(ctx, rawConfig) {
   syncProviderKinds()
   // 插件可能晚于本插件注册 provider，定期刷新一次即可，开销可忽略。
   // 卸载时关掉所有 SSE 连接，避免残留半开连接
-  ctx.effect(() => () => pushHub.close(), 'token-metrics: SSE 关闭')
+  ctx.effect(() => () => {
+    pushHub.close()
+    saveAlertState(true)
+  }, 'token-metrics: SSE 关闭')
 
   ctx.effect(() => {
     const timer = setInterval(syncProviderKinds, 60_000)
@@ -1923,8 +1926,34 @@ export function apply(ctx, rawConfig) {
   // 但 webServer 允许 handler 持有响应，这正好是 SSE 需要的。
   const pushHub = createPushHub({ logger })
 
-  /** 已推送过的告警 id（避免重复弹）。挂在 tracker 上以便跨重载保留。 */
-  const alertState = tracker.alertState ?? (tracker.alertState = { sent: {} })
+  // 已推送过的告警 id 与时间戳，**必须落盘**：否则每次插件重载都会把
+  // 所有告警重新推一遍，用户会看到同一批通知反复弹。
+  const alertStatePath = join(dataDir(tracker.home), 'alerts.json')
+  const alertState = (() => {
+    try {
+      if (existsSync(alertStatePath)) {
+        const parsed = JSON.parse(readFileSync(alertStatePath, 'utf8'))
+        if (parsed !== null && typeof parsed === 'object' && typeof parsed.sent === 'object') {
+          return { sent: parsed.sent ?? {} }
+        }
+      }
+    } catch { /* 读失败就当空的，重新开始 */ }
+    return { sent: {} }
+  })()
+
+  /** 把告警状态写回磁盘（节流：最多每 5 秒一次）。 */
+  let lastAlertSaveAt = 0
+  const saveAlertState = (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastAlertSaveAt < 5000) return
+    lastAlertSaveAt = now
+    try {
+      mkdirSync(dataDir(tracker.home), { recursive: true })
+      writeFileSync(alertStatePath, JSON.stringify({ sent: alertState.sent }), 'utf8')
+    } catch (error) {
+      logger?.warn?.(`token-metrics: 保存告警状态失败（${error?.message ?? error}）`)
+    }
+  }
 
   /** 当前所有需要提醒的告警。 */
   const currentAlerts = () => {
@@ -1963,6 +1992,7 @@ export function apply(ctx, rawConfig) {
     if (recovered.length > 0) {
       pushHub.broadcast('alert', { alerts: recovered })
     }
+    if (fresh.length > 0 || recovered.length > 0) saveAlertState()
     return { fresh, recovered }
   }
 
@@ -2275,6 +2305,8 @@ export function apply(ctx, rawConfig) {
                     baseUrl: site.baseUrl,
                     apiKey,
                     fetchImpl: globalThis.fetch,
+                    // 用户指定了接口类型就不自动探测，少走弯路
+                    balanceKind: site.balanceKind,
                   })
                 }
                 tracker.balanceBook.recordResult(id, result)

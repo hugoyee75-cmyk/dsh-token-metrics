@@ -21,6 +21,8 @@
 #       trackAccount: true       # 是否读取登录账号身份与余额（只读，不碰凭据）
 #       autoUpdate: true         # 是否启用自更新（检查版本、安装、热重载）
 #       watchFiles: false        # 监视包目录，改文件即热重载（开发用）
+#       modelAliases:            # 模型别名：把 provider 上报的内部代号映射成真实模型名
+#         qfmodel: deepseek-v4.1-flash
 #       alertThresholds:         # 右下角通知的告警阈值
 #         balanceLowUsd: 5       # 余额低于此值（美元）时提醒；0 表示关闭
 #         quotaLowPercent: 10    # 配额窗口剩余低于此百分比时提醒；0 表示关闭
