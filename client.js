@@ -6998,10 +6998,17 @@ function formatMoneyText(value) {
         h('span', null, `${t('updatedAt')} ${formatTime(data?.generatedAt, locale)}`),
       )
 
-      // 供应商视图是完整页面，不叠在统计内容下面。
-      if (topView === 'suppliers') {
+      /**
+       * 非统计页：模型接入与预算都是完整页面，不叠在统计内容下面。
+       *
+       * 注意这里必须把**两个页面都纳入判断**。早先只在 topView === 'suppliers'
+       * 时进入这个分支，导致点「预算」仍落到统计页——页签高亮了但内容没换。
+       */
+      if (topView === 'suppliers' || topView === 'budget') {
         return h('div', { className: 'tu-root' },
-          head, toolbar, topView === 'budget' ? budgetPage : supplierPage, supplierModal, modelsModal, versionModal)
+          head, toolbar,
+          topView === 'budget' ? budgetPage : supplierPage,
+          supplierModal, modelsModal, versionModal)
       }
 
       return h('div', { className: 'tu-root' },
