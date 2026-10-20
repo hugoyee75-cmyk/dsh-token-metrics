@@ -2330,49 +2330,59 @@ window.__ModuleLoader__.load({
   margin-bottom: 14px;
   flex-wrap: wrap;
 }
-/* 两栏：左热力图，右关键数字。用满横向空间，避免右侧大片留白 */
+/* 两栏：左热力图，右 KPI 条。KPI 均分剩余宽度并加分隔线，
+   避免之前「数字沉底、中间大片空白」的失衡。 */
 .tu-heat-body {
   display: flex;
-  align-items: flex-end;
-  gap: 28px;
+  align-items: center;
+  gap: 36px;
   flex-wrap: wrap;
 }
 .tu-heat-main { flex: none; }
-.tu-heat-months {
-  display: flex;
+/* 月份与格子共用同一套 8 列网格，标签自然对齐到对应周 */
+.tu-heat-months,
+.tu-heat-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 11px);
   gap: 3px;
-  margin-bottom: 4px;
 }
+.tu-heat-grid {
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-flow: column;
+}
+.tu-heat-months { margin-bottom: 5px; }
 .tu-heat-month {
-  width: 11px;
   font-size: 9.5px;
+  line-height: 1;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
-  overflow: visible;
 }
-.tu-heat-month + .tu-heat-month { margin-left: 28px; }
-/* 右侧：三个关键数字，靠右对齐填满空白 */
+/* KPI 条：等分剩余宽度 */
 .tu-heat-summary {
-  display: flex;
-  gap: 26px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   flex: 1 1 auto;
-  justify-content: flex-end;
-  align-items: flex-end;
   min-width: 0;
+  gap: 0;
 }
 .tu-heat-stat {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
+  padding: 0 16px;
+  border-left: 1px solid var(--dsw-alias-border-l1);
 }
+.tu-heat-stat:first-child { border-left: none; }
 .tu-heat-stat-label {
   font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
 .tu-heat-stat-value {
-  font-size: 17px;
+  font-size: 21px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   font-variant-numeric: tabular-nums;
@@ -2390,13 +2400,6 @@ window.__ModuleLoader__.load({
 .tu-heat-sub {
   font-size: 11.5px;
   color: var(--dsw-alias-label-secondary);
-}
-.tu-heat-grid {
-  display: grid;
-  grid-template-rows: repeat(7, 11px);
-  grid-auto-flow: column;
-  grid-auto-columns: 11px;
-  gap: 3px;
 }
 .tu-heat-cell {
   appearance: none;
@@ -4006,8 +4009,9 @@ function formatMoneyText(value) {
         cells.push({
           key,
           value,
-          // 每列的第一天（周日）用于画月份标签
+          // 每列的第一天用于画月份标签；具体显示与否还要看月份有没有变
           isWeekStart: i % WEEK === 0,
+          month: cursor.getMonth(),
           date: new Date(cursor),
         })
         cursor.setDate(cursor.getDate() + 1)
@@ -4030,8 +4034,23 @@ function formatMoneyText(value) {
           // —— 左：热力图本体（含月份标签）——
           h('div', { className: 'tu-heat-main' },
             h('div', { className: 'tu-heat-months' },
-              ...cells.filter((c) => c.isWeekStart).map((c) =>
-                h('span', { key: c.key, className: 'tu-heat-month' }, monthLabel(c.date))),
+              // 月份标签按「周列」定位：同一个月只在它第一次出现的周上标一次。
+              // 早先在每个周首都标，一个月跨 4 周就会显示 4 次「9月」。
+              ...(() => {
+                const seen = new Set()
+                const labels = []
+                cells.forEach((c, index) => {
+                  if (!c.isWeekStart || seen.has(c.month)) return
+                  seen.add(c.month)
+                  labels.push(h('span', {
+                    key: c.key,
+                    className: 'tu-heat-month',
+                    // 定位到第几周列（1-based）
+                    style: { gridColumn: String(Math.floor(index / WEEK) + 1) },
+                  }, monthLabel(c.date)))
+                })
+                return labels
+              })(),
             ),
             h('div', { className: 'tu-heat-grid' },
               ...cells.map((cell) => h('button', {
