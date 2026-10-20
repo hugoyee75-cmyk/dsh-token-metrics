@@ -134,12 +134,30 @@ export function createPushHub({ logger = console, heartbeatMs = HEARTBEAT_MS } =
 export function evaluateAlerts({ sites, thresholds = {} }) {
   const balanceLowUsd = Number.isFinite(thresholds.balanceLowUsd) ? thresholds.balanceLowUsd : 5
   const quotaLowPercent = Number.isFinite(thresholds.quotaLowPercent) ? thresholds.quotaLowPercent : 10
+  // 「即将重置」的提前量：默认 10 分钟
+  const quotaResetSoonMs = Number.isFinite(thresholds.quotaResetSoonMinutes)
+    ? thresholds.quotaResetSoonMinutes * 60_000
+    : 10 * 60_000
   const alerts = []
 
   for (const site of sites ?? []) {
     const balance = site.lastBalance
-    if (balance === null || balance === undefined) continue
     const label = site.label || site.id
+
+    // 查询失败的告警必须在「没有余额数据」时也能触发——恰恰是查不到
+    // 才最需要提醒。所以这里不能因为 lastBalance 为空就 continue。
+    if (typeof site.error === 'string' && site.error !== '' && site.noPlan !== true) {
+      alerts.push({
+        id: `probe-failed:${site.id}`,
+        level: 'error',
+        kind: 'probe-failed',
+        siteId: site.id,
+        title: '余额查询失败',
+        body: `${label}：${site.error}`,
+      })
+    }
+
+    if (balance === null || balance === undefined) continue
 
     // ① 余额不足
     if (typeof balance.usd === 'number' && balance.usd < balanceLowUsd) {
@@ -153,7 +171,7 @@ export function evaluateAlerts({ sites, thresholds = {} }) {
       })
     }
 
-    // ② 配额窗口剩余不足
+    // ② 配额窗口剩余不足 / 即将重置
     for (const window of Array.isArray(balance.quotas) ? balance.quotas : []) {
       const used = Number(window.used)
       const limit = Number(window.limit)
@@ -168,6 +186,31 @@ export function evaluateAlerts({ sites, thresholds = {} }) {
         window: window.label,
         title: leftPercent <= 0 ? `${window.label} 额度已用尽` : `${window.label} 额度将尽`,
         body: `${label} ${window.label} 剩余 ${Math.max(0, leftPercent)}%`,
+      })
+    }
+
+    // ④ 配额即将重置：还剩几分钟就恢复，提醒用户「稍等一下就能用」
+    // 这条和「将尽」互补——将尽说「快没了」，这条说「马上就好了」。
+    for (const window of Array.isArray(balance.quotas) ? balance.quotas : []) {
+      const resetsAt = Number(window.resetsAt)
+      if (!Number.isFinite(resetsAt) || resetsAt <= 0) continue
+      const remainMs = resetsAt - (thresholds.now ?? Date.now())
+      // 只在「已用尽或快用尽」且「即将重置」时才提醒，否则太吵
+      const used = Number(window.used)
+      const limit = Number(window.limit)
+      const leftPercent = Number.isFinite(used) && Number.isFinite(limit) && limit > 0
+        ? Math.round((1 - used / limit) * 100) : 100
+      if (leftPercent > quotaLowPercent) continue
+      if (remainMs <= 0 || remainMs > quotaResetSoonMs) continue
+      const minutes = Math.max(1, Math.round(remainMs / 60_000))
+      alerts.push({
+        id: `quota-reset-soon:${site.id}:${window.label}`,
+        level: 'ok',
+        kind: 'quota-reset-soon',
+        siteId: site.id,
+        window: window.label,
+        title: `${window.label} 即将重置`,
+        body: `${label} 的 ${window.label} 将在约 ${minutes} 分钟后恢复`,
       })
     }
   }
@@ -187,23 +230,35 @@ export function diffAlerts(current, state) {
   const sent = state?.sent ?? {}
   const currentIds = new Set(current.map((alert) => alert.id))
   const fresh = current.filter((alert) => sent[alert.id] === undefined)
+  /** 每种告警消失时的恢复文案。 */
+  const RECOVERY = {
+    'balance-low': { title: '余额已恢复', body: (p) => `${p[1]} 的余额已回到阈值以上` },
+    'quota-low': { title: '配额已恢复', body: (p) => `${p[1]} 的 ${p[2] ?? ''} 窗口已重置` },
+    'probe-failed': { title: '查询已恢复', body: (p) => `${p[1]} 现在可以正常查询了` },
+    // 「即将重置」不是故障，它消失是正常的（已重置或已过窗口），不提示恢复
+    'quota-reset-soon': undefined,
+    // 版本更新后由插件自己重载，不需要额外通知
+    'plugin-update': undefined,
+  }
+
   const recovered = Object.keys(sent)
     .filter((id) => !currentIds.has(id))
     .map((id) => {
-      // id 形如 `quota-low:<siteId>:<window>` 或 `balance-low:<siteId>`
+      // id 形如 `quota-low:<siteId>:<window>` / `probe-failed:<siteId>`
       const parts = id.split(':')
       const kind = parts[0]
+      const recipe = RECOVERY[kind]
+      if (recipe === undefined) return undefined
       return {
         id,
         kind: `${kind}-recovered`,
         siteId: parts[1],
         window: parts[2],
         level: 'ok',
-        title: kind === 'quota-low' ? '配额已恢复' : '余额已恢复',
-        body: kind === 'quota-low' && parts[2] !== undefined
-          ? `${parts[1]} 的 ${parts[2]} 窗口已重置`
-          : `${parts[1]} 的状态已恢复`,
+        title: recipe.title,
+        body: recipe.body(parts),
       }
     })
+    .filter((entry) => entry !== undefined)
   return { fresh, recovered }
 }

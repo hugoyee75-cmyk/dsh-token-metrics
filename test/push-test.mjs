@@ -65,6 +65,73 @@ function checkTrue(label, condition, detail = '') {
 
 //#endregion
 
+//#region 查询失败告警
+
+{
+  const alerts = evaluateAlerts({
+    sites: [
+      { id: 'a', label: 'key过期', lastBalance: null, error: 'HTTP 401' },
+      { id: 'b', label: '无订阅', lastBalance: null, error: '当前用户不存在coding plan', noPlan: true },
+      { id: 'c', label: '正常', lastBalance: { usd: 100 }, error: '' },
+    ],
+  })
+  const failed = alerts.filter((a) => a.kind === 'probe-failed')
+  check('查询失败被识别', failed.length, 1)
+  check('失败级别为 error', failed[0].level, 'error')
+  checkTrue('失败带原因', failed[0].body.includes('HTTP 401'), failed[0].body)
+  // 「无订阅」是正常状态，不该报成故障
+  check('无订阅不报错', alerts.some((a) => a.siteId === 'b' && a.kind === 'probe-failed'), false)
+}
+
+//#endregion
+
+//#region 配额即将重置
+
+{
+  const now = 1_800_000_000_000
+  const alerts = evaluateAlerts({
+    sites: [{
+      id: 'k', label: 'Kimi',
+      lastBalance: {
+        quotas: [
+          // 已用尽 + 8 分钟后重置 -> 应提醒「即将重置」
+          { label: '5-hour', used: 100, limit: 100, resetsAt: now + 8 * 60_000 },
+          // 已用尽但 2 小时后才重置 -> 太远，不提醒
+          { label: 'Weekly', used: 100, limit: 100, resetsAt: now + 120 * 60_000 },
+          // 还剩很多，即使快重置也不用提醒
+          { label: 'Monthly', used: 10, limit: 100, resetsAt: now + 5 * 60_000 },
+        ],
+      },
+    }],
+    thresholds: { quotaResetSoonMinutes: 10, now },
+  })
+  const soon = alerts.filter((a) => a.kind === 'quota-reset-soon')
+  check('即将重置告警数', soon.length, 1)
+  check('命中 5-hour 窗口', soon[0].window, '5-hour')
+  check('即将重置为 ok 级', soon[0].level, 'ok')
+  checkTrue('文案含分钟数', soon[0].body.includes('分钟'), soon[0].body)
+  // 已用尽的窗口同时也会触发 quota-low
+  checkTrue('同时有将尽告警', alerts.some((a) => a.kind === 'quota-low' && a.window === '5-hour'))
+}
+
+//#endregion
+
+//#region 恢复文案
+
+{
+  // 不同告警消失时给不同措辞，且「即将重置」消失不提示
+  const sent = {
+    'probe-failed:a': 1,
+    'quota-reset-soon:k:5-hour': 1,
+    'plugin-update:1.2.3': 1,
+  }
+  const d = diffAlerts([], { sent })
+  check('只有查询失败给恢复', d.recovered.length, 1)
+  check('恢复标题', d.recovered[0].title, '查询已恢复')
+}
+
+//#endregion
+
 //#region 阈值边界
 
 {

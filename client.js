@@ -83,12 +83,16 @@ window.__ModuleLoader__.load({
     { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
     { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
 
-    // —— Coding Plan（订阅制，地址与协议都不同）——
-    { id: 'glm-coding', label: '智谱 GLM Coding Plan', baseUrl: 'https://open.bigmodel.cn/api/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: 'Coding Plan 专用地址，与按量计费的 /api/paas/v4 不同' },
-    { id: 'kimi-coding', label: 'Kimi Coding Plan', baseUrl: 'https://api.kimi.com/coding', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: 'Coding Plan 专用地址，与按量计费的 api.moonshot.cn 不同' },
-    { id: 'minimax-coding', label: 'MiniMax Coding Plan', baseUrl: 'https://api.minimax.chat/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true },
-    { id: 'deepseek-coding', label: 'DeepSeek Coding Plan', baseUrl: 'https://api.deepseek.com/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true },
-    { id: 'codex', label: 'ChatGPT (Codex)', baseUrl: 'https://chatgpt.com/backend-api', api: 'openai-responses', balance: 'oauth', keyHint: '需账号登录态，API key 无法查余额' },
+    // —— Coding Plan（订阅制）——
+    //
+    // 重要：只有**额度查询**端点是从 CC Switch 实现里核对过的
+    // （Kimi /coding/v1/usages、智谱 /api/monitor/usage/quota/limit）。
+    // 推理端点各家文档口径不一，且我无法在没有真实 key 的情况下验证，
+    // 所以这里只保留能确认的那一个，其余让用户按官方文档自己填——
+    // 宁可少一个预设，也不要给一个填了就 404 的地址。
+    { id: 'glm-coding', label: '智谱 GLM Coding Plan', baseUrl: 'https://open.bigmodel.cn/api/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '实测该端点存在（401 需鉴权）；与按量计费的 /api/paas/v4 不同' },
+    { id: 'kimi-coding', label: 'Kimi Coding Plan（需填地址）', baseUrl: '', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '额度可查（/coding/v1/usages），但推理地址请按 Kimi 官方文档填写' },
+    { id: 'minimax-coding', label: 'MiniMax Coding Plan（需填地址）', baseUrl: '', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '推理地址请按 MiniMax 官方文档填写' },
 
     // —— 自定义 ——
     { id: 'custom', label: '自定义端点', baseUrl: '', api: 'openai-completions', balance: 'auto' },

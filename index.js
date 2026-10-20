@@ -120,6 +120,14 @@ const DEFAULTS = {
    */
   alertThresholds: { balanceLowUsd: 5, quotaLowPercent: 10 },
 
+  /**
+   * 模型别名映射：`{ "qfmodel": "deepseek-v4.1-flash" }`。
+   *
+   * 部分 provider 上报的是内部队列代号而不是真实模型名，这些代号无法从
+   * DSH 元数据反查，只能由用户指定。界面维护的别名会覆盖这里的值。
+   */
+  modelAliases: {},
+
   /** 趋势图最多画多少条模型曲线（超出部分聚合为「其他」）。 */
   maxTrendSeries: 6,
 
@@ -156,6 +164,19 @@ function resolveConfig(raw) {
     retentionDays: number(source.retentionDays, DEFAULTS.retentionDays, 0, 3650),
     maxSessions: number(source.maxSessions, DEFAULTS.maxSessions, 0, 5000),
     maxTrendSeries: number(source.maxTrendSeries, DEFAULTS.maxTrendSeries, 1, 20),
+    // 只接受字符串到字符串的映射，其余忽略
+    modelAliases: (() => {
+      const raw = source.modelAliases !== null && typeof source.modelAliases === 'object'
+        ? source.modelAliases
+        : {}
+      const out = {}
+      for (const [from, to] of Object.entries(raw)) {
+        if (typeof from === 'string' && from !== '' && typeof to === 'string' && to !== '') {
+          out[from.trim()] = to.trim()
+        }
+      }
+      return out
+    })(),
     alertThresholds: (() => {
       const raw = source.alertThresholds !== null && typeof source.alertThresholds === 'object'
         ? source.alertThresholds
@@ -1009,6 +1030,18 @@ class TokenUsageTracker {
       /** 各 provider 路由名的判定结果，供明细表把供应商列换成类别。 */
       providerKinds: Object.fromEntries(this.providerKinds ?? []),
       byModel: this.store.byModel,
+      /**
+       * 模型别名映射（原始名 -> 显示名）。
+       *
+       * 部分 provider 上报的是内部代号而非模型名（Qoder 的 qfmodel 是上游
+       * 队列 modelKey），这些代号无法从 DSH 元数据反查。页面据此把代号显示成
+       * 真实模型名，明细表 / 占比图 / 趋势图统一生效。
+       */
+      modelAliases: {
+        // 配置里写的别名先铺底，界面维护的优先（用户当场改的应立即生效）
+        ...(this.config.modelAliases ?? {}),
+        ...(this.priceBook?.aliases ?? {}),
+      },
       /**
        * 成本核算。
        *
@@ -1894,10 +1927,27 @@ export function apply(ctx, rawConfig) {
   const alertState = tracker.alertState ?? (tracker.alertState = { sent: {} })
 
   /** 当前所有需要提醒的告警。 */
-  const currentAlerts = () => evaluateAlerts({
-    sites: tracker.balanceBook?.sites ?? [],
-    thresholds: tracker.config?.alertThresholds ?? {},
-  })
+  const currentAlerts = () => {
+    const alerts = evaluateAlerts({
+      sites: tracker.balanceBook?.sites ?? [],
+      thresholds: tracker.config?.alertThresholds ?? {},
+    })
+    // 插件有新版本：这是全局事件，与站点无关，单独追加。
+    try {
+      const status = updater?.status?.()
+      if (status?.available === true && typeof status.latest === 'string' && status.latest !== '') {
+        alerts.push({
+          id: `plugin-update:${status.latest}`,
+          level: 'ok',
+          kind: 'plugin-update',
+          siteId: '',
+          title: '插件有新版本',
+          body: `发现 ${status.latest}（当前 ${status.current}），点右上角版本号升级`,
+        })
+      }
+    } catch { /* updater 未启用时跳过 */ }
+    return alerts
+  }
 
   /** 求值并推送「新出现」与「已恢复」的告警。 */
   const publishAlerts = () => {
