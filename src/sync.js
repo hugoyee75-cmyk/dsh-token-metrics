@@ -90,9 +90,21 @@ export function buildProviderConfig(site) {
       //  - 把某档映射成 null 表示「不支持这一档」。
       // 所以用户勾选哪些档，就只写哪些档，不要一股脑全写。
       if (Array.isArray(model.thinkingLevels) && model.thinkingLevels.length > 0) {
-        entry.reasoningEfforts = Object.fromEntries(
-          model.thinkingLevels.map((level) => [level, level]),
-        )
+        // 档位条目可以是两种形式：
+        //   'high'                      -> 协议拼写与档位名相同
+        //   { level: 'max', wire: 'ultra' } -> 网关用别的词（如 ultra）
+        // 后者是给「协议拼写与档位名不一致」的网关用的。
+        const efforts = {}
+        for (const item of model.thinkingLevels) {
+          if (typeof item === 'string' && item !== '') {
+            efforts[item] = item
+          } else if (item !== null && typeof item === 'object'
+            && typeof item.level === 'string' && item.level !== '') {
+            const wire = typeof item.wire === 'string' && item.wire !== '' ? item.wire : item.level
+            efforts[item.level] = wire
+          }
+        }
+        if (Object.keys(efforts).length > 0) entry.reasoningEfforts = efforts
       } else if (model.reasoningEfforts !== undefined) {
         entry.reasoningEfforts = model.reasoningEfforts
       }

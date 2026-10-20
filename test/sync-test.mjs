@@ -90,6 +90,24 @@ function checkTrue(label, condition, detail = '') {
   })
   check('未勾选档位时不写该字段', noLevels.models[0].reasoningEfforts, undefined)
 
+  // 协议拼写自定义：网关不认档位名时（如把 max 叫 ultra），
+  // 档位条目写成 { level, wire }，同步时按 wire 落盘。
+  const custom = buildProviderConfig({
+    id: 'x', baseUrl: 'https://x',
+    models: [{ id: 'm', thinkingLevels: ['low', { level: 'max', wire: 'ultra' }] }],
+  })
+  check('自定义协议值生效', custom.models[0].reasoningEfforts, { low: 'low', max: 'ultra' })
+  // 字符串形式仍按「同名映射」处理（兼容旧配置）
+  const plain = buildProviderConfig({
+    id: 'x', baseUrl: 'https://x', models: [{ id: 'm', thinkingLevels: ['low', 'high'] }],
+  })
+  check('字符串形式同档位名', plain.models[0].reasoningEfforts, { low: 'low', high: 'high' })
+  // wire 为空时退回档位名，不能写出空串
+  const emptyWire = buildProviderConfig({
+    id: 'x', baseUrl: 'https://x', models: [{ id: 'm', thinkingLevels: [{ level: 'max', wire: '' }] }],
+  })
+  check('空 wire 退回档位名', emptyWire.models[0].reasoningEfforts, { max: 'max' })
+
   // 附件能力
   const textOnly = buildProviderConfig({
     id: 'x', baseUrl: 'https://x', models: [{ id: 'm', image: false }],
