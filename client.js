@@ -5554,17 +5554,29 @@ window.__ModuleLoader__.load({
                       }
                     },
                   },
-                  h('span', { className: 'tu-supcard-money-label' },
-                    `${t('supplier.balance')} · ${currency === 'cny' ? t('currency.cny') : t('currency.usd')}`),
-                  h('span', { className: 'tu-supcard-money-value' },
-                    (() => {
-                      // 余额本身是 USD：RMB 模式按汇率换算
-                      // 余额本身是 CNY：两种模式都显示原值，不做二次换算
-                      if (nativeCurrency === 'CNY') return money(balance.usd)
+                  // 先算清「实际显示哪种货币、多少钱」，标签再跟着它走。
+                  // 之前标签固定写切换模式，而 CNY 站点在 USD 模式下仍显示 ¥，
+                  // 于是出现「余额 · USD  ¥128.50」这种自相矛盾的组合。
+                  (() => {
+                    const shown = (() => {
+                      // 余额本身是 CNY：换算成美元才符合「USD 模式」，
+                      // 而不是把人民币数字贴上美元标签。
+                      if (nativeCurrency === 'CNY') {
+                        return currency === 'usd'
+                          ? { text: `$${(balance.usd / usdCny).toFixed(2)}`, unit: 'usd' }
+                          : { text: `¥${balance.usd.toFixed(2)}`, unit: 'cny' }
+                      }
+                      // 余额本身是 USD
                       return currency === 'cny'
-                        ? `¥${(balance.usd * usdCny).toFixed(2)}`
-                        : `$${balance.usd < 1 ? balance.usd.toFixed(3) : balance.usd.toFixed(2)}`
-                    })()),
+                        ? { text: `¥${(balance.usd * usdCny).toFixed(2)}`, unit: 'cny' }
+                        : { text: `$${balance.usd < 1 ? balance.usd.toFixed(3) : balance.usd.toFixed(2)}`, unit: 'usd' }
+                    })()
+                    return [
+                      h('span', { key: 'label', className: 'tu-supcard-money-label' },
+                        `${t('supplier.balance')} · ${shown.unit === 'cny' ? t('currency.cny') : t('currency.usd')}`),
+                      h('span', { key: 'value', className: 'tu-supcard-money-value' }, shown.text),
+                    ]
+                  })(),
                   )
                   : (site.noPlan === true
                     ? h('span', { className: 'tu-balnoplan' }, t('quota.noPlan'))
