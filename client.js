@@ -176,6 +176,9 @@ window.__ModuleLoader__.load({
       'heat.more': '多',
       'heat.click': '点击某天可筛选当天数据',
       'heat.today': '今天',
+      'heat.days': '活跃天数',
+      'heat.average': '日均',
+      'heat.peak': '单日峰值',
       'balance.title': '供应商余额',
       'view.stats': '统计',
       'view.suppliers': '模型接入',
@@ -574,6 +577,9 @@ window.__ModuleLoader__.load({
       'heat.more': 'more',
       'heat.click': 'Click a day to filter to it',
       'heat.today': 'today',
+      'heat.days': 'Active days',
+      'heat.average': 'Daily avg',
+      'heat.peak': 'Peak day',
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
       'view.suppliers': 'Model Access',
@@ -2321,8 +2327,60 @@ window.__ModuleLoader__.load({
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
+}
+/* 两栏：左热力图，右关键数字。用满横向空间，避免右侧大片留白 */
+.tu-heat-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+.tu-heat-main { flex: none; }
+.tu-heat-months {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.tu-heat-month {
+  width: 11px;
+  font-size: 9.5px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: visible;
+}
+.tu-heat-month + .tu-heat-month { margin-left: 28px; }
+/* 右侧：三个关键数字，靠右对齐填满空白 */
+.tu-heat-summary {
+  display: flex;
+  gap: 26px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  align-items: flex-end;
+  min-width: 0;
+}
+.tu-heat-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.tu-heat-stat-label {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+.tu-heat-stat-value {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.tu-heat-stat-hint {
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
 }
 .tu-heat-title {
   font-size: 13px;
@@ -3902,22 +3960,37 @@ function formatMoneyText(value) {
      * 一眼看出「我什么时候在用 AI」——趋势图看的是量，热力图看的是节奏。
      * 点击某天可以筛选到那天。
      */
-    function ActivityHeatmap({ byDay, t, onPickDay, activeDay }) {
+    /**
+     * 活动热力图。
+     *
+     * 布局取舍：热力图本身只有 8 周 × 7 天，约 150px 宽。独占一整行卡片
+     * 会让右侧留下大片空白（就是之前「不协调」的来源）。这里做成两栏：
+     * 左边热力图，右边配一组当期关键数字，把这条横向空间用满。
+     *
+     * @param {object} props
+     * @param {object} props.byDay day -> counters
+     * @param {object} props.summary 当期汇总（活跃天数、日均、峰值）
+     */
+    function ActivityHeatmap({ byDay, t, onPickDay, activeDay, summary }) {
       const WEEK = 7
       const WEEKS = 8
       const days = Object.keys(byDay ?? {}).sort()
+
+      /** 月份标签：只在对齐月份第一周时显示，避免堆满。 */
+      const monthLabel = (date) => `${date.getMonth() + 1}月`
+
+      const head = h('div', { className: 'tu-heat-head' },
+        h('span', { className: 'tu-heat-title' }, t('heat.title')),
+        h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
+      )
+
       if (days.length === 0) {
-        return h('div', { className: 'tu-heat' },
-          h('div', { className: 'tu-heat-head' },
-            h('span', { className: 'tu-heat-title' }, t('heat.title')),
-            h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
-          ),
-          h('p', { className: 'tu-chart-empty' }, t('chart.empty')),
-        )
+        return h('div', { className: 'tu-heat' }, head,
+          h('p', { className: 'tu-chart-empty' }, t('chart.empty')))
       }
 
-      // 从今天往回推 8 周（56 天），缺的天补 0 —— 空白也要占位，
-      // 否则格子会挤在一起看不出时间跨度。
+      // 从最后一天往回推 8 周（56 天）。缺的天补 0 —— 空白也要占位，
+      // 否则格子会挤在一起，看不出时间跨度。
       const last = days[days.length - 1]
       const lastDate = new Date(`${last}T00:00:00`)
       const start = new Date(lastDate)
@@ -3927,17 +4000,21 @@ function formatMoneyText(value) {
       const cursor = new Date(start)
       let max = 0
       for (let i = 0; i < WEEKS * WEEK; i += 1) {
-        const y = cursor.getFullYear()
-        const m = String(cursor.getMonth() + 1).padStart(2, '0')
-        const d = String(cursor.getDate()).padStart(2, '0')
-        const key = `${y}-${m}-${d}`
+        const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`
         const value = byDay[key]?.totalTokens ?? 0
         if (value > max) max = value
-        cells.push({ key, value, date: new Date(cursor) })
+        cells.push({
+          key,
+          value,
+          // 每列的第一天（周日）用于画月份标签
+          isWeekStart: i % WEEK === 0,
+          date: new Date(cursor),
+        })
         cursor.setDate(cursor.getDate() + 1)
       }
 
-      // 分 5 档着色：0 表示当天没用，用底色
+      // 分 5 档着色。用「相对峰值」而不是绝对分位：
+      // 用户关心的是「哪天比平常多」，不是精确的分位统计。
       const levelOf = (value) => {
         if (value <= 0 || max <= 0) return 0
         const ratio = value / max
@@ -3947,28 +4024,48 @@ function formatMoneyText(value) {
         return 4
       }
 
-      // 按列排（每列一周），grid 用 column 方向填充
       return h('div', { className: 'tu-heat' },
-        h('div', { className: 'tu-heat-head' },
-          h('span', { className: 'tu-heat-title' }, t('heat.title')),
-          h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
-        ),
-        h('div', { className: 'tu-heat-grid' },
-          ...cells.map((cell) => h('button', {
-            key: cell.key,
-            type: 'button',
-            className: 'tu-heat-cell',
-            'data-level': String(levelOf(cell.value)),
-            'data-active': activeDay === cell.key ? 'true' : 'false',
-            title: `${cell.key} · ${formatCompact(cell.value)} tokens`,
-            onClick: () => onPickDay?.(cell.key),
-          })),
-        ),
-        h('div', { className: 'tu-heat-foot' },
-          h('span', null, t('heat.less')),
-          ...[0, 1, 2, 3, 4].map((lv) => h('i', { key: lv, className: 'tu-heat-dot', 'data-level': String(lv) })),
-          h('span', null, t('heat.more')),
-          h('span', { className: 'tu-heat-hint' }, `· ${t('heat.click')}`),
+        head,
+        h('div', { className: 'tu-heat-body' },
+          // —— 左：热力图本体（含月份标签）——
+          h('div', { className: 'tu-heat-main' },
+            h('div', { className: 'tu-heat-months' },
+              ...cells.filter((c) => c.isWeekStart).map((c) =>
+                h('span', { key: c.key, className: 'tu-heat-month' }, monthLabel(c.date))),
+            ),
+            h('div', { className: 'tu-heat-grid' },
+              ...cells.map((cell) => h('button', {
+                key: cell.key,
+                type: 'button',
+                className: 'tu-heat-cell',
+                'data-level': String(levelOf(cell.value)),
+                'data-active': activeDay === cell.key ? 'true' : 'false',
+                title: `${cell.key} · ${formatCompact(cell.value)} tokens`,
+                onClick: () => onPickDay?.(cell.key),
+              })),
+            ),
+            h('div', { className: 'tu-heat-foot' },
+              h('span', null, t('heat.less')),
+              ...[0, 1, 2, 3, 4].map((lv) =>
+                h('i', { key: lv, className: 'tu-heat-dot', 'data-level': String(lv) })),
+              h('span', null, t('heat.more')),
+              h('span', { className: 'tu-heat-hint' }, `· ${t('heat.click')}`),
+            ),
+          ),
+          // —— 右：当期关键数字，填补横向空白 ——
+          summary === undefined
+            ? null
+            : h('div', { className: 'tu-heat-summary' },
+              ...(summary ?? []).map((item) => h('div', {
+                key: item.label, className: 'tu-heat-stat',
+              },
+              h('span', { className: 'tu-heat-stat-label' }, item.label),
+              h('span', { className: 'tu-heat-stat-value' }, item.value),
+              item.hint === undefined
+                ? null
+                : h('span', { className: 'tu-heat-stat-hint' }, item.hint),
+              )),
+            ),
         ),
       )
     }
@@ -5690,11 +5787,46 @@ function formatMoneyText(value) {
        *
        * 点击某天会切到「按日期」明细并定位到那天——比只看颜色更有用。
        */
+      /**
+       * 热力图右侧的关键数字。
+       *
+       * 热力图回答「什么时候在用」，但看颜色答不了「到底多少」。
+       * 这组数字把当期（按 rangeDays 过滤）的量补上，顺便填满横向空间。
+       */
+      const heatSummary = (() => {
+        if (data === undefined) return undefined
+        const byDay = data.byDay ?? {}
+        const days = (rangeDays.length > 0 ? rangeDays : Object.keys(byDay))
+          .filter((day) => byDay[day] !== undefined)
+        if (days.length === 0) return undefined
+        let tokenSum = 0
+        let activeDays = 0
+        let peakDay = ''
+        let peakValue = 0
+        for (const day of days) {
+          const value = byDay[day]?.totalTokens ?? 0
+          tokenSum += value
+          if (value > 0) activeDays += 1
+          if (value > peakValue) { peakValue = value; peakDay = day }
+        }
+        const average = activeDays > 0 ? tokenSum / activeDays : 0
+        return [
+          { label: t('heat.days'), value: `${activeDays} / ${days.length}` },
+          { label: t('heat.average'), value: formatCompact(average) },
+          {
+            label: t('heat.peak'),
+            value: formatCompact(peakValue),
+            hint: peakDay === '' ? undefined : peakDay.slice(5),
+          },
+        ]
+      })()
+
       const heatmap = empty
         ? null
         : h(ActivityHeatmap, {
           byDay: data?.byDay,
           t,
+          summary: heatSummary,
           activeDay: dayFrom,
           onPickDay: (day) => {
             setTableView('day')
