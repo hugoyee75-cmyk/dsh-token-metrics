@@ -57,19 +57,39 @@ window.__ModuleLoader__.load({
    * 避免把 Anthropic 的地址配成 OpenAI 协议这类错误。
    * `balance` 说明该服务的余额能否用 API key 查询。
    */
+  /**
+   * 各家服务的接入预设。
+   *
+   * 关键区分：同一家厂商的「按量计费 API」与「Coding Plan」用的是**不同地址**
+   * 与**不同协议**。例如智谱：
+   *   - 按量计费： https://open.bigmodel.cn/api/paas/v4      (OpenAI 协议)
+   *   - Coding Plan: https://open.bigmodel.cn/api/anthropic   (Anthropic 协议)
+   * 填错地址会直接 404，所以拆成两条独立预设，让用户按自己买的套餐选。
+   *
+   * `balance` 说明余额/配额能否用 API key 查询。
+   */
   const SERVICE_PRESETS = [
+    // —— 按量计费 ——
     { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions', balance: 'admin', keyHint: 'sk- 开头；查用量需 sk-admin- 组织密钥' },
     { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', balance: 'no', keyHint: 'sk-ant- 开头' },
     { id: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'openai-completions', balance: 'no', keyHint: 'Google AI Studio 的 key' },
     { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', balance: 'yes' },
     { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', balance: 'yes' },
     { id: 'kimi', label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', balance: 'yes' },
-    { id: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
+    { id: 'glm', label: '智谱 GLM（按量计费）', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
     { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', balance: 'yes' },
     { id: 'siliconflow', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', balance: 'yes' },
     { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
     { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
+
+    // —— Coding Plan（订阅制，地址与协议都不同）——
+    { id: 'glm-coding', label: '智谱 GLM Coding Plan', baseUrl: 'https://open.bigmodel.cn/api/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: 'Coding Plan 专用地址，与按量计费的 /api/paas/v4 不同' },
+    { id: 'kimi-coding', label: 'Kimi Coding Plan', baseUrl: 'https://api.kimi.com/coding', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: 'Coding Plan 专用地址，与按量计费的 api.moonshot.cn 不同' },
+    { id: 'minimax-coding', label: 'MiniMax Coding Plan', baseUrl: 'https://api.minimax.chat/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true },
+    { id: 'deepseek-coding', label: 'DeepSeek Coding Plan', baseUrl: 'https://api.deepseek.com/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true },
     { id: 'codex', label: 'ChatGPT (Codex)', baseUrl: 'https://chatgpt.com/backend-api', api: 'openai-responses', balance: 'oauth', keyHint: '需账号登录态，API key 无法查余额' },
+
+    // —— 自定义 ——
     { id: 'custom', label: '自定义端点', baseUrl: '', api: 'openai-completions', balance: 'auto' },
   ]
 
@@ -148,6 +168,14 @@ window.__ModuleLoader__.load({
       'supplier.probeAll': '刷新全部余额',
       'supplier.groupBasic': '基础信息',
       'supplier.service': '服务',
+      'supplier.required': '必填',
+      'err.nameRequired': '请填写名称',
+      'err.urlRequired': '请填写接口地址',
+      'err.urlInvalid': '接口地址必须以 http:// 或 https:// 开头',
+      'err.keyRequired': '请填写 API 密钥（编辑时留空表示沿用已保存的）',
+      'err.modelsRequired': '请至少选择一个模型，否则无法写入 DSH 配置',
+      'err.serviceRequired': '请选择服务类型',
+      'err.dupId': '已存在同名的供应商，请换个名称',
       'supplier.serviceHint': '选择服务后会自动填好地址与接口格式',
       'supplier.servicePick': '选择服务',
       'supplier.customEndpoint': '自定义端点',
@@ -471,6 +499,14 @@ window.__ModuleLoader__.load({
       'supplier.probeAll': 'Refresh all balances',
       'supplier.groupBasic': 'Basics',
       'supplier.service': 'Service',
+      'supplier.required': 'required',
+      'err.nameRequired': 'Please enter a name',
+      'err.urlRequired': 'Please enter the base URL',
+      'err.urlInvalid': 'Base URL must start with http:// or https://',
+      'err.keyRequired': 'Please enter the API key (leave blank when editing to keep the saved one)',
+      'err.modelsRequired': 'Select at least one model, otherwise the DSH config cannot be written',
+      'err.serviceRequired': 'Please pick a service',
+      'err.dupId': 'A supplier with this name already exists',
       'supplier.serviceHint': 'Picking a service fills in the URL and protocol',
       'supplier.servicePick': 'Select a service',
       'supplier.customEndpoint': 'Custom endpoint',
@@ -1112,7 +1148,9 @@ window.__ModuleLoader__.load({
   border-radius: 999px;
   transition: width 200ms ease;
 }
-.tu-quota-fill[data-level='ok'] { background: var(--dsw-alias-brand-primary); }
+/* 用绿/黄/红三色表达「充裕 / 吃紧 / 将尽」。
+   之前 ok 档用 brand-primary，在亮色主题下是黑色——既不表意也不好看。 */
+.tu-quota-fill[data-level='ok'] { background: var(--dsw-alias-state-success-primary); }
 .tu-quota-fill[data-level='warn'] { background: var(--dsw-alias-state-warn-primary); }
 .tu-quota-fill[data-level='danger'] { background: var(--dsw-alias-state-error-primary); }
 .tu-quota-reset {
@@ -1244,6 +1282,11 @@ window.__ModuleLoader__.load({
 .tu-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 0 1 200px; }
 .tu-col-wide { flex: 1 1 260px; }
 .tu-col-grow { flex: 2 1 320px; }
+.tu-req {
+  color: var(--dsw-alias-state-error-primary);
+  margin-left: 2px;
+  font-weight: 600;
+}
 .tu-flabel {
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
@@ -4819,7 +4862,11 @@ window.__ModuleLoader__.load({
             entry.id === id ? { ...entry, ...patch } : entry)),
         }))
 
-        const fieldLabel = (text) => h('span', { className: 'tu-flabel' }, text)
+        /** 字段标题；required 为 true 时带红色星号。 */
+        const fieldLabel = (text, required = false) => h('span', { className: 'tu-flabel' },
+          text,
+          required ? h('span', { className: 'tu-req', title: t('supplier.required') }, '*') : null,
+        )
         const input = (value, placeholder, onInput, extra = {}) => h('input', {
           type: 'text',
           className: 'tu-input',
@@ -4853,22 +4900,33 @@ window.__ModuleLoader__.load({
             // ① 先选服务：选完自动填地址与协议，比手抄 baseURL 可靠
             h('div', { className: 'tu-row' },
               h('div', { className: 'tu-col tu-col-grow' },
-                fieldLabel(t('supplier.service')),
+                fieldLabel(t('supplier.service'), true),
                 h('select', {
                   className: 'tu-input tu-select',
                   value: form.service ?? 'custom',
                   onChange: (event) => {
                     const preset = SERVICE_PRESETS.find((entry) => entry.id === event.target.value)
                     if (preset === undefined) return
-                    // 选中服务时把地址、协议、显示名一起填好；
-                    // 自定义端点则保留用户已填内容。
-                    setSupplierForm((current) => (current === null ? null : {
-                      ...current,
-                      service: preset.id,
-                      baseUrl: preset.id === 'custom' ? current.baseUrl : preset.baseUrl,
-                      api: preset.api,
-                      label: current.label || (preset.id === 'custom' ? '' : preset.label),
-                    }))
+                    setSupplierForm((current) => {
+                      if (current === null) return null
+                      // 关键：切换服务必须**整组替换**地址与协议。
+                      // 之前只在非 custom 时覆盖，导致「先选 DeepSeek 再切自定义」
+                      // 会残留 deepseek 的地址，用户以为清空了其实没有。
+                      const isCustom = preset.id === 'custom'
+                      return {
+                        ...current,
+                        service: preset.id,
+                        baseUrl: isCustom ? '' : preset.baseUrl,
+                        api: preset.api,
+                        // 名称跟随服务走；自定义时清空让用户自己填
+                        label: isCustom ? '' : preset.label,
+                        // 换服务等于换站点，旧模型列表不再适用
+                        models: [],
+                        available: [],
+                        keyword: '',
+                        activeModel: undefined,
+                      }
+                    })
                   },
                 },
                 h('option', { value: 'custom' }, t('supplier.customEndpoint')),
@@ -4877,7 +4935,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
               h('div', { className: 'tu-col tu-col-wide' },
-                fieldLabel(t('supplier.name')),
+                fieldLabel(t('supplier.name'), true),
                 input(form.label, t('supplier.namePlaceholder'), (value) => setField('label', value)),
               ),
             ),
@@ -4901,13 +4959,13 @@ window.__ModuleLoader__.load({
 
             h('div', { className: 'tu-row' },
               h('div', { className: 'tu-col tu-col-grow' },
-                fieldLabel(t('supplier.baseUrl')),
+                fieldLabel(t('supplier.baseUrl'), true),
                 input(form.baseUrl, t('supplier.urlPlaceholder'), (value) => setField('baseUrl', value), { type: 'url' }),
               ),
             ),
             h('div', { className: 'tu-row' },
               h('div', { className: 'tu-col tu-col-grow' },
-                fieldLabel(t('supplier.apiKey')),
+                fieldLabel(t('supplier.apiKey'), form.editing !== true),
                 h('input', {
                   type: 'password',
                   className: 'tu-input',
@@ -5200,16 +5258,52 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button', className: 'tu-btn',
                 disabled: supplierBusy === 'sync',
-                onClick: () => { void saveSupplier(collect(), form.apiKey, false) },
+                onClick: () => {
+                  const problem = validate()
+                  if (problem !== '') { setSupplierNotice({ kind: 'error', text: problem }); return }
+                  setSupplierNotice({ kind: '', text: '' })
+                  void saveSupplier(collect(), form.apiKey, false)
+                },
               }, t('supplier.save')),
               h('button', {
                 type: 'button', className: 'tu-btn tu-btn-primary',
                 disabled: supplierBusy === 'sync',
-                onClick: () => { void saveSupplier(collect(), form.apiKey, true) },
+                onClick: () => {
+                  const problem = validate()
+                  if (problem !== '') { setSupplierNotice({ kind: 'error', text: problem }); return }
+                  setSupplierNotice({ kind: '', text: '' })
+                  void saveSupplier(collect(), form.apiKey, true)
+                },
               }, supplierBusy === 'sync' ? t('supplier.syncing') : t('supplier.saveAndSync')),
             ),
           ),
         ))
+
+        /**
+         * 校验表单，返回第一条错误信息；全部通过返回空串。
+         *
+         * 防呆的重点是「在提交前拦住」而不是让后端报错——用户填错时
+         * 应该当场看到哪一项不对，而不是点完保存才看到一个笼统的失败。
+         */
+        function validate() {
+          if (String(form.label ?? '').trim() === '') return t('err.nameRequired')
+          const url = String(form.baseUrl ?? '').trim()
+          if (url === '') return t('err.urlRequired')
+          if (!/^https?:\/\//i.test(url)) return t('err.urlInvalid')
+          // 新增时必须填密钥；编辑时留空表示沿用已保存的，不算错
+          if (form.editing !== true && String(form.apiKey ?? '').trim() === '') {
+            return t('err.keyRequired')
+          }
+          // DSH 的 provider 配置必须声明模型，否则写入会被拒绝
+          if ((form.models ?? []).length === 0) return t('err.modelsRequired')
+          // 同名站点会互相覆盖，提前拦住
+          const id = (form.id || (form.label || form.baseUrl).trim().replace(/\s+/g, '-').toLowerCase())
+          if (form.editing !== true
+            && (balanceState.sites ?? []).some((site) => site.id === id)) {
+            return t('err.dupId')
+          }
+          return ''
+        }
 
         /** 把表单状态收敛成要提交的站点描述。 */
         function collect() {
@@ -5251,8 +5345,10 @@ window.__ModuleLoader__.load({
         const card = (site) => {
           const balance = site.lastBalance
           const quotas = Array.isArray(balance?.quotas) ? balance.quotas : []
-          const currency = balance?.currency
-          const symbol = currency === 'CNY' ? '¥' : '$'
+          // 注意命名：这里不能叫 currency，否则会遮蔽外层的货币切换状态，
+          // 导致标签永远显示 USD、点击也不换算。
+          const nativeCurrency = balance?.currency
+          const symbol = nativeCurrency === 'CNY' ? '¥' : '$'
           const money = (value) => (typeof value === 'number'
             ? `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
           const modelCount = Array.isArray(site.models) ? site.models.length : 0
@@ -5305,10 +5401,14 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'tu-supcard-money-label' },
                     `${t('supplier.balance')} · ${currency === 'cny' ? t('currency.cny') : t('currency.usd')}`),
                   h('span', { className: 'tu-supcard-money-value' },
-                    // 按当前货币换算：CNY 站点不做二次换算，直接原样显示
-                    currency === 'cny' && symbol !== '¥'
-                      ? `¥${(balance.usd * usdCny).toFixed(2)}`
-                      : money(balance.usd)),
+                    (() => {
+                      // 余额本身是 USD：RMB 模式按汇率换算
+                      // 余额本身是 CNY：两种模式都显示原值，不做二次换算
+                      if (nativeCurrency === 'CNY') return money(balance.usd)
+                      return currency === 'cny'
+                        ? `¥${(balance.usd * usdCny).toFixed(2)}`
+                        : `$${balance.usd < 1 ? balance.usd.toFixed(3) : balance.usd.toFixed(2)}`
+                    })()),
                   )
                   : (site.noPlan === true
                     ? h('span', { className: 'tu-balnoplan' }, t('quota.noPlan'))
