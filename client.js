@@ -1738,6 +1738,21 @@ window.__ModuleLoader__.load({
   gap: 1px;
 }
 .tu-supcard-money-label { font-size: 10.5px; color: var(--dsw-alias-label-secondary); }
+/* 余额可点：提示可切换货币，与统计页的金额卡片行为一致 */
+.tu-supcard-money-click {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  transition: background 130ms ease;
+}
+.tu-supcard-money-click:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+.tu-supcard-money-click:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
 .tu-supcard-money-value {
   font-size: 16px;
   font-weight: 600;
@@ -5274,9 +5289,26 @@ window.__ModuleLoader__.load({
                   })),
                 )
                 : (typeof balance?.usd === 'number'
-                  ? h('div', { className: 'tu-supcard-money' },
-                    h('span', { className: 'tu-supcard-money-label' }, t('supplier.balance')),
-                    h('span', { className: 'tu-supcard-money-value' }, money(balance.usd)),
+                  ? h('div', {
+                    className: 'tu-supcard-money tu-supcard-money-click',
+                    role: 'button',
+                    tabIndex: 0,
+                    title: t('currency.toggleTitle'),
+                    onClick: () => setCurrency((current) => (current === 'usd' ? 'cny' : 'usd')),
+                    onKeyDown: (event) => {
+                      if (event?.key === 'Enter' || event?.key === ' ') {
+                        event.preventDefault?.()
+                        setCurrency((current) => (current === 'usd' ? 'cny' : 'usd'))
+                      }
+                    },
+                  },
+                  h('span', { className: 'tu-supcard-money-label' },
+                    `${t('supplier.balance')} · ${currency === 'cny' ? t('currency.cny') : t('currency.usd')}`),
+                  h('span', { className: 'tu-supcard-money-value' },
+                    // 按当前货币换算：CNY 站点不做二次换算，直接原样显示
+                    currency === 'cny' && symbol !== '¥'
+                      ? `¥${(balance.usd * usdCny).toFixed(2)}`
+                      : money(balance.usd)),
                   )
                   : (site.noPlan === true
                     ? h('span', { className: 'tu-balnoplan' }, t('quota.noPlan'))
