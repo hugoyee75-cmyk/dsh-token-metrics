@@ -2292,12 +2292,17 @@ window.__ModuleLoader__.load({
 .tu-budget[data-level='warn'] .tu-budget-fill { background: var(--dsw-alias-state-warn-primary); }
 .tu-budget[data-level='over'] .tu-budget-fill { background: var(--dsw-alias-state-error-primary); }
 .tu-budget-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   font-size: 10.5px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+/* 金额单独一行，避免被 nowrap + 省略号截掉 */
+.tu-budget-amount {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
 }
 .tu-budget[data-level='warn'] .tu-budget-text { color: var(--dsw-alias-state-warn-primary); }
 .tu-budget[data-level='over'] .tu-budget-text { color: var(--dsw-alias-state-error-primary); }
@@ -4733,7 +4738,20 @@ function formatMoneyText(value) {
             }
             return map[facetKey] ?? {}
           }
-          // 需要按时间段过滤：把范围内的每一天该维度的桶相加。
+          // day 维度特殊：`byDayFacets[day]` 里没有 day 这一层（它装的是
+          // 该天内部的其他维度），日期本身就该直接读 byDay。
+          // 早先这里统一走 byDayFacets，导致「按日期」视图恒为空。
+          if (facetKey === 'day') {
+            const source = data.byDay ?? {}
+            const days = rangeDays.length === 0 ? Object.keys(source) : rangeDays
+            for (const day of days) {
+              const counters = source[day]
+              if (counters === undefined) continue
+              accCounters(merged[day] ?? (merged[day] = zeroCounters()), counters)
+            }
+            return merged
+          }
+          // 其他维度：把范围内每一天该维度的桶相加。
           for (const day of rangeDays.length === 0 ? Object.keys(data.byDay ?? {}) : rangeDays) {
             const byFacet = data.byDayFacets?.[day]?.[facetKey]
             if (byFacet === undefined) continue
@@ -5432,11 +5450,14 @@ function formatMoneyText(value) {
                 style: { width: `${Math.min(100, Math.round(budgetInfo.ratio * 100))}%` },
               }),
             ),
+            // 拆两行：卡片窄，挤在一行会被省略号截掉金额——
+            // 而金额恰恰是这行最该看到的东西。
             h('div', { className: 'tu-budget-text' },
-              `${budgetInfo.label} ${budgetInfo.percent}% · `
-              + (budgetInfo.over
-                ? `${t('budget.over')} ${formatMoney(budgetInfo.used - budgetInfo.limit)}`
-                : `${t('budget.left')} ${formatMoney(Math.max(0, budgetInfo.limit - budgetInfo.used))}`),
+              h('span', null, `${budgetInfo.label} ${budgetInfo.percent}%`),
+              h('span', { className: 'tu-budget-amount' },
+                budgetInfo.over
+                  ? `${t('budget.over')} ${formatMoney(budgetInfo.used - budgetInfo.limit)}`
+                  : `${t('budget.left')} ${formatMoney(Math.max(0, budgetInfo.limit - budgetInfo.used))}`),
             ),
           ),
         ),
@@ -5466,38 +5487,60 @@ function formatMoneyText(value) {
         if (groups.length === 0) return null
         const byModel = data?.byModel ?? {}
         const rows = []
+        // 该分组在当前时间段内的花销。
+        //
+        // 必须按范围算，不能拿全量历史去比日预算 —— 那会算出几千个百分点，
+        // 数字本身没错，但语义完全错了。做法是逐天累加：当天成本 ×
+        // 该组 token 占当天总量的比例。
+        const dayCost = data?.cost?.byDay ?? {}
+        const dayModel = data?.byDayModel ?? {}
+        const costByModel = data?.cost?.byModel ?? {}
+        const coveredDays = rangeDays.length === 0
+          ? Object.keys(data?.byDay ?? {})
+          : rangeDays
+
         for (const group of groups) {
-          // 该分组覆盖的模型合计花销：按 byModel 的成本累加
-          let used = 0
-          for (const [key, counters] of Object.entries(byModel)) {
+          // 该分组覆盖哪些 provider/model 键
+          const members = Object.keys(byModel).filter((key) => {
             const slash = key.indexOf('/')
             const rawName = slash === -1 ? key : key.slice(slash + 1)
             const shown = displayModel(rawName)
-            const hit = (group.models ?? []).some((name) => name === rawName || name === shown || name === key)
-            if (!hit) continue
-            const cost = data?.cost?.byModel?.[key]
-            if (cost?.priced !== true) continue
-            used += cost.usd ?? 0
+            return (group.models ?? []).some((name) => name === rawName || name === shown || name === key)
+          })
+          if (members.length === 0) continue
+          // 组内全是未定价模型时没有可比的成本，跳过而不是显示 0
+          if (!members.some((key) => costByModel[key]?.priced === true)) continue
+
+          let used = 0
+          for (const day of coveredDays) {
+            const counters = dayModel[day]
+            if (counters === undefined) continue
+            const dayTotal = dayCost[day] ?? 0
+            if (dayTotal <= 0) continue
+            const allTokens = Object.values(counters).reduce((sum, c) => sum + (c.totalTokens ?? 0), 0)
+            if (allTokens <= 0) continue
+            let groupTokens = 0
+            for (const key of members) groupTokens += counters[key]?.totalTokens ?? 0
+            used += dayTotal * (groupTokens / allTokens)
           }
-          // 窗口：今日看日预算，其余看月预算
+
+          // 窗口：今日看日预算（没设就跳过），其余看月预算
           const daily = Number(group.dailyUsd) > 0 ? Number(group.dailyUsd) : 0
           const monthly = Number(group.monthlyUsd) > 0 ? Number(group.monthlyUsd) : 0
           let limit = 0
-          let shownUsed = used
           let label = ''
-          if (range === 'today' && daily > 0) {
+          if (range === 'today') {
+            if (daily <= 0) continue
             limit = daily
             label = t('budget.daily')
-          } else if (monthly > 0) {
+          } else {
+            if (monthly <= 0) continue
             limit = monthly
             label = t('budget.monthly')
-          } else if (daily > 0) {
-            limit = daily
-            label = t('budget.daily')
           }
-          if (limit <= 0) continue
+          let shownUsed = used
           if (currency === 'cny') { shownUsed *= usdCny; limit *= usdCny }
-          const ratio = shownUsed / limit
+          const ratio = limit > 0 ? shownUsed / limit : 0
           const percent = Math.round(ratio * 100)
           const over = ratio >= 1
           const warn = ratio >= 0.8
@@ -5511,8 +5554,11 @@ function formatMoneyText(value) {
                 }),
               ),
               h('div', { className: 'tu-budget-text' },
-                `${label} ${percent}% · ${over ? t('budget.over') : t('budget.left')} `
-                + formatMoney(Math.abs(limit - shownUsed))),
+                // 超支后百分比的参考价值就没了（真实值可能上千），
+                // 改成直接说超出多少钱，比一个吓人的百分比有用。
+                over
+                  ? `${label} · ${t('budget.over')} ${formatMoney(shownUsed - limit)}`
+                  : `${label} ${percent}% · ${t('budget.left')} ${formatMoney(limit - shownUsed)}`),
             ),
           ))
         }
