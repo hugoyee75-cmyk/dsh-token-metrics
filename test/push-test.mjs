@@ -125,7 +125,7 @@ function checkTrue(label, condition, detail = '') {
     'quota-reset-soon:k:5-hour': 1,
     'plugin-update:1.2.3': 1,
   }
-  const d = diffAlerts([], { sent })
+  const d = diffAlerts([], { sent }, { now: Date.now() })
   check('只有查询失败给恢复', d.recovered.length, 1)
   check('恢复标题', d.recovered[0].title, '查询已恢复')
 }
@@ -169,20 +169,25 @@ function checkTrue(label, condition, detail = '') {
   check('首次全部新增', first.fresh.length, 2)
   check('首次无恢复', first.recovered.length, 0)
 
-  // 第二次：已经推过，不应重复
-  const state = { sent: { 'balance-low:a': 1, 'quota-low:k:5-hour': 1 } }
-  const second = diffAlerts(alerts, state)
-  check('已推过不重复', second.fresh.length, 0)
+  // 第二次：刚推过（冷却期内），不应重复
+  const now = 1_800_000_000_000
+  const state = { sent: { 'balance-low:a': now - 1000, 'quota-low:k:5-hour': now - 1000 } }
+  const second = diffAlerts(alerts, state, { now })
+  check('冷却期内不重复', second.fresh.length, 0)
+
+  // 冷却期过后可以再推（提醒仍然有效）
+  const later = diffAlerts(alerts, state, { now: now + 31 * 60_000 })
+  check('冷却结束后可再推', later.fresh.length, 2)
 
   // 告警消失 -> 产生恢复通知
-  const recovered = diffAlerts([], state)
+  const recovered = diffAlerts([], state, { now: now + 1000 })
   check('恢复通知数量', recovered.recovered.length, 2)
   check('余额恢复文案', recovered.recovered.find((r) => r.siteId === 'a')?.title, '余额已恢复')
   check('配额恢复文案', recovered.recovered.find((r) => r.window === '5-hour')?.title, '配额已恢复')
   check('恢复级别为 ok', recovered.recovered[0].level, 'ok')
 
   // 新增与恢复同时发生
-  const mixed = diffAlerts([alerts[0]], { sent: { 'quota-low:k:5-hour': 1 } })
+  const mixed = diffAlerts([alerts[0]], { sent: { 'quota-low:k:5-hour': now - 1000 } }, { now })
   check('同时有新增', mixed.fresh.length, 1)
   check('同时有恢复', mixed.recovered.length, 1)
 }

@@ -226,10 +226,52 @@ export function evaluateAlerts({ sites, thresholds = {} }) {
  * 另外处理「恢复」：某条告警消失时，如果之前推送过，要发一条恢复通知
  * （例如配额重置后用户会想知道「现在可以用了」）。
  */
-export function diffAlerts(current, state) {
+/**
+ * 各类型的冷却时长（毫秒）。
+ *
+ * 为什么不是统一冷却：不同告警的「多久提一次才有意义」差别很大。
+ *   - 余额不足：钱真的少了才需要再提醒，但要防止用户反复点查询时刷屏
+ *   - 查询失败：站点挂了会一直失败，必须给较长冷却，否则每次轮询都弹
+ *   - 配额将尽：窗口内不会恢复，冷却可以长一些
+ *   - 即将重置：这是「好消息」，只在临近时提一次，不需要冷却
+ *   - 插件新版本：一天一次足够
+ *
+ * 另外所有类型都有一个**硬下限**（`minCooldownMs`），防止意外刷屏。
+ */
+const COOLDOWN_MS = {
+  'balance-low': 30 * 60_000,      // 30 分钟
+  'quota-low': 30 * 60_000,        // 30 分钟
+  'probe-failed': 2 * 60 * 60_000, // 2 小时（站点挂了会一直失败）
+  'quota-reset-soon': 0,           // 不冷却：只在临近重置时出现，天然只提一次
+  'plugin-update': 24 * 60 * 60_000, // 一天
+}
+
+/** 所有告警的硬下限：即使规则说 0 冷却，也不允许短时间内重复。 */
+const MIN_COOLDOWN_MS = 60_000
+
+/**
+ * 算出某条告警的冷却剩余时间（毫秒）。
+ *
+ * @returns {number} 0 表示可以推送
+ */
+export function cooldownRemaining(alert, sent, now = Date.now()) {
+  const last = sent?.[alert.id]
+  if (last === undefined) return 0
+  const configured = COOLDOWN_MS[alert.kind] ?? 30 * 60_000
+  const cooldown = Math.max(configured, MIN_COOLDOWN_MS)
+  const elapsed = now - Number(last)
+  return Math.max(0, cooldown - elapsed)
+}
+
+export function diffAlerts(current, state, options = {}) {
   const sent = state?.sent ?? {}
+  const now = options.now ?? Date.now()
   const currentIds = new Set(current.map((alert) => alert.id))
-  const fresh = current.filter((alert) => sent[alert.id] === undefined)
+  // 冷却期内不重复推送；恢复通知不受冷却影响（它本来就只出现一次）
+  const fresh = current.filter((alert) => {
+    if (sent[alert.id] === undefined) return true
+    return cooldownRemaining(alert, sent, now) === 0
+  })
   /** 每种告警消失时的恢复文案。 */
   const RECOVERY = {
     'balance-low': { title: '余额已恢复', body: (p) => `${p[1]} 的余额已回到阈值以上` },
