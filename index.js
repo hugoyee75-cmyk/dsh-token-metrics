@@ -181,6 +181,71 @@ const DEFAULTS = {
 }
 
 /** 读取并规整配置。 */
+/**
+ * 读取页面保存过的预算（`$DSH_HOME/token-metrics/budget.json`）。
+ *
+ * 读不到或格式不对时返回 null，让调用方退回 cordis.patch.yml 的配置。
+ */
+export function loadSavedBudget(home) {
+  try {
+    const path = join(dataDir(home), 'budget.json')
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    if (parsed === null || typeof parsed !== 'object') return null
+    const budget = parsed.budget
+    if (budget === null || typeof budget !== 'object') return null
+    return sanitizeBudget(budget)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 清洗预算对象（来自页面提交或配置文件）。
+ *
+ * 与 resolveConfig 里的解析规则保持一致，但独立成函数是为了让
+ * 「页面保存」与「启动读取」走同一套校验，避免两处规则漂移。
+ */
+export function sanitizeBudget(raw) {
+  const source = raw !== null && typeof raw === 'object' ? raw : {}
+  const money = (value, fallback = 0) => {
+    const parsed = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback
+    return Math.min(1e7, Math.round(parsed * 100) / 100)
+  }
+  const percent = (value, fallback) => {
+    const parsed = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(parsed)) return fallback
+    return Math.min(100, Math.max(1, Math.round(parsed)))
+  }
+  const groups = Array.isArray(source.groups)
+    ? source.groups
+      .map((entry, index) => {
+        if (entry === null || typeof entry !== 'object') return undefined
+        const models = Array.isArray(entry.models)
+          ? [...new Set(entry.models
+            .filter((name) => typeof name === 'string' && name.trim() !== '')
+            .map((name) => name.trim()))]
+          : []
+        if (models.length === 0) return undefined
+        return {
+          id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `group-${index + 1}`,
+          label: typeof entry.label === 'string' && entry.label !== '' ? entry.label : `分组 ${index + 1}`,
+          models,
+          dailyUsd: money(entry.dailyUsd),
+          monthlyUsd: money(entry.monthlyUsd),
+        }
+      })
+      .filter((entry) => entry !== undefined)
+    : []
+  return {
+    dailyUsd: money(source.dailyUsd),
+    monthlyUsd: money(source.monthlyUsd),
+    warnPercent: percent(source.warnPercent, 80),
+    groups,
+  }
+}
+
 function resolveConfig(raw) {
   const source = raw !== null && typeof raw === 'object' ? raw : {}
   const number = (value, fallback, min, max) => {
@@ -660,10 +725,12 @@ class TokenUsageTracker {
   constructor(logger, buildId, config = resolveConfig()) {
     this.logger = logger
     this.buildId = buildId
-    this.config = config
     // 固定数据目录：定时落盘是异步的，若每次都读 process.env，环境变量一变
     // 就会把数据写到别的目录去（测试里真实踩到过）。
     this.home = process.env.DSH_HOME?.trim() ?? join(homedir(), '.dsh')
+    // 预算优先取页面保存过的值（budget.json），没有才用 cordis.patch.yml
+    // 里手写的配置。页面上改的东西不该要求用户去改 yml 文件。
+    this.config = { ...config, budget: loadSavedBudget(this.home) ?? config.budget }
     /**
      * 价目表：负责模型单价、汇率、手工补价与供应商倍率。
      *
@@ -733,6 +800,30 @@ class TokenUsageTracker {
    * @param {number} [input.delegationDepth] 子代理层级
    * @param {string} [input.accountId] 记录时已知的账号标识
    */
+  /**
+   * 保存预算设置（来自页面的可视化配置）。
+   *
+   * 写到 `$DSH_HOME/token-metrics/budget.json`，不动 profile 的
+   * cordis.patch.yml —— 那是用户手写的配置文件，程序不该改它。
+   * 启动时先读这个文件，读不到才用 cordis.patch.yml 里的值。
+   */
+  saveBudget(input) {
+    const budget = sanitizeBudget(input)
+    this.config = { ...this.config, budget }
+    try {
+      mkdirSync(dataDir(this.home), { recursive: true })
+      writeFileSync(
+        join(dataDir(this.home), 'budget.json'),
+        JSON.stringify({ budget }, null, 2),
+        'utf8',
+      )
+    } catch (error) {
+      this.logger?.warn?.(`token-metrics: 保存预算失败（${error?.message ?? error}）`)
+      throw error
+    }
+    return budget
+  }
+
   record({
     sessionId, provider, model, turn, step, usage, time, purpose, parentSession,
     cwd, origin, delegationDepth, accountId,
@@ -2548,6 +2639,31 @@ export function apply(ctx, rawConfig) {
                 tracker.cachedSnapshot = undefined
                 tracker.storeRevision += 1
                 sendJson(res, 200, { ok: true, aliases: { ...tracker.priceBook.aliases } })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            /**
+             * 保存预算设置。
+             *
+             * 页面上的可视化配置写到这里，覆盖内存里的 config 并落盘到
+             * `budget.json`（不改 profile 的 cordis.patch.yml —— 那是用户
+             * 手写的配置，程序不该去改）。启动时优先读这个文件，
+             * 其次是 cordis.patch.yml 里的 `budget`。
+             */
+            if (url.pathname === '/api/dsh-token-metrics/budget') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const saved = tracker.saveBudget(body)
+                tracker.cachedSnapshot = undefined
+                tracker.storeRevision += 1
+                sendJson(res, 200, { ok: true, budget: saved })
               } catch (error) {
                 sendJson(res, 400, { error: error?.message ?? String(error) })
               }

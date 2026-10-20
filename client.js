@@ -117,6 +117,7 @@ window.__ModuleLoader__.load({
   ]
 
   const SUPPLIER_MODELS_ROUTE = '/api/dsh-token-metrics/supplier/models'
+  const BUDGET_ROUTE = '/api/dsh-token-metrics/budget'
   const SUPPLIER_SYNC_ROUTE = '/api/dsh-token-metrics/supplier/sync'
   const PRICING_MULTIPLIER_ROUTE2 = '/api/dsh-token-metrics/pricing/multiplier'
 
@@ -147,9 +148,32 @@ window.__ModuleLoader__.load({
       'budget.left': '剩',
       'budget.over': '已超',
       'budget.set': '设置预算',
+      'budget.title': '预算管理',
+      'budget.subtitle': '给花销一个参照系：今天用了多少、还剩多少，心里有数才好规划',
+      'budget.global': '全局预算',
+      'budget.dailyLabel': '每日预算（USD）',
+      'budget.monthlyLabel': '每月预算（USD）',
+      'budget.dailyHint': '留空或 0 表示不启用',
+      'budget.monthlyHint': '留空或 0 表示不启用',
+      'budget.warnLabel': '提醒阈值（%）',
+      'budget.warnHint': '已用超过这个比例时提醒，默认 80',
+      'budget.groupsTitle': '按模型分组',
+      'budget.groupsHint': '一个分组可包含单个或多个模型，组内额度是这些模型的合计',
+      'budget.addGroup': '添加分组',
+      'budget.groupName': '分组名称',
+      'budget.groupModels': '包含的模型',
+      'budget.groupModelsHint': '从已有模型中选，可多选',
+      'budget.groupDaily': '每日（USD）',
+      'budget.groupMonthly': '每月（USD）',
+      'budget.removeGroup': '删除分组',
+      'budget.save': '保存预算',
+      'budget.saved': '已保存',
+      'budget.emptyModels': '还没有可选的模型',
+      'budget.noGroups': '还没有分组。给某几个模型单独设额度时再添加。',
       'balance.title': '供应商余额',
       'view.stats': '统计',
       'view.suppliers': '模型接入',
+      'view.budget': '预算',
       'supplier.title': '模型接入',
       'supplier.subtitle': '接入第三方中转站与官方平台：余额、可用模型，并同步到 DSH 模型配置',
       'supplier.add': '添加供应商',
@@ -515,9 +539,32 @@ window.__ModuleLoader__.load({
       'budget.left': 'left',
       'budget.over': 'over',
       'budget.set': 'Set budget',
+      'budget.title': 'Budget',
+      'budget.subtitle': 'Give your spending a reference point: how much today, how much left.',
+      'budget.global': 'Global budget',
+      'budget.dailyLabel': 'Daily budget (USD)',
+      'budget.monthlyLabel': 'Monthly budget (USD)',
+      'budget.dailyHint': 'Leave empty or 0 to disable',
+      'budget.monthlyHint': 'Leave empty or 0 to disable',
+      'budget.warnLabel': 'Warn threshold (%)',
+      'budget.warnHint': 'Warn when usage exceeds this share; default 80',
+      'budget.groupsTitle': 'Per-model groups',
+      'budget.groupsHint': 'A group holds one or more models; its limit is their combined budget',
+      'budget.addGroup': 'Add group',
+      'budget.groupName': 'Group name',
+      'budget.groupModels': 'Models',
+      'budget.groupModelsHint': 'Pick from your models; multi-select',
+      'budget.groupDaily': 'Daily (USD)',
+      'budget.groupMonthly': 'Monthly (USD)',
+      'budget.removeGroup': 'Remove group',
+      'budget.save': 'Save budget',
+      'budget.saved': 'Saved',
+      'budget.emptyModels': 'No models available yet',
+      'budget.noGroups': 'No groups yet. Add one to budget specific models separately.',
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
       'view.suppliers': 'Model Access',
+      'view.budget': 'Budget',
       'supplier.title': 'Model Access',
       'supplier.subtitle': 'Add relay stations and official platforms: balances, models, and DSH config sync',
       'supplier.add': 'Add supplier',
@@ -2241,6 +2288,86 @@ window.__ModuleLoader__.load({
 .tu-budget[data-level='warn'] .tu-budget-text { color: var(--dsw-alias-state-warn-primary); }
 .tu-budget[data-level='over'] .tu-budget-text { color: var(--dsw-alias-state-error-primary); }
 /* 分组预算：成本卡片下方独立一块 */
+/* —— 预算页 —— */
+.tu-budget-section {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.tu-budget-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.tu-budget-h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.tu-budget-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 320px;
+}
+.tu-budget-fields .tu-input { margin-bottom: 4px; }
+.tu-budget-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.tu-budget-group-card {
+  padding: 14px 16px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+.tu-budget-group-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.tu-budget-name { flex: 1 1 auto; }
+.tu-budget-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.tu-budget-group-row .tu-flabel { min-width: auto; }
+.tu-budget-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.tu-budget-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-budget-model[data-on='true'] {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+}
+
 .tu-budget-groups {
   display: flex;
   flex-direction: column;
@@ -3964,6 +4091,15 @@ function formatMoneyText(value) {
       const [topView, setTopView] = useState('stats')
       // 供应商编辑表单：null 表示关闭
       const [supplierForm, setSupplierForm] = useState(null)
+      /**
+       * 预算编辑表单。
+       *
+       * null 表示还没打开过；打开时从 `data.config.budget` 初始化一份副本，
+       * 用户改的是副本，点「保存预算」才写回 Host —— 中途取消不会影响已存配置。
+       */
+      const [budgetForm, setBudgetForm] = useState(null)
+      const [budgetBusy, setBudgetBusy] = useState(false)
+      const [budgetNotice, setBudgetNotice] = useState('')
       // 查看某个供应商的模型清单：{ siteId, label, models } 或 null
       const [modelsDialog, setModelsDialog] = useState(null)
       const [supplierBusy, setSupplierBusy] = useState('')
@@ -5013,6 +5149,11 @@ function formatMoneyText(value) {
             void loadBalance()
           },
         }, t('view.suppliers')),
+        h('button', {
+          type: 'button', className: 'tu-viewtab',
+          'data-active': topView === 'budget' ? 'true' : 'false',
+          onClick: () => setTopView('budget'),
+        }, t('view.budget')),
       )
 
       const tabs = h('div', { className: 'tu-filterbar' },
@@ -6279,6 +6420,193 @@ function formatMoneyText(value) {
       })()
 
       // 供应商管理页面（顶层视图，占满整页）。
+      /**
+       * 预算页：可视化配置全局预算与按模型分组预算。
+       *
+       * 保存走 POST /budget，Host 写到 `$DSH_HOME/token-metrics/budget.json`，
+       * 不改用户的 cordis.patch.yml。
+       */
+      const budgetPage = (() => {
+        // 未初始化时用当前配置填一份
+        const saved = data?.config?.budget ?? {}
+        const form = budgetForm ?? {
+          dailyUsd: saved.dailyUsd ?? 0,
+          monthlyUsd: saved.monthlyUsd ?? 0,
+          warnPercent: saved.warnPercent ?? 80,
+          groups: (saved.groups ?? []).map((g) => ({ ...g, models: [...(g.models ?? [])] })),
+        }
+        const models = (data?.modelOptions ?? []).slice().sort()
+
+        /** 字段标签（与弹窗里的同名函数一致，但作用域独立）。 */
+        const fieldLabel = (text, required = false) => h('span', { className: 'tu-flabel' },
+          text, required ? h('span', { className: 'tu-req' }, '*') : null)
+
+        const setFormField = (key, value) => {
+          setBudgetForm({ ...form, groups: form.groups ?? [], [key]: value })
+        }
+        const setGroupField = (index, key, value) => {
+          const groups = (form.groups ?? []).map((g, i) => (i === index ? { ...g, [key]: value } : g))
+          setBudgetForm({ ...form, groups })
+        }
+        const addGroup = () => {
+          const groups = [...(form.groups ?? []), {
+            id: `group-${Date.now()}`,
+            label: '',
+            models: [],
+            dailyUsd: 0,
+            monthlyUsd: 0,
+          }]
+          setBudgetForm({ ...form, groups })
+        }
+        const removeGroup = (index) => {
+          setBudgetForm({ ...form, groups: (form.groups ?? []).filter((_, i) => i !== index) })
+        }
+        const toggleModel = (index, model) => {
+          const group = (form.groups ?? [])[index]
+          if (group === undefined) return
+          const has = (group.models ?? []).includes(model)
+          setGroupField(index, 'models', has
+            ? (group.models ?? []).filter((m) => m !== model)
+            : [...(group.models ?? []), model])
+        }
+
+        const save = async () => {
+          setBudgetBusy(true)
+          setBudgetNotice('')
+          try {
+            const response = await fetch(BUDGET_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(form),
+              credentials: 'same-origin',
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok || payload?.ok !== true) {
+              throw new Error(payload?.error ?? `HTTP ${response.status}`)
+            }
+            setBudgetForm(payload.budget)
+            setBudgetNotice(t('budget.saved'))
+            void refresh()
+          } catch (error) {
+            setBudgetNotice(`${t('error')}：${error?.message ?? error}`)
+          } finally {
+            setBudgetBusy(false)
+          }
+        }
+
+        return h('div', { className: 'tu-supplier-page' },
+          h('div', { className: 'tu-supplier-head' },
+            h('div', null,
+              h('h2', { className: 'tu-supplier-title' }, t('budget.title')),
+              h('p', { className: 'tu-supplier-sub' }, t('budget.subtitle')),
+            ),
+            h('button', {
+              type: 'button', className: 'tu-button tu-button-primary',
+              onClick: save, disabled: budgetBusy,
+            }, budgetBusy ? t('saving') : t('budget.save')),
+          ),
+
+          budgetNotice === ''
+            ? null
+            : h('p', { className: 'tu-hint', style: { color: 'var(--dsw-alias-state-success-primary)' } }, budgetNotice),
+
+          // —— 全局预算 ——
+          h('section', { className: 'tu-budget-section' },
+            h('h3', { className: 'tu-budget-h3' }, t('budget.global')),
+            h('div', { className: 'tu-budget-fields' },
+              fieldLabel(t('budget.dailyLabel')),
+              h('input', {
+                type: 'number', min: 0, step: 0.5, className: 'tu-input',
+                value: form.dailyUsd ?? 0,
+                onChange: (e) => setFormField('dailyUsd', Number(e.target.value) || 0),
+              }),
+              h('span', { className: 'tu-dfield-hint' }, t('budget.dailyHint')),
+              fieldLabel(t('budget.monthlyLabel')),
+              h('input', {
+                type: 'number', min: 0, step: 1, className: 'tu-input',
+                value: form.monthlyUsd ?? 0,
+                onChange: (e) => setFormField('monthlyUsd', Number(e.target.value) || 0),
+              }),
+              h('span', { className: 'tu-dfield-hint' }, t('budget.monthlyHint')),
+              fieldLabel(t('budget.warnLabel')),
+              h('input', {
+                type: 'number', min: 1, max: 100, step: 5, className: 'tu-input',
+                value: form.warnPercent ?? 80,
+                onChange: (e) => setFormField('warnPercent', Number(e.target.value) || 80),
+              }),
+              h('span', { className: 'tu-dfield-hint' }, t('budget.warnHint')),
+            ),
+          ),
+
+          // —— 按模型分组 ——
+          h('section', { className: 'tu-budget-section' },
+            h('div', { className: 'tu-budget-section-head' },
+              h('div', null,
+                h('h3', { className: 'tu-budget-h3' }, t('budget.groupsTitle')),
+                h('p', { className: 'tu-dfield-hint' }, t('budget.groupsHint')),
+              ),
+              h('button', {
+                type: 'button', className: 'tu-button', onClick: addGroup,
+              }, `+ ${t('budget.addGroup')}`),
+            ),
+            (form.groups ?? []).length === 0
+              ? h('p', { className: 'tu-hint' }, t('budget.noGroups'))
+              : h('div', { className: 'tu-budget-group-list' },
+                ...(form.groups ?? []).map((group, index) => h('div', {
+                  key: group.id ?? index, className: 'tu-budget-group-card',
+                },
+                h('div', { className: 'tu-budget-group-top' },
+                  h('input', {
+                    type: 'text', className: 'tu-input tu-budget-name',
+                    placeholder: t('budget.groupName'),
+                    value: group.label ?? '',
+                    onChange: (e) => setGroupField(index, 'label', e.target.value),
+                  }),
+                  h('button', {
+                    type: 'button', className: 'tu-icon-btn',
+                    title: t('budget.removeGroup'),
+                    onClick: () => removeGroup(index),
+                  }, '×'),
+                ),
+                h('div', { className: 'tu-budget-group-row' },
+                  fieldLabel(t('budget.groupDaily')),
+                  h('input', {
+                    type: 'number', min: 0, step: 0.5, className: 'tu-input tu-input-xs',
+                    value: group.dailyUsd ?? 0,
+                    onChange: (e) => setGroupField(index, 'dailyUsd', Number(e.target.value) || 0),
+                  }),
+                  fieldLabel(t('budget.groupMonthly')),
+                  h('input', {
+                    type: 'number', min: 0, step: 1, className: 'tu-input tu-input-xs',
+                    value: group.monthlyUsd ?? 0,
+                    onChange: (e) => setGroupField(index, 'monthlyUsd', Number(e.target.value) || 0),
+                  }),
+                ),
+                h('div', { className: 'tu-dfield-hint' }, t('budget.groupModelsHint')),
+                models.length === 0
+                  ? h('p', { className: 'tu-hint' }, t('budget.emptyModels'))
+                  : h('div', { className: 'tu-budget-models' },
+                    ...models.map((model) => {
+                      const picked = (group.models ?? []).includes(model)
+                      return h('label', {
+                        key: model, className: 'tu-budget-model',
+                        'data-on': picked ? 'true' : 'false',
+                      },
+                      h('input', {
+                        type: 'checkbox', className: 'tu-checkbox',
+                        checked: picked,
+                        onChange: () => toggleModel(index, model),
+                      }),
+                      h('span', null, model),
+                      )
+                    }),
+                  ),
+                )),
+              ),
+          ),
+        )
+      })()
+
       const supplierPage = (() => {
         const sites = balanceState.sites ?? []
         const discovered = (balanceState.discovered ?? [])
@@ -6673,7 +7001,7 @@ function formatMoneyText(value) {
       // 供应商视图是完整页面，不叠在统计内容下面。
       if (topView === 'suppliers') {
         return h('div', { className: 'tu-root' },
-          head, toolbar, supplierPage, supplierModal, modelsModal, versionModal)
+          head, toolbar, topView === 'budget' ? budgetPage : supplierPage, supplierModal, modelsModal, versionModal)
       }
 
       return h('div', { className: 'tu-root' },
