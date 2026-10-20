@@ -38,7 +38,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync, copyFileSync } from 'node:fs'
 import { PluginUpdater, parseRepository } from './src/updater.js'
 import { isReloading, selfReload, watchPackage } from './src/reload.js'
-import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
+import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
 import { probeOfficial, detectProvider, loadModelCatalog } from './src/providers.js'
@@ -103,6 +103,16 @@ const STORE_VERSION = 1
  * 默认配置。全部可在 cordis.patch.yml 的 `config` 里覆盖，
  * 用户的自定义层在升级后依然保留。
  */
+/**
+ * 数据结构版本号。
+ *
+ * 每新增一类分桶（byDayModel / byModelFacets / byDayFacets / byDayPeak …）
+ * 就递增。回扫成功补齐后写入 store，之后不再重复判断——靠「桶是否为空」
+ * 猜测会把「刚重建完但该时段没有此类调用」误判成「还没迁移」，
+ * 每次启动都白跑一次全量回扫。
+ */
+const SCHEMA_VERSION = 2
+
 const DEFAULTS = {
   /** 落盘防抖（毫秒）。模型调用本身很轻，磁盘写入才是开销。 */
   flushDelayMs: 2000,
@@ -352,6 +362,33 @@ function emptyStore(buildId) {
     /** `${provider}/${model}` -> counters。明细表按供应商拆分时用它。 */
     byModel: {},
     /**
+     * day -> 各维度 -> 名称 -> counters。
+     *
+     * 供前端把「今日 / 近 7 天 / 全部」应用到供应商、项目、来源、账号
+     * 这些明细上。没有它，切时间段时只有指标卡在变，表格和图表不动。
+     */
+    byDayFacets: {},
+    /**
+     * day -> `${provider}/${model}` -> { peak, off }。
+     *
+     * 与 byModelPeak 同构但按天拆分，供「今日/近 7 天」的金额卡片
+     * 精确套用峰谷价。
+     */
+    byDayPeak: {},
+    /**
+     * `${provider}/${model}` -> { peak, off } 两份 counters。
+     *
+     * 只对分时段计价的厂商（目前是 DeepSeek 系）记录。成本按两桶分别套用
+     * 峰时/谷时单价，否则谷时调用会被按峰时价高估最多一倍。
+     */
+    byModelPeak: {},
+    /**
+     * 数据结构版本号，见 loadStore 里的说明。
+     *
+     * 全新库直接标为当前版本：没有历史数据要迁移，不该触发重建。
+     */
+    schemaVersion: SCHEMA_VERSION,
+    /**
      * 模型名（不含 provider）-> counters。
      *
      * 同一个模型可能挂在多个供应商下（例如 deepseek-v4.1-flash 同时出现在
@@ -434,6 +471,16 @@ function loadStore(logger, home) {
       byDayModel: parsed.byDayModel ?? {},
       byDayModelName: parsed.byDayModelName ?? {},
       byModelFacets: parsed.byModelFacets ?? {},
+      byDayFacets: parsed.byDayFacets ?? {},
+      byDayPeak: parsed.byDayPeak ?? {},
+      byModelPeak: parsed.byModelPeak ?? {},
+      /**
+       * 数据结构版本号。新增分桶结构时递增，回扫完成后写入。
+       *
+       * 用它判断「是否需要为迁移而重建」，避免靠「桶空不空」猜测——
+       * 后者会把「刚重建完但该时段恰好没有此类调用」误判成「还没迁移」。
+       */
+      schemaVersion: Number(parsed.schemaVersion ?? 0) || 0,
       bySession: parsed.bySession ?? {},
       seen: parsed.seen ?? {},
       failedSeen: parsed.failedSeen ?? {},
@@ -451,15 +498,27 @@ function loadStore(logger, home) {
     const modelNameKeys = Object.keys(store.byModelName ?? {})
     const missingFacets = modelNameKeys.length > 0
       && Object.keys(store.byModelFacets ?? {}).length === 0
-    if (missingFacets
-      || (dayKeys.length > 0
-        && (dayKeys.some((day) => !dayModelKeys.has(day))
-          || dayKeys.some((day) => !dayModelNameKeys.has(day))))) {
+    // byDayFacets / byDayPeak 也是后加的桶，判据同上：看覆盖度而非空/非空。
+    const dayFacetKeys = new Set(Object.keys(store.byDayFacets ?? {}))
+    const dayPeakKeys = new Set(Object.keys(store.byDayPeak ?? {}))
+    const missingDayFacets = dayKeys.length > 0
+      && (dayKeys.some((day) => !dayFacetKeys.has(day))
+        || dayKeys.some((day) => !dayModelKeys.has(day))
+        || dayKeys.some((day) => !dayModelNameKeys.has(day)))
+    // 峰谷分桶的迁移用**结构版本号**判断，而不是「桶是否为空」。
+    //
+    // 为什么不用空/非空：桶为空有两种可能——① 老数据从没记过（需要重建）；
+    // ② 刚重建完但该时段没有 DeepSeek 调用（不需要重建）。用空/非空会把
+    // 后者误判成前者，每次启动都触发一次全量回扫。
+    const missingPeak = Number(store.schemaVersion ?? 0) < SCHEMA_VERSION
+      && Object.keys(store.byModel ?? {}).length > 0
+    if (missingFacets || missingDayFacets || missingPeak) {
       store.needsRebuild = true
-      logger?.info?.(
-        `token-metrics: 「按天×模型」数据不完整（${dayModelKeys.size}/${dayKeys.length} 天），`
-        + '将重建以补齐历史趋势',
-      )
+      const reasons = []
+      if (missingFacets) reasons.push('按模型分组的维度数据缺失')
+      if (missingDayFacets) reasons.push(`「按天×模型」不完整（${dayModelKeys.size}/${dayKeys.length} 天）`)
+      if (missingPeak) reasons.push('峰谷用量分桶缺失')
+      logger?.info?.(`token-metrics: ${reasons.join('、')}，将重建以补齐历史`)
     }
 
     // 一致性检查：正常情况下 calls 与去重键数严格相等（每次调用写一个键）。
@@ -510,6 +569,8 @@ function pruneStore(store, retentionDays, maxSeenEntries) {
   // 按天×模型的桶必须与 byDay 一起裁，否则会随保留期无限增长。
   for (const day of Object.keys(store.byDayModel ?? {})) {
     if (day < cutoffDay) delete store.byDayModel[day]
+    if (day < cutoffDay) delete store.byDayFacets[day]
+    if (day < cutoffDay) delete store.byDayPeak[day]
   }
   for (const day of Object.keys(store.byDayModelName ?? {})) {
     if (day < cutoffDay) delete store.byDayModelName[day]
@@ -638,6 +699,24 @@ class TokenUsageTracker {
     this.store.byModel[modelKey] ??= emptyCounters()
     addUsage(this.store.byModel[modelKey], usage)
 
+    // 峰谷用量分桶：DeepSeek 系分时段计价，谷时价是峰时的一半。
+    // 只对「有谷时价的模型」记录，其余模型不需要这份数据，
+    // 避免给所有调用都多存一份计数器。
+    const priceForPeak = resolvePrice(model || 'unknown', this.priceBook.table, this.priceBook.overrides)
+    if (priceForPeak?.offPeak !== undefined) {
+      const bucket = isOffPeak(new Date(stamp), priceForPeak.offPeak.windows) ? 'off' : 'peak'
+      this.store.byModelPeak ??= {}
+      const peakEntry = this.store.byModelPeak[modelKey] ?? { peak: emptyCounters(), off: emptyCounters() }
+      addUsage(peakEntry[bucket], usage)
+      this.store.byModelPeak[modelKey] = peakEntry
+
+      // 同一天再拆一份，供按天成本精确计价
+      this.store.byDayPeak[day] ??= {}
+      const dayPeak = this.store.byDayPeak[day][modelKey] ?? { peak: emptyCounters(), off: emptyCounters() }
+      addUsage(dayPeak[bucket], usage)
+      this.store.byDayPeak[day][modelKey] = dayPeak
+    }
+
     // 按天 × 模型：趋势图按模型拆分需要它。
     this.store.byDayModel[day] ??= {}
     this.store.byDayModel[day][modelKey] ??= emptyCounters()
@@ -667,6 +746,19 @@ class TokenUsageTracker {
     facets.day[day] ??= emptyCounters()
     addUsage(facets.day[day], usage)
 
+    // —— 按天 × 维度归组（供前端按时间段过滤各明细）——
+    const dayFacets = this.store.byDayFacets[day] ??= {
+      provider: {}, project: {}, origin: {}, account: {},
+    }
+    dayFacets.provider[providerKey] ??= emptyCounters()
+    addUsage(dayFacets.provider[providerKey], usage)
+    if (cwd) {
+      dayFacets.project[cwd] ??= emptyCounters()
+      addUsage(dayFacets.project[cwd], usage)
+    }
+    dayFacets.origin[originName] ??= emptyCounters()
+    addUsage(dayFacets.origin[originName], usage)
+
     // —— 按项目（工作目录）归组 ——
     if (cwd) {
       this.store.byProject[cwd] ??= emptyCounters()
@@ -691,9 +783,11 @@ class TokenUsageTracker {
     addUsage(accountEntry, usage)
     accountEntry.firstAt = Math.min(accountEntry.firstAt ?? stamp, stamp)
     accountEntry.lastAt = Math.max(accountEntry.lastAt ?? 0, stamp)
-    // 同步进按模型分组的明细，供前端筛选后展示账号维度。
+    // 同步进按模型分组与按天分组的明细，供前端筛选后展示账号维度。
     facets.account[accountKey] ??= emptyCounters()
     addUsage(facets.account[accountKey], usage)
+    dayFacets.account[accountKey] ??= emptyCounters()
+    addUsage(dayFacets.account[accountKey], usage)
 
     if (sessionId) {
       const entry = this.store.bySession[sessionId] ?? {
@@ -1069,6 +1163,11 @@ class TokenUsageTracker {
         const book = this.priceBook
         const byModelCost = {}
         let totalUsd = 0
+        // 按天成本：前端把「今日/近 7 天」应用到金额卡片时用。
+        // 逐天逐模型算，峰谷同样按桶区分（byModelPeak 是按模型全量的，
+        // 无法拆到天，所以这里按天重算时用峰时价——日级估算足够，
+        // 且不会把谷时调用算成峰时价而高估）。
+        const costByDay = {}
         const unpriced = []
         for (const [key, counters] of Object.entries(this.store.byModel)) {
           // key 形如 provider/model
@@ -1082,12 +1181,21 @@ class TokenUsageTracker {
             byModelCost[key] = { usd: 0, priced: false, multiplier }
             continue
           }
-          const usd = costOf(counters, price, multiplier)
+          // 峰谷分桶有数据时分别计价，否则按峰时估一次。
+          // DeepSeek 的谷时价是峰时的一半，不区分会让成本高估最多一倍。
+          const peakBuckets = this.store.byModelPeak?.[key]
+          let usd
+          if (peakBuckets !== undefined) {
+            usd = costOf(peakBuckets.peak, price, multiplier)
+              + costOf(peakBuckets.off, price, multiplier, { offPeak: true })
+          } else {
+            usd = costOf(counters, price, multiplier)
+          }
           totalUsd += usd
           byModelCost[key] = {
             usd,
             priced: true,
-            // 单价按每百万 token 展示，这是行业惯例
+            // 单价按每百万 token 展示，这是行业惯例。有谷时价时额外标注。
             inputPerM: (price.input ?? 0) * 1e6,
             outputPerM: (price.output ?? 0) * 1e6,
             cacheReadPerM: (price.cacheRead ?? 0) * 1e6,
@@ -1095,10 +1203,39 @@ class TokenUsageTracker {
             matchedName: price.matchedName,
             priceSource: price.source,
             multiplier,
+            ...(price.offPeak === undefined ? {} : {
+              offPeak: {
+                inputPerM: (price.offPeak.input ?? 0) * 1e6,
+                outputPerM: (price.offPeak.output ?? 0) * 1e6,
+                cacheReadPerM: (price.offPeak.cacheRead ?? 0) * 1e6,
+              },
+              // 该模型有多少用量落在谷时，供页面说明
+              offPeakTokens: peakBuckets?.off?.totalTokens ?? 0,
+            }),
           }
         }
         // 按模型名合并（与占比图同一口径），供页面表格直接用
         const byModelNameCost = {}
+        for (const [day, byModel] of Object.entries(this.store.byDayModel ?? {})) {
+          let dayUsd = 0
+          for (const [key, counters] of Object.entries(byModel)) {
+            const slash = key.indexOf('/')
+            const modelName = slash === -1 ? key : key.slice(slash + 1)
+            const providerName = slash === -1 ? 'unknown' : key.slice(0, slash)
+            const price = resolvePrice(modelName, book.table, book.overrides)
+            if (price === undefined) continue
+            // 该天该模型的峰谷桶（若有）
+            const buckets = this.store.byDayPeak?.[day]?.[key]
+            if (buckets !== undefined) {
+              dayUsd += costOf(buckets.peak, price, book.multiplierOf(providerName))
+                + costOf(buckets.off, price, book.multiplierOf(providerName), { offPeak: true })
+            } else {
+              dayUsd += costOf(counters, price, book.multiplierOf(providerName))
+            }
+          }
+          costByDay[day] = dayUsd
+        }
+
         for (const [key, entry] of Object.entries(byModelCost)) {
           const slash = key.indexOf('/')
           const modelName = slash === -1 ? key : key.slice(slash + 1)
@@ -1109,6 +1246,7 @@ class TokenUsageTracker {
         }
         return {
           totalUsd,
+          byDay: costByDay,
           byModel: byModelCost,
           byModelName: byModelNameCost,
           unpriced: unpriced.sort((a, b) => b.tokens - a.tokens),
@@ -1127,6 +1265,29 @@ class TokenUsageTracker {
        * 前端选中若干模型后把这些桶相加，就能同时刷新占比图、明细表与图表，
        * 而不是只有指标卡跟着变。
        */
+      /**
+       * day -> 各维度 -> counters。前端按时间段重算明细表与图表。
+       */
+      byDayFacets: this.store.byDayFacets,
+      /**
+       * day -> `${provider}/${model}` -> counters。
+       * 明细表按时间段过滤时用它重新汇总。
+       */
+      byDayModel: Object.fromEntries(
+        Object.entries(this.store.byDayModel ?? {}).map(([day, byModel]) => [
+          day,
+          Object.fromEntries(Object.entries(byModel).map(([k, v]) => [k, withRate(v)])),
+        ]),
+      ),
+      /**
+       * day -> 模型名 -> counters。占比图按时间段过滤时用它。
+       */
+      byDayModelName: Object.fromEntries(
+        Object.entries(this.store.byDayModelName ?? {}).map(([day, byName]) => [
+          day,
+          Object.fromEntries(Object.entries(byName).map(([k, v]) => [k, withRate(v)])),
+        ]),
+      ),
       byModelFacets: Object.fromEntries(
         Object.entries(this.store.byModelFacets).map(([name, facets]) => [
           name,
@@ -1303,6 +1464,8 @@ async function backfillFromDisk(tracker, logger) {
     rollbackFullRebuild(tracker, rebuildBackup, logger)
   } else if (tracker.store.needsRebuild && scanned > 0) {
     tracker.store.needsRebuild = false
+    // 重建完成即视为已迁移到当前结构版本，避免下次启动再判一次。
+    tracker.store.schemaVersion = SCHEMA_VERSION
   }
   if (recorded > 0) tracker.flush()
   logger?.info?.(`token-metrics: 磁盘回扫完成：检查 ${scanned} 个会话，补录 ${recorded} 次调用`)
