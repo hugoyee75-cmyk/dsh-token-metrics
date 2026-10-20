@@ -5,7 +5,7 @@
  * 告警求值与「只推新增、恢复要通知」的去重规则。
  */
 
-import { evaluateAlerts, diffAlerts, createPushHub } from '../src/push.js'
+import { evaluateAlerts, evaluateBudgetAlerts, diffAlerts, createPushHub } from '../src/push.js'
 
 const failures = []
 
@@ -36,6 +36,87 @@ function checkTrue(label, condition, detail = '') {
   checkTrue('告警含站点名', alerts[0].body.includes('快没钱了'), alerts[0].body)
   // 充足的站点不应报警
   check('充足不报警', alerts.some((a) => a.siteId === 'b'), false)
+}
+
+// —— 预算告警 ——
+// 与余额的区别：余额看账户剩多少，预算看这段时间花得快不快。
+{
+  // 未超阈值：不出告警
+  const quiet = evaluateBudgetAlerts({
+    spend: { todayUsd: 3, monthUsd: 30 },
+    budget: { dailyUsd: 10, monthlyUsd: 200 },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('未达阈值不出告警', quiet.length, 0)
+
+  // 超过 warnPercent（默认 80%）：warning
+  const warn = evaluateBudgetAlerts({
+    spend: { todayUsd: 8.5, monthUsd: 30 },
+    budget: { dailyUsd: 10, monthlyUsd: 200 },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('超阈值出 1 条', warn.length, 1)
+  check('级别为 warn', warn[0].level, 'warn')
+  check('kind 为 budget-daily', warn[0].kind, 'budget-daily')
+  checkTrue('文案含剩余金额', warn[0].body.includes('1.50'))
+
+  // 超 100%：error
+  const over = evaluateBudgetAlerts({
+    spend: { todayUsd: 12, monthUsd: 30 },
+    budget: { dailyUsd: 10, monthlyUsd: 200 },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('超预算级别为 error', over[0].level, 'error')
+  checkTrue('文案含超出金额', over[0].body.includes('超出'))
+
+  // 日/月同时超：两条
+  const both = evaluateBudgetAlerts({
+    spend: { todayUsd: 12, monthUsd: 250 },
+    budget: { dailyUsd: 10, monthlyUsd: 200 },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('日与月各一条', both.length, 2)
+
+  // 预算为 0 表示不启用
+  const disabled = evaluateBudgetAlerts({
+    spend: { todayUsd: 100, monthUsd: 1000 },
+    budget: { dailyUsd: 0, monthlyUsd: 0 },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('预算为 0 不告警', disabled.length, 0)
+
+  // 自定义阈值
+  const custom = evaluateBudgetAlerts({
+    spend: { todayUsd: 5.5, monthUsd: 0 },
+    budget: { dailyUsd: 10, warnPercent: 50 },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('自定义阈值生效', custom.length, 1)
+
+  // 分组预算：单模型
+  const single = evaluateBudgetAlerts({
+    spend: { todayUsd: 0, monthUsd: 0, groups: { g1: { todayUsd: 9, monthUsd: 0 } } },
+    budget: { groups: [{ id: 'g1', label: '日常编码', models: ['deepseek-flash'], dailyUsd: 10 }] },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('分组预算告警', single.length, 1)
+  checkTrue('分组文案含组名', single[0].title.includes('日常编码'))
+
+  // 分组预算：多模型合计
+  const multi = evaluateBudgetAlerts({
+    spend: { todayUsd: 0, monthUsd: 0, groups: { g2: { todayUsd: 0, monthUsd: 130 } } },
+    budget: { groups: [{ id: 'g2', label: '重活', models: ['claude-opus-5', 'gpt-5.5'], monthlyUsd: 120 }] },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('多模型分组合计超预算', multi[0].level, 'error')
+
+  // 分组没花销时不告警
+  const idle = evaluateBudgetAlerts({
+    spend: { groups: { g3: { todayUsd: 0, monthUsd: 0 } } },
+    budget: { groups: [{ id: 'g3', label: '闲置', models: ['x'], dailyUsd: 5 }] },
+    today: '2026-10-20', month: '2026-10',
+  })
+  check('分组无花销不告警', idle.length, 0)
 }
 
 //#endregion

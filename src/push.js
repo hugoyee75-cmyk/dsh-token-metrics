@@ -131,6 +131,83 @@ export function createPushHub({ logger = console, heartbeatMs = HEARTBEAT_MS } =
  * @param {object} [options.thresholds]
  * @returns {object[]} 需要推送的告警
  */
+/**
+ * 预算告警求值。
+ *
+ * 与余额告警的区别：余额看「账户里还剩多少」，预算看「这段时间花得快不快」。
+ * 例如账户余额 $60 很充足，但今天已花 $8.5 / 日预算 $10 —— 只有预算能提醒到。
+ *
+ * @param {object} options
+ * @param {{todayUsd:number, monthUsd:number}} options.spend 当前花销
+ * @param {{dailyUsd?:number, monthlyUsd?:number, warnPercent?:number}} options.budget
+ * @param {string} [options.today] 今日日期，用于告警 id 稳定性
+ * @param {string} [options.month] 当月，形如 2026-10
+ */
+export function evaluateBudgetAlerts({ spend, budget, today = '', month = '' } = {}) {
+  const alerts = []
+  const warnPercent = Number.isFinite(budget?.warnPercent) ? budget.warnPercent : 80
+
+  /**
+   * 通用：检查一个预算窗口。
+   *
+   * 级别规则：
+   *   - 已超 100%   -> error
+   *   - 超过 warn% -> warn
+   */
+  const check = (label, used, limit, scope) => {
+    if (!Number.isFinite(limit) || limit <= 0) return
+    if (!Number.isFinite(used) || used <= 0) return
+    const ratio = used / limit
+    if (ratio < warnPercent / 100) return
+    const percent = Math.round(ratio * 100)
+    const remaining = Math.max(0, limit - used)
+    const over = ratio >= 1
+    alerts.push({
+      // id 带日期：今天的告警不会影响明天重新提醒
+      id: `budget-${scope}:${scope === 'daily' ? today : month}`,
+      level: over ? 'error' : 'warn',
+      kind: `budget-${scope}`,
+      siteId: '',
+      title: over ? `${label}预算已超` : `${label}预算将尽`,
+      body: over
+        ? `${label}已花 $${used.toFixed(2)}，超出预算 $${limit.toFixed(2)}（${percent}%）`
+        : `${label}已花 $${used.toFixed(2)} / $${limit.toFixed(2)}（${percent}%），还剩 $${remaining.toFixed(2)}`,
+    })
+  }
+
+  check('今日', spend?.todayUsd, budget?.dailyUsd, 'daily')
+  check('本月', spend?.monthUsd, budget?.monthlyUsd, 'monthly')
+
+  // 分组预算：每组是「这些模型的合计额度」。
+  // `spend.groups` 是计算好的 { groupId: { todayUsd, monthUsd } }。
+  for (const group of Array.isArray(budget?.groups) ? budget.groups : []) {
+    const used = spend?.groups?.[group.id]
+    if (used === undefined) continue
+    const groupCheck = (label, value, limit, scope) => {
+      if (!Number.isFinite(limit) || limit <= 0) return
+      if (!Number.isFinite(value) || value <= 0) return
+      const ratio = value / limit
+      if (ratio < warnPercent / 100) return
+      const percent = Math.round(ratio * 100)
+      const over = ratio >= 1
+      const remaining = Math.max(0, limit - value)
+      alerts.push({
+        id: `budget-group:${group.id}:${scope === 'daily' ? today : month}`,
+        level: over ? 'error' : 'warn',
+        kind: `budget-${scope}`,
+        siteId: '',
+        title: over ? `${group.label} 预算已超` : `${group.label} 预算将尽`,
+        body: over
+          ? `${label}已花 $${value.toFixed(2)}，超出 $${limit.toFixed(2)}（${percent}%）`
+          : `${label}已花 $${value.toFixed(2)} / $${limit.toFixed(2)}（${percent}%），还剩 $${remaining.toFixed(2)}`,
+      })
+    }
+    groupCheck('今日', used.todayUsd, group.dailyUsd, 'daily')
+    groupCheck('本月', used.monthUsd, group.monthlyUsd, 'monthly')
+  }
+  return alerts
+}
+
 export function evaluateAlerts({ sites, thresholds = {} }) {
   const balanceLowUsd = Number.isFinite(thresholds.balanceLowUsd) ? thresholds.balanceLowUsd : 5
   const quotaLowPercent = Number.isFinite(thresholds.quotaLowPercent) ? thresholds.quotaLowPercent : 10
@@ -244,6 +321,9 @@ const COOLDOWN_MS = {
   'probe-failed': 2 * 60 * 60_000, // 2 小时（站点挂了会一直失败）
   'quota-reset-soon': 0,           // 不冷却：只在临近重置时出现，天然只提一次
   'plugin-update': 24 * 60 * 60_000, // 一天
+  // 预算告警：花销增长是渐进的，1 小时提醒一次足够，避免每轮询都弹
+  'budget-daily': 60 * 60_000,
+  'budget-monthly': 60 * 60_000,
 }
 
 /** 所有告警的硬下限：即使规则说 0 冷却，也不允许短时间内重复。 */
@@ -277,6 +357,9 @@ export function diffAlerts(current, state, options = {}) {
     'balance-low': { title: '余额已恢复', body: (p) => `${p[1]} 的余额已回到阈值以上` },
     'quota-low': { title: '配额已恢复', body: (p) => `${p[1]} 的 ${p[2] ?? ''} 窗口已重置` },
     'probe-failed': { title: '查询已恢复', body: (p) => `${p[1]} 现在可以正常查询了` },
+    // 预算告警消失通常是跨天/跨月重置，不需要提示「已恢复」——用户自己知道
+    'budget-daily': undefined,
+    'budget-monthly': undefined,
     // 「即将重置」不是故障，它消失是正常的（已重置或已过窗口），不提示恢复
     'quota-reset-soon': undefined,
     // 版本更新后由插件自己重载，不需要额外通知

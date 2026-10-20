@@ -42,7 +42,7 @@ import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
 import { probeOfficial, detectProvider, loadModelCatalog } from './src/providers.js'
-import { createPushHub, evaluateAlerts, diffAlerts } from './src/push.js'
+import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, diffAlerts } from './src/push.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
@@ -131,6 +131,26 @@ const DEFAULTS = {
   alertThresholds: { balanceLowUsd: 5, quotaLowPercent: 10 },
 
   /**
+   * 预算（美元）。设为 0 表示不启用该档。
+   *
+   * 与「余额」是两回事：余额看账户还剩多少，预算看这段时间花得快不快。
+   * 账户里还有 $60，但今天已经花了 $9 / 日预算 $10 —— 只有预算提醒得到。
+   *
+   * `groups` 支持按模型分组管理预算：一个分组可包含单个或多个模型，
+   * 分组内预算是这些模型的合计额度。
+   *
+   *   groups:
+   *     - label: 日常编码
+   *       models: [deepseek-flash]
+   *       dailyUsd: 3
+   *       monthlyUsd: 50
+   *     - label: 重活
+   *       models: [claude-opus-5, gpt-5.5]
+   *       monthlyUsd: 120
+   */
+  budget: { dailyUsd: 0, monthlyUsd: 0, warnPercent: 80, groups: [] },
+
+  /**
    * 模型别名映射：`{ "qfmodel": "deepseek-v4.1-flash" }`。
    *
    * 部分 provider 上报的是内部队列代号而不是真实模型名，这些代号无法从
@@ -194,6 +214,47 @@ function resolveConfig(raw) {
       return {
         balanceLowUsd: number(raw.balanceLowUsd, DEFAULTS.alertThresholds.balanceLowUsd, 0, 1e6),
         quotaLowPercent: number(raw.quotaLowPercent, DEFAULTS.alertThresholds.quotaLowPercent, 0, 100),
+      }
+    })(),
+
+    /**
+     * 预算（美元）。0 表示该档不启用。
+     *
+     * 用 float 而不是取整：预算可以是 $2.50 这种小额。
+     */
+    budget: (() => {
+      const raw = source.budget !== null && typeof source.budget === 'object' ? source.budget : {}
+      const money = (value, fallback) => {
+        const parsed = typeof value === 'number' ? value : Number(value)
+        if (!Number.isFinite(parsed) || parsed < 0) return fallback
+        return Math.min(1e7, parsed)
+      }
+      // 分组预算：每组一个名字 + 模型清单 + 额度。
+      // 模型名按「用户填什么就匹配什么」，同时兼容别名后的显示名。
+      const groups = Array.isArray(raw.groups)
+        ? raw.groups
+          .map((entry, index) => {
+            if (entry === null || typeof entry !== 'object') return undefined
+            const models = Array.isArray(entry.models)
+              ? entry.models.filter((name) => typeof name === 'string' && name.trim() !== '')
+                .map((name) => name.trim())
+              : []
+            if (models.length === 0) return undefined
+            return {
+              id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `group-${index + 1}`,
+              label: typeof entry.label === 'string' && entry.label !== '' ? entry.label : `分组 ${index + 1}`,
+              models,
+              dailyUsd: money(entry.dailyUsd, 0),
+              monthlyUsd: money(entry.monthlyUsd, 0),
+            }
+          })
+          .filter((entry) => entry !== undefined)
+        : []
+      return {
+        dailyUsd: money(raw.dailyUsd, DEFAULTS.budget.dailyUsd),
+        monthlyUsd: money(raw.monthlyUsd, DEFAULTS.budget.monthlyUsd),
+        warnPercent: number(raw.warnPercent, DEFAULTS.budget.warnPercent, 1, 100),
+        groups,
       }
     })(),
 
@@ -1038,6 +1099,9 @@ class TokenUsageTracker {
         snapshotCacheMs: this.config.snapshotCacheMs,
         retentionDays: this.config.retentionDays,
         maxTrendSeries: this.config.maxTrendSeries,
+        // 预算配置要传给页面：卡片上的进度条据此渲染
+        budget: this.config.budget,
+        alertThresholds: this.config.alertThresholds,
       },
       byDay: Object.fromEntries(days.map((day) => [day, this.store.byDay[day]])),
       /**
@@ -2132,12 +2196,101 @@ export function apply(ctx, rawConfig) {
     }
   }
 
+  /**
+   * 当前花销（今日 / 本月），供预算告警使用。
+   *
+   * 直接读成本快照：它已经按峰谷分桶算好每天的成本，这里只做累加。
+   * 没有快照时返回 undefined —— 调用方据此跳过，不报假的 0。
+   */
+  const currentSpend = () => {
+    try {
+      const snapshot = aggregateSnapshot()
+      const cost = snapshot?.cost
+      if (cost === undefined || cost === null) return undefined
+      const byDay = cost.byDay ?? {}
+      const today = snapshot.today
+      const monthKey = typeof today === 'string' ? today.slice(0, 7) : ''
+      let monthUsd = 0
+      for (const [day, usd] of Object.entries(byDay)) {
+        if (typeof day === 'string' && day.startsWith(monthKey)) monthUsd += Number(usd) || 0
+      }
+      // 分组花销：把每个分组的模型在今日/本月的成本分别累加。
+      // 用 byModelDay（day -> provider/model -> counters）乘单价算，
+      // 不能直接用 byModel 的比例 —— 峰谷价会让比例失真。
+      const groups = {}
+      const budgetGroups = tracker.config?.budget?.groups ?? []
+      if (budgetGroups.length > 0) {
+        const book = tracker.priceBook
+        const modelDay = tracker.store.byDayModel ?? {}
+        // 先把「模型名 -> 该名下的成本(按天)」算好，避免重复计价
+        const usdByModelDay = {}
+        for (const [day, byModel] of Object.entries(modelDay)) {
+          for (const [key, counters] of Object.entries(byModel)) {
+            const slash = key.indexOf('/')
+            const providerName = slash === -1 ? 'unknown' : key.slice(0, slash)
+            const rawName = slash === -1 ? key : key.slice(slash + 1)
+            const price = resolvePrice(rawName, book.table, book.overrides)
+            if (price === undefined) continue
+            const buckets = tracker.store.byDayPeak?.[day]?.[key]
+            const usd = buckets !== undefined
+              ? costOf(buckets.peak, price, book.multiplierOf(providerName))
+                + costOf(buckets.off, price, book.multiplierOf(providerName), { offPeak: true })
+              : costOf(counters, price, book.multiplierOf(providerName))
+            usdByModelDay[rawName] ??= {}
+            usdByModelDay[rawName][day] = (usdByModelDay[rawName][day] ?? 0) + usd
+          }
+        }
+        for (const group of budgetGroups) {
+          let todayUsd = 0
+          let groupMonthUsd = 0
+          for (const modelName of group.models ?? []) {
+            const byDayForModel = usdByModelDay[modelName] ?? {}
+            todayUsd += byDayForModel[today] ?? 0
+            for (const [day, usd] of Object.entries(byDayForModel)) {
+              if (typeof day === 'string' && day.startsWith(monthKey)) groupMonthUsd += usd
+            }
+          }
+          groups[group.id] = { todayUsd, monthUsd: groupMonthUsd }
+        }
+      }
+
+      return {
+        todayUsd: Number(byDay[today] ?? 0),
+        monthUsd,
+        todayDay: today,
+        monthKey,
+        groups,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
   /** 当前所有需要提醒的告警。 */
   const currentAlerts = () => {
     const alerts = evaluateAlerts({
       sites: tracker.balanceBook?.sites ?? [],
       thresholds: tracker.config?.alertThresholds ?? {},
     })
+
+    // 预算告警：今日/本月花销对比预算。成本数据来自最近一次快照，
+    // 没有快照（刚启动）时跳过——宁可不提醒，也不要报个 0。
+    try {
+      const budget = tracker.config?.budget ?? {}
+      if (budget.dailyUsd > 0 || budget.monthlyUsd > 0) {
+        const costSpend = currentSpend()
+        if (costSpend !== undefined) {
+          alerts.push(...evaluateBudgetAlerts({
+            spend: costSpend,
+            budget,
+            today: costSpend.todayDay ?? '',
+            month: costSpend.monthKey ?? '',
+          }))
+        }
+      }
+    } catch (error) {
+      logger?.warn?.(`token-metrics: 预算告警求值失败（${error?.message ?? error}）`)
+    }
     // 插件有新版本：这是全局事件，与站点无关，单独追加。
     try {
       const status = updater?.status?.()

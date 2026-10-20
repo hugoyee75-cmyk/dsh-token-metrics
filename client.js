@@ -141,6 +141,12 @@ window.__ModuleLoader__.load({
       'filter.clear': '清除选择',
       'field.total': '总量',
       'field.cost': '总成本',
+      'budget.daily': '今日预算',
+      'budget.monthly': '本月预算',
+      'budget.used': '已用',
+      'budget.left': '剩',
+      'budget.over': '已超',
+      'budget.set': '设置预算',
       'balance.title': '供应商余额',
       'view.stats': '统计',
       'view.suppliers': '模型接入',
@@ -503,6 +509,12 @@ window.__ModuleLoader__.load({
       'filter.clear': 'Clear',
       'field.total': 'Total',
       'field.cost': 'Cost',
+      'budget.daily': 'Daily budget',
+      'budget.monthly': 'Monthly budget',
+      'budget.used': 'used',
+      'budget.left': 'left',
+      'budget.over': 'over',
+      'budget.set': 'Set budget',
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
       'view.suppliers': 'Model Access',
@@ -2195,6 +2207,59 @@ window.__ModuleLoader__.load({
   white-space: nowrap;
 }
 .tu-aliasarrow { color: var(--dsw-alias-label-secondary); }
+/* —— 预算进度 ——
+   给「花了多少」一个参照系。与 Coding Plan 额度条同一套视觉语言，
+   用户不必学第二套理解方式。 */
+.tu-budget {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.tu-budget-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dsw-alias-bg-layer-1);
+  overflow: hidden;
+}
+.tu-budget-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--dsw-alias-state-success-primary);
+  transition: width 200ms ease, background 200ms ease;
+}
+.tu-budget[data-level='warn'] .tu-budget-fill { background: var(--dsw-alias-state-warn-primary); }
+.tu-budget[data-level='over'] .tu-budget-fill { background: var(--dsw-alias-state-error-primary); }
+.tu-budget-text {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tu-budget[data-level='warn'] .tu-budget-text { color: var(--dsw-alias-state-warn-primary); }
+.tu-budget[data-level='over'] .tu-budget-text { color: var(--dsw-alias-state-error-primary); }
+/* 分组预算：成本卡片下方独立一块 */
+.tu-budget-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.tu-budget-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+}
+.tu-budget-group-name {
+  flex: none;
+  min-width: 76px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-budget-group .tu-budget { flex: 1 1 auto; margin-top: 0; }
+
 .tu-card-cost {
   cursor: pointer;
   transition: border-color 150ms ease, background 150ms ease;
@@ -4406,6 +4471,65 @@ function formatMoneyText(value) {
         return hit ? sum : total
       })()
       const costValue = currency === 'cny' ? costUsd * usdCny : costUsd
+
+      /**
+       * 预算进度。
+       *
+       * 与「余额」不同：余额看账户还剩多少，预算看这段时间花得快不快。
+       * 只有当前范围是「今日」或「全部」时才显示月预算——「近 7 天」
+       * 对不上任何一个预算窗口，硬套会误导。
+       */
+      const budgetInfo = (() => {
+        const budget = data?.config?.budget ?? {}
+        const daily = Number(budget.dailyUsd) > 0 ? Number(budget.dailyUsd) : 0
+        const monthly = Number(budget.monthlyUsd) > 0 ? Number(budget.monthlyUsd) : 0
+        if (daily === 0 && monthly === 0) return undefined
+        const warnPercent = Number(budget.warnPercent) > 0 ? Number(budget.warnPercent) : 80
+
+        // 选窗口：今日看日预算，全部看月预算；近 7 天不显示
+        let limit = 0
+        let used = 0
+        let scope = ''
+        if (range === 'today' && daily > 0) {
+          limit = daily
+          used = costUsd
+          scope = 'daily'
+        } else if (range === 'all' && monthly > 0) {
+          limit = monthly
+          // 本月累计：按 byDay 里本月日期累加
+          const monthKey = typeof data?.today === 'string' ? data.today.slice(0, 7) : ''
+          const byDay = data?.cost?.byDay ?? {}
+          for (const [day, usd] of Object.entries(byDay)) {
+            if (monthKey !== '' && day.startsWith(monthKey)) used += Number(usd) || 0
+          }
+          if (currency === 'cny') used *= usdCny
+          if (currency === 'cny') limit *= usdCny
+          scope = 'monthly'
+        } else if (monthly > 0) {
+          // 其他范围（如近 7 天）显示月预算，用本月累计
+          const monthKey = typeof data?.today === 'string' ? data.today.slice(0, 7) : ''
+          const byDay = data?.cost?.byDay ?? {}
+          for (const [day, usd] of Object.entries(byDay)) {
+            if (monthKey !== '' && day.startsWith(monthKey)) used += Number(usd) || 0
+          }
+          if (currency === 'cny') { used *= usdCny; limit = monthly * usdCny } else limit = monthly
+          scope = 'monthly'
+        }
+        if (limit <= 0) return undefined
+        if (scope === 'daily' && currency === 'cny') limit *= usdCny
+        const ratio = limit > 0 ? used / limit : 0
+        const percent = Math.round(ratio * 100)
+        return {
+          scope,
+          label: t(scope === 'daily' ? 'budget.daily' : 'budget.monthly'),
+          used,
+          limit,
+          ratio,
+          percent,
+          over: ratio >= 1,
+          warn: ratio >= warnPercent / 100,
+        }
+      })()
       const costSymbol = currency === 'cny' ? '¥' : '$'
       const formatMoney = (value) => {
         const n = Number(value) || 0
@@ -4964,6 +5088,23 @@ function formatMoneyText(value) {
           `${t('field.cost')} · ${currency === 'cny' ? t('currency.cny') : t('currency.usd')}`),
         h('div', { className: 'tu-card-value' },
           formatMoney(costValue)),
+        // 预算进度：给花费一个参照系。没有配置预算时完全不显示。
+        budgetInfo === undefined
+          ? null
+          : h('div', { className: 'tu-budget', 'data-level': budgetInfo.over ? 'over' : budgetInfo.warn ? 'warn' : 'ok' },
+            h('div', { className: 'tu-budget-bar' },
+              h('div', {
+                className: 'tu-budget-fill',
+                style: { width: `${Math.min(100, Math.round(budgetInfo.ratio * 100))}%` },
+              }),
+            ),
+            h('div', { className: 'tu-budget-text' },
+              `${budgetInfo.label} ${budgetInfo.percent}% · `
+              + (budgetInfo.over
+                ? `${t('budget.over')} ${formatMoney(budgetInfo.used - budgetInfo.limit)}`
+                : `${t('budget.left')} ${formatMoney(Math.max(0, budgetInfo.limit - budgetInfo.used))}`),
+            ),
+          ),
         ),
         h(MetricCard, {
           label: t('field.cacheHitRate'),
@@ -4978,6 +5119,71 @@ function formatMoneyText(value) {
         h(MetricCard, { label: t('field.reasoning'), value: totals?.reasoningTokens ?? 0 }),
         h(MetricCard, { label: t('field.calls'), value: totals?.calls ?? 0 }),
       )
+
+      /**
+       * 分组预算进度条。
+       *
+       * 每个分组是「这些模型的合计额度」。模型名匹配同时接受原始名与
+       * 别名后的显示名 —— 用户填 `deepseek-flash` 或 `deepseek-v4.1-flash`
+       * 都能命中（别名在 displayModel 里统一）。
+       */
+      const budgetGroupBars = (() => {
+        const groups = data?.config?.budget?.groups ?? []
+        if (groups.length === 0) return null
+        const byModel = data?.byModel ?? {}
+        const rows = []
+        for (const group of groups) {
+          // 该分组覆盖的模型合计花销：按 byModel 的成本累加
+          let used = 0
+          for (const [key, counters] of Object.entries(byModel)) {
+            const slash = key.indexOf('/')
+            const rawName = slash === -1 ? key : key.slice(slash + 1)
+            const shown = displayModel(rawName)
+            const hit = (group.models ?? []).some((name) => name === rawName || name === shown || name === key)
+            if (!hit) continue
+            const cost = data?.cost?.byModel?.[key]
+            if (cost?.priced !== true) continue
+            used += cost.usd ?? 0
+          }
+          // 窗口：今日看日预算，其余看月预算
+          const daily = Number(group.dailyUsd) > 0 ? Number(group.dailyUsd) : 0
+          const monthly = Number(group.monthlyUsd) > 0 ? Number(group.monthlyUsd) : 0
+          let limit = 0
+          let shownUsed = used
+          let label = ''
+          if (range === 'today' && daily > 0) {
+            limit = daily
+            label = t('budget.daily')
+          } else if (monthly > 0) {
+            limit = monthly
+            label = t('budget.monthly')
+          } else if (daily > 0) {
+            limit = daily
+            label = t('budget.daily')
+          }
+          if (limit <= 0) continue
+          if (currency === 'cny') { shownUsed *= usdCny; limit *= usdCny }
+          const ratio = shownUsed / limit
+          const percent = Math.round(ratio * 100)
+          const over = ratio >= 1
+          const warn = ratio >= 0.8
+          rows.push(h('div', { key: group.id, className: 'tu-budget-group' },
+            h('span', { className: 'tu-budget-group-name', title: (group.models ?? []).join(', ') }, group.label),
+            h('div', { className: 'tu-budget', 'data-level': over ? 'over' : warn ? 'warn' : 'ok' },
+              h('div', { className: 'tu-budget-bar' },
+                h('div', {
+                  className: 'tu-budget-fill',
+                  style: { width: `${Math.min(100, percent)}%` },
+                }),
+              ),
+              h('div', { className: 'tu-budget-text' },
+                `${label} ${percent}% · ${over ? t('budget.over') : t('budget.left')} `
+                + formatMoney(Math.abs(limit - shownUsed))),
+            ),
+          ))
+        }
+        return rows.length === 0 ? null : h('div', { className: 'tu-budget-groups' }, ...rows)
+      })()
 
       const modelColumns = [
         { key: 'model', label: t('column.model'), main: true },
@@ -6471,7 +6677,7 @@ function formatMoneyText(value) {
       }
 
       return h('div', { className: 'tu-root' },
-        head, scanBar, toolbar, tabs, accountBar, cards, charts, sections,
+        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, charts, sections,
         warn, note, versionModal, priceModal, aliasModal)
     }
 
