@@ -208,6 +208,65 @@ export function evaluateBudgetAlerts({ spend, budget, today = '', month = '' } =
   return alerts
 }
 
+/**
+ * DeepSeek 峰谷时段切换提醒。
+ *
+ * 为什么值得提醒：谷时价是峰时的一半。如果 10 分钟后就要转峰时，
+ * 现在跑完一个大任务能省一半钱 —— 这个提醒是**直接给用户省钱**的，
+ * 不是单纯的状态播报。
+ *
+ * 时段规则（UTC，与 DeepSeek 官方一致）：
+ *   峰时 = 周一至周五 01:00-04:00 与 06:00-10:00
+ *   其余时间（含周末）= 谷时
+ *
+ * @param {object} options
+ * @param {Date} [options.at] 当前时刻，默认 now
+ * @param {number} [options.leadMinutes] 提前量（分钟），默认 10
+ * @returns {object[]} 告警列表
+ */
+export function evaluatePeakAlerts({ at = new Date(), leadMinutes = 10 } = {}) {
+  // 0 表示关闭提醒，必须显式返回空——不能当成「没传值」而回退到默认 10，
+  // 否则用户关不掉这个提醒。
+  const lead = Number.isFinite(leadMinutes) ? Math.max(0, leadMinutes) : 10
+  if (lead === 0) return []
+
+  /** 判断某个 UTC 时刻是否处于峰时。 */
+  const isPeak = (date) => {
+    const weekday = date.getUTCDay() === 0 ? 7 : date.getUTCDay()
+    if (weekday > 5) return false // 周末全天谷时
+    const hour = date.getUTCHours()
+    return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10)
+  }
+
+  const now = new Date(at)
+  const soon = new Date(now.getTime() + lead * 60_000)
+  const nowPeak = isPeak(now)
+  const soonPeak = isPeak(soon)
+
+  // 只在「现在谷时、10 分钟后峰时」时提醒 —— 反过来（峰转谷）是好消息，
+  // 用户不着急，多一条通知反而是噪音。
+  if (nowPeak || !soonPeak) return []
+
+  // 算出具体还有几分钟转峰时
+  let minutes = 0
+  for (let i = 1; i <= lead; i += 1) {
+    if (isPeak(new Date(now.getTime() + i * 60_000))) {
+      minutes = i
+      break
+    }
+  }
+
+  return [{
+    id: `peak-soon:${now.toISOString().slice(0, 13)}`,
+    level: 'warn',
+    kind: 'peak-soon',
+    siteId: '',
+    title: '即将进入峰时价',
+    body: `${minutes > 0 ? `约 ${minutes} 分钟后` : '马上'}转峰时，价格翻倍。`
+      + '手上的活建议现在跑完，或等谷时再继续。',
+  }]
+}
+
 export function evaluateAlerts({ sites, thresholds = {} }) {
   const balanceLowUsd = Number.isFinite(thresholds.balanceLowUsd) ? thresholds.balanceLowUsd : 5
   const quotaLowPercent = Number.isFinite(thresholds.quotaLowPercent) ? thresholds.quotaLowPercent : 10
@@ -322,6 +381,7 @@ const COOLDOWN_MS = {
   'quota-reset-soon': 0,           // 不冷却：只在临近重置时出现，天然只提一次
   'plugin-update': 24 * 60 * 60_000, // 一天
   // 预算告警：花销增长是渐进的，1 小时提醒一次足够，避免每轮询都弹
+  'peak-soon': 60 * 60_000,
   'budget-daily': 60 * 60_000,
   'budget-monthly': 60 * 60_000,
 }
@@ -358,6 +418,7 @@ export function diffAlerts(current, state, options = {}) {
     'quota-low': { title: '配额已恢复', body: (p) => `${p[1]} 的 ${p[2] ?? ''} 窗口已重置` },
     'probe-failed': { title: '查询已恢复', body: (p) => `${p[1]} 现在可以正常查询了` },
     // 预算告警消失通常是跨天/跨月重置，不需要提示「已恢复」——用户自己知道
+    'peak-soon': undefined,
     'budget-daily': undefined,
     'budget-monthly': undefined,
     // 「即将重置」不是故障，它消失是正常的（已重置或已过窗口），不提示恢复

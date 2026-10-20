@@ -170,6 +170,12 @@ window.__ModuleLoader__.load({
       'budget.saved': '已保存',
       'budget.emptyModels': '还没有可选的模型',
       'budget.noGroups': '还没有分组。给某几个模型单独设额度时再添加。',
+      'heat.title': '活动热力图',
+      'heat.subtitle': '过去 8 周每天用了多少，颜色越深用得越多',
+      'heat.less': '少',
+      'heat.more': '多',
+      'heat.click': '点击某天可筛选当天数据',
+      'heat.today': '今天',
       'balance.title': '供应商余额',
       'view.stats': '统计',
       'view.suppliers': '模型接入',
@@ -392,6 +398,7 @@ window.__ModuleLoader__.load({
       'chart.title': '用量趋势',
       'chart.mode.total': '总量',
       'chart.mode.cache': '命中率',
+      'chart.mode.cost': '成本',
       'chart.mode.compose': '构成',
       'chart.mode.model': '按模型',
       'chart.modelDisabled': '先在「模型」下拉里选择一个或多个模型，再切到「按模型」查看各模型曲线',
@@ -561,6 +568,12 @@ window.__ModuleLoader__.load({
       'budget.saved': 'Saved',
       'budget.emptyModels': 'No models available yet',
       'budget.noGroups': 'No groups yet. Add one to budget specific models separately.',
+      'heat.title': 'Activity heatmap',
+      'heat.subtitle': 'Daily usage over the last 8 weeks; darker means more',
+      'heat.less': 'less',
+      'heat.more': 'more',
+      'heat.click': 'Click a day to filter to it',
+      'heat.today': 'today',
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
       'view.suppliers': 'Model Access',
@@ -783,6 +796,7 @@ window.__ModuleLoader__.load({
       'chart.title': 'Usage trend',
       'chart.mode.total': 'Total',
       'chart.mode.cache': 'Hit rate',
+      'chart.mode.cost': 'Cost',
       'chart.mode.compose': 'Composition',
       'chart.mode.model': 'By model',
       'chart.modelDisabled': 'Pick one or more models in the filter first, then switch to "By model"',
@@ -2289,6 +2303,78 @@ window.__ModuleLoader__.load({
 .tu-budget[data-level='over'] .tu-budget-text { color: var(--dsw-alias-state-error-primary); }
 /* 分组预算：成本卡片下方独立一块 */
 /* —— 预算页 —— */
+/* —— 活动热力图 ——
+   8 周 × 7 天 = 56 格。按列排（每列一周），从周一到周日。 */
+.tu-heat {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.tu-heat-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.tu-heat-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.tu-heat-sub {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-heat-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-flow: column;
+  grid-auto-columns: 11px;
+  gap: 3px;
+}
+.tu-heat-cell {
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: none;
+  border-radius: 2.5px;
+  cursor: pointer;
+  background: var(--dsw-alias-bg-layer-2);
+  transition: transform 90ms ease;
+}
+.tu-heat-cell:hover { transform: scale(1.25); }
+.tu-heat-cell[data-level='1'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 25%, transparent); }
+.tu-heat-cell[data-level='2'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); }
+.tu-heat-cell[data-level='3'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); }
+.tu-heat-cell[data-level='4'] { background: var(--dsw-alias-brand-primary); }
+.tu-heat-cell[data-active='true'] {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 1px;
+}
+.tu-heat-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-heat-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+.tu-heat-dot[data-level='1'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 25%, transparent); }
+.tu-heat-dot[data-level='2'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); }
+.tu-heat-dot[data-level='3'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); }
+.tu-heat-dot[data-level='4'] { background: var(--dsw-alias-brand-primary); }
+.tu-heat-hint { margin-left: 6px; opacity: 0.75; }
+
 .tu-budget-section {
   margin-top: 18px;
   padding: 16px 18px;
@@ -3668,12 +3754,18 @@ function formatMoneyText(value) {
 
       // 其它模式：单条曲线，按自己的量纲缩放。
       const rawValues = points.map((point) => (
-        mode === 'cache' ? point.rate * 100 : point.total
+        mode === 'cache' ? point.rate * 100
+          // 成本模式：点位上带 costUsd（由调用方按天算好）
+          : mode === 'cost' ? (point.costUsd ?? 0) * 1000
+            : point.total
       ))
       const max = Math.max(...rawValues, 1)
       const formatValue = mode === 'cache'
         ? (value) => `${value.toFixed(1)}%`
-        : formatCompact
+        // 成本内部按「毫美元」放大画图（否则 0.03 这种值在图上贴底），
+        // 显示时还原成美元
+        : mode === 'cost' ? (value) => `$${(value / 1000).toFixed(3)}`
+          : formatCompact
 
       const coords = rawValues.map((value, index) => ({
         x: toX(index), y: toY(value, max), value, point: points[index],
@@ -3681,7 +3773,9 @@ function formatMoneyText(value) {
       const path = smoothPath(coords)
       const area = `${path} L${coords[coords.length - 1].x.toFixed(2)},${baseY.toFixed(2)}`
         + ` L${coords[0].x.toFixed(2)},${baseY.toFixed(2)} Z`
-      const stroke = mode === 'cache' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-brand-primary)'
+      const stroke = mode === 'cache' ? 'var(--dsw-alias-state-success-primary)'
+        : mode === 'cost' ? 'var(--dsw-alias-state-warn-primary)'
+          : 'var(--dsw-alias-brand-primary)'
       const gradientId = `tu-grad-${mode}`
 
       const hovered = hoverIndex >= 0 ? coords[hoverIndex] : undefined
@@ -3797,6 +3891,83 @@ function formatMoneyText(value) {
      * 用 SVG 的 stroke-dasharray 画圆弧，不引入任何图表库；中点图标显示总量。
      * 图例单独用 DOM 渲染，因此长模型名可以换行、可以悬停高亮。
      */
+    /**
+     * 活动热力图：过去 8 周每天一格，颜色深浅代表当天用量。
+     *
+     * 一眼看出「我什么时候在用 AI」——趋势图看的是量，热力图看的是节奏。
+     * 点击某天可以筛选到那天。
+     */
+    function ActivityHeatmap({ byDay, t, onPickDay, activeDay }) {
+      const WEEK = 7
+      const WEEKS = 8
+      const days = Object.keys(byDay ?? {}).sort()
+      if (days.length === 0) {
+        return h('div', { className: 'tu-heat' },
+          h('div', { className: 'tu-heat-head' },
+            h('span', { className: 'tu-heat-title' }, t('heat.title')),
+            h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
+          ),
+          h('p', { className: 'tu-chart-empty' }, t('chart.empty')),
+        )
+      }
+
+      // 从今天往回推 8 周（56 天），缺的天补 0 —— 空白也要占位，
+      // 否则格子会挤在一起看不出时间跨度。
+      const last = days[days.length - 1]
+      const lastDate = new Date(`${last}T00:00:00`)
+      const start = new Date(lastDate)
+      start.setDate(start.getDate() - (WEEKS * WEEK - 1))
+
+      const cells = []
+      const cursor = new Date(start)
+      let max = 0
+      for (let i = 0; i < WEEKS * WEEK; i += 1) {
+        const y = cursor.getFullYear()
+        const m = String(cursor.getMonth() + 1).padStart(2, '0')
+        const d = String(cursor.getDate()).padStart(2, '0')
+        const key = `${y}-${m}-${d}`
+        const value = byDay[key]?.totalTokens ?? 0
+        if (value > max) max = value
+        cells.push({ key, value, date: new Date(cursor) })
+        cursor.setDate(cursor.getDate() + 1)
+      }
+
+      // 分 5 档着色：0 表示当天没用，用底色
+      const levelOf = (value) => {
+        if (value <= 0 || max <= 0) return 0
+        const ratio = value / max
+        if (ratio <= 0.2) return 1
+        if (ratio <= 0.4) return 2
+        if (ratio <= 0.7) return 3
+        return 4
+      }
+
+      // 按列排（每列一周），grid 用 column 方向填充
+      return h('div', { className: 'tu-heat' },
+        h('div', { className: 'tu-heat-head' },
+          h('span', { className: 'tu-heat-title' }, t('heat.title')),
+          h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
+        ),
+        h('div', { className: 'tu-heat-grid' },
+          ...cells.map((cell) => h('button', {
+            key: cell.key,
+            type: 'button',
+            className: 'tu-heat-cell',
+            'data-level': String(levelOf(cell.value)),
+            'data-active': activeDay === cell.key ? 'true' : 'false',
+            title: `${cell.key} · ${formatCompact(cell.value)} tokens`,
+            onClick: () => onPickDay?.(cell.key),
+          })),
+        ),
+        h('div', { className: 'tu-heat-foot' },
+          h('span', null, t('heat.less')),
+          ...[0, 1, 2, 3, 4].map((lv) => h('i', { key: lv, className: 'tu-heat-dot', 'data-level': String(lv) })),
+          h('span', null, t('heat.more')),
+          h('span', { className: 'tu-heat-hint' }, `· ${t('heat.click')}`),
+        ),
+      )
+    }
+
     function DonutChart({ items, t, centerLabel }) {
       const total = items.reduce((sum, item) => sum + item.value, 0)
       if (total <= 0) {
@@ -4128,6 +4299,7 @@ function formatMoneyText(value) {
         { id: 'cache', labelKey: 'chart.mode.cache' },
         { id: 'compose', labelKey: 'chart.mode.compose' },
         { id: 'model', labelKey: 'chart.mode.model' },
+        { id: 'cost', labelKey: 'chart.mode.cost' },
       ]
 
       // 版本与更新状态。这些动作会改变运行中的代码，因此每一步都在
@@ -4845,19 +5017,36 @@ function formatMoneyText(value) {
 
       const sessionRows = useMemo(() => {
         if (data === undefined) return []
+        // 会话成本：Host 的 bySession 只带 token，成本按「该会话用量占
+        // 该 provider/model 全量的比例」折算 —— 峰谷差异无法在客户端还原，
+        // 所以是估算值，列头会标注。
+        const byModel = data.byModel ?? {}
+        const costByModel = data.cost?.byModel ?? {}
         return Object.values(data.bySession ?? {})
-          .map((entry) => ({
-            key: entry.id,
-            session: entry.title || t('noTitle'),
-            provider: entry.provider ?? '—',
-            model: entry.model ?? '—',
-            lastUsed: formatTime(entry.lastAt, locale),
-            total: formatNumber(entry.counters?.totalTokens ?? 0),
-            sortKey: entry.lastAt ?? 0,
-          }))
+          .map((entry) => {
+            const counters = entry.counters ?? {}
+            const key = `${entry.provider ?? 'unknown'}/${entry.model ?? 'unknown'}`
+            const modelTotal = byModel[key]?.totalTokens ?? 0
+            const modelCost = costByModel[key]?.usd ?? 0
+            const priced = costByModel[key]?.priced === true
+            const share = modelTotal > 0 ? (counters.totalTokens ?? 0) / modelTotal : 0
+            const usd = priced ? modelCost * share : 0
+            const value = currency === 'cny' ? usd * usdCny : usd
+            return {
+              key: entry.id,
+              session: entry.title || t('noTitle'),
+              provider: entry.provider ?? '—',
+              model: entry.model ?? '—',
+              lastUsed: formatTime(entry.lastAt, locale),
+              total: formatNumber(counters.totalTokens ?? 0),
+              cost: priced ? `${costSymbol}${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}` : '—',
+              costRaw: value,
+              sortKey: entry.lastAt ?? 0,
+            }
+          })
           .sort((a, b) => b.sortKey - a.sortKey)
           .slice(0, 200)
-      }, [data, locale, t])
+      }, [data, locale, t, currency, usdCny, costSymbol])
 
 
       // 按项目（工作目录）——路径太长，只显示末两段。
@@ -5022,6 +5211,7 @@ function formatMoneyText(value) {
           : trendEntries)
           .map(([day, counters]) => ({
             label: day.slice(5),
+            day,
             total: counters.totalTokens ?? 0,
             // 悬停提示要显示当天调用次数，缺了它会恒显示 0。
             calls: counters.calls ?? 0,
@@ -5029,6 +5219,9 @@ function formatMoneyText(value) {
             cacheRead: counters.cacheReadTokens ?? 0,
             output: counters.outputTokens ?? 0,
             rate: counters.cacheHitRate ?? 0,
+            // 当天成本（美元）。成本趋势与 token 趋势不是一回事——
+            // 峰谷价和模型混用会让两条线分叉。
+            costUsd: (data?.cost?.byDay ?? {})[day] ?? 0,
           }))
       }, [data, selectedModels, rangeDays])
 
@@ -5387,6 +5580,8 @@ function formatMoneyText(value) {
         { key: 'model', label: t('column.model') },
         { key: 'lastUsed', label: t('column.lastUsed') },
         { key: 'total', label: t('field.total') },
+        // 成本按模型单价折算，峰谷差异还原不了，所以是估算
+        { key: 'cost', label: `${t('column.cost')}≈` },
       ]
 
       // 版本条：当前版本、检查更新、更新并重载、直接重载。
@@ -5444,6 +5639,25 @@ function formatMoneyText(value) {
       const showCharts = !empty && (trendSeries.length >= 2 || hasModelTrend)
       // 图表区：一张可切换模式的主趋势图 + 一张模型占比环形图。
       // 原先三张独立图表占用大量纵向空间，合并后腾出的位置用于更多指标。
+      /**
+       * 活动热力图。
+       *
+       * 点击某天会切到「按日期」明细并定位到那天——比只看颜色更有用。
+       */
+      const heatmap = empty
+        ? null
+        : h(ActivityHeatmap, {
+          byDay: data?.byDay,
+          t,
+          activeDay: dayFrom,
+          onPickDay: (day) => {
+            setTableView('day')
+            setDayFrom(day)
+            setDayTo(day)
+            setPage(0)
+          },
+        })
+
       const charts = showCharts
         ? h('div', { className: 'tu-grid-2' },
           h('section', { className: 'tu-section' },
@@ -7014,7 +7228,7 @@ function formatMoneyText(value) {
       }
 
       return h('div', { className: 'tu-root' },
-        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, charts, sections,
+        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, heatmap, charts, sections,
         warn, note, versionModal, priceModal, aliasModal)
     }
 

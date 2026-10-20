@@ -5,7 +5,7 @@
  * 告警求值与「只推新增、恢复要通知」的去重规则。
  */
 
-import { evaluateAlerts, evaluateBudgetAlerts, diffAlerts, createPushHub } from '../src/push.js'
+import { evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts, createPushHub } from '../src/push.js'
 
 const failures = []
 
@@ -117,6 +117,36 @@ function checkTrue(label, condition, detail = '') {
     today: '2026-10-20', month: '2026-10',
   })
   check('分组无花销不告警', idle.length, 0)
+}
+
+// —— 峰谷切换提醒 ——
+// 谷时价是峰时的一半，转峰前提醒能直接帮用户省钱。
+{
+  // 周一 00:55 UTC：5 分钟后（01:00）转峰时 -> 应提醒
+  const soon = evaluatePeakAlerts({ at: new Date('2026-10-19T00:55:00Z'), leadMinutes: 10 })
+  check('谷时即将转峰时出提醒', soon.length, 1)
+  check('级别为 warn', soon[0].level, 'warn')
+  check('kind 为 peak-soon', soon[0].kind, 'peak-soon')
+
+  // 周一 00:20 UTC：距转峰还有 40 分钟 -> 不提醒
+  const early = evaluatePeakAlerts({ at: new Date('2026-10-19T00:20:00Z'), leadMinutes: 10 })
+  check('还早不提醒', early.length, 0)
+
+  // 周一 02:00 UTC：已经是峰时 -> 不提醒
+  const peak = evaluatePeakAlerts({ at: new Date('2026-10-19T02:00:00Z'), leadMinutes: 10 })
+  check('已在峰时不提醒', peak.length, 0)
+
+  // 周一 03:55 UTC：5 分钟后转谷时 -> 好消息，不提醒
+  const toOff = evaluatePeakAlerts({ at: new Date('2026-10-19T03:55:00Z'), leadMinutes: 10 })
+  check('转谷时不提醒', toOff.length, 0)
+
+  // 周六：全天谷时 -> 不提醒
+  const weekend = evaluatePeakAlerts({ at: new Date('2026-10-24T00:55:00Z'), leadMinutes: 10 })
+  check('周末不提醒', weekend.length, 0)
+
+  // 关闭（leadMinutes=0）
+  const off = evaluatePeakAlerts({ at: new Date('2026-10-19T00:55:00Z'), leadMinutes: 0 })
+  check('提前量为 0 不提醒', off.length, 0)
 }
 
 //#endregion

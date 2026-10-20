@@ -42,7 +42,8 @@ import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
 import { probeOfficial, detectProvider, loadModelCatalog } from './src/providers.js'
-import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, diffAlerts } from './src/push.js'
+import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts } from './src/push.js'
+import { createMemoryGate } from './src/memory.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
@@ -128,7 +129,7 @@ const DEFAULTS = {
    * 余额低于 `balanceLowUsd`、或配额窗口剩余低于 `quotaLowPercent` 时，
    * 通过右下角通知提醒。设为 0 可关闭对应告警。
    */
-  alertThresholds: { balanceLowUsd: 5, quotaLowPercent: 10 },
+  alertThresholds: { balanceLowUsd: 5, quotaLowPercent: 10, peakLeadMinutes: 10 },
 
   /**
    * 预算（美元）。设为 0 表示不启用该档。
@@ -279,6 +280,8 @@ function resolveConfig(raw) {
       return {
         balanceLowUsd: number(raw.balanceLowUsd, DEFAULTS.alertThresholds.balanceLowUsd, 0, 1e6),
         quotaLowPercent: number(raw.quotaLowPercent, DEFAULTS.alertThresholds.quotaLowPercent, 0, 100),
+        // 峰谷切换提醒的提前量（分钟）。0 表示关闭
+        peakLeadMinutes: number(raw.peakLeadMinutes, DEFAULTS.alertThresholds.peakLeadMinutes, 0, 120),
       }
     })(),
 
@@ -1555,7 +1558,23 @@ async function backfillFromDisk(tracker, logger) {
   // 让前端能显示进度：首次安装要扫完全部会话，不是瞬间完成。
   tracker.beginScan(files.length)
 
+  /**
+   * 内存闸门：每处理一个文件检查一次堆占用。
+   *
+   * 会话日志解析出的 JSON 对象会短暂撑高堆内存；文件多时（用户可能
+   * 攒了几千个会话）不做让步会把 DSH 拖死。超阈值就让出 16ms 给 GC。
+   */
+  const memoryGate = createMemoryGate({
+    softRatio: 0.75,
+    onPressure: (ratio) => {
+      logger?.debug?.(`token-metrics: 堆占用 ${(ratio * 100).toFixed(0)}%，回扫让步`)
+    },
+  })
+  let yieldedCount = 0
+
   for (const file of files) {
+    // 处理前先看一眼内存压力
+    if (await memoryGate.check()) yieldedCount += 1
     let text
     try {
       text = readSessionLog(file)
@@ -1623,7 +1642,10 @@ async function backfillFromDisk(tracker, logger) {
     tracker.store.schemaVersion = SCHEMA_VERSION
   }
   if (recorded > 0) tracker.flush()
-  logger?.info?.(`token-metrics: 磁盘回扫完成：检查 ${scanned} 个会话，补录 ${recorded} 次调用`)
+  logger?.info?.(
+    `token-metrics: 磁盘回扫完成：检查 ${scanned} 个会话，补录 ${recorded} 次调用`
+    + (yieldedCount > 0 ? `（内存让步 ${yieldedCount} 次）` : ''),
+  )
   return scanned
 }
 
@@ -2381,6 +2403,17 @@ export function apply(ctx, rawConfig) {
       }
     } catch (error) {
       logger?.warn?.(`token-metrics: 预算告警求值失败（${error?.message ?? error}）`)
+    }
+
+    // DeepSeek 峰谷切换提醒：谷时即将转峰时前 leadMinutes 提醒。
+    // 这是唯一一条「直接帮用户省钱」的通知——现在跑完能省一半。
+    try {
+      const leadMinutes = tracker.config?.alertThresholds?.peakLeadMinutes ?? 10
+      if (leadMinutes > 0) {
+        alerts.push(...evaluatePeakAlerts({ leadMinutes }))
+      }
+    } catch (error) {
+      logger?.warn?.(`token-metrics: 峰谷提醒求值失败（${error?.message ?? error}）`)
     }
     // 插件有新版本：这是全局事件，与站点无关，单独追加。
     try {
