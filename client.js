@@ -46,6 +46,7 @@ window.__ModuleLoader__.load({
   const PRICING_MULTIPLIER_ROUTE = '/api/dsh-token-metrics/pricing/multiplier'
   const PRICING_REFRESH_ROUTE = '/api/dsh-token-metrics/pricing/refresh'
   const BALANCE_ROUTE = '/api/dsh-token-metrics/balance'
+  const EVENTS_ROUTE = '/api/dsh-token-metrics/events'
   const BALANCE_SITE_ROUTE = '/api/dsh-token-metrics/balance/site'
   const BALANCE_REMOVE_ROUTE = '/api/dsh-token-metrics/balance/remove'
   const BALANCE_PROBE_ROUTE = '/api/dsh-token-metrics/balance/probe'
@@ -1780,6 +1781,83 @@ window.__ModuleLoader__.load({
   flex-wrap: wrap;
 }
 /* 模型清单弹窗 */
+/* 右下角通知：与 our-free-model 插件同一位置与观感，
+   保证同一界面里的通知风格一致 */
+.tu-toasts {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(380px, calc(100vw - 36px));
+  font-family: inherit;
+  pointer-events: none;
+}
+.tu-toast {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 13px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 94%, transparent);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  box-shadow: 0 14px 40px var(--dsw-alias-shadow-l2, rgb(0 0 0 / 26%));
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+  animation: tu-toast-rise 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  pointer-events: auto;
+}
+/* 左侧色条表达级别：红=用尽、黄=将尽、绿=恢复 */
+.tu-toast::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--dsw-alias-state-warn-primary);
+}
+.tu-toast[data-level='error']::before { background: var(--dsw-alias-state-error-primary); }
+.tu-toast[data-level='ok']::before { background: var(--dsw-alias-state-success-primary); }
+.tu-toast-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  padding-right: 18px;
+}
+.tu-toast-body {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+.tu-toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 5px;
+}
+.tu-toast-close:hover { background: var(--dsw-alias-bg-layer-2); }
+@keyframes tu-toast-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tu-toast { animation: none; }
+}
+
 .tu-sheet-narrow { width: min(560px, 100%); }
 .tu-models-list {
   display: flex;
@@ -5908,9 +5986,127 @@ window.__ModuleLoader__.load({
       return () => tag.remove()
     }
 
+    /**
+     * 右下角通知。
+     *
+     * 与 our-free-model 插件同一位置与观感：那里是 DSH 里已有的通知落点，
+     * 用户的注意力已经习惯在右下角。用纯 DOM 而不是 React 渲染，
+     * 因为通知要能在「用户正停在会话页、面板根本没挂载」时也出现。
+     */
+    const toastHostRef = { current: null }
+    const toastTimers = new Set()
+
+    /** 确保右下角容器存在。 */
+    function ensureToastHost() {
+      if (toastHostRef.current !== null && document.body.contains(toastHostRef.current)) {
+        return toastHostRef.current
+      }
+      const host = document.createElement('div')
+      host.className = 'tu-toasts'
+      document.body.appendChild(host)
+      toastHostRef.current = host
+      return host
+    }
+
+    /**
+     * 弹一条通知。
+     *
+     * @param {{title:string, body:string, level?:string}} alert
+     * @param {object} [options] `ttl` 毫秒后自动消失，0 表示不自动关
+     */
+    function showToast(alert, options = {}) {
+      const host = ensureToastHost()
+      const ttl = options.ttl ?? 8000
+      const card = document.createElement('div')
+      card.className = 'tu-toast'
+      card.dataset.level = alert.level ?? 'warn'
+
+      const title = document.createElement('div')
+      title.className = 'tu-toast-title'
+      title.textContent = alert.title ?? ''
+      card.appendChild(title)
+
+      if (typeof alert.body === 'string' && alert.body !== '') {
+        const body = document.createElement('div')
+        body.className = 'tu-toast-body'
+        body.textContent = alert.body
+        card.appendChild(body)
+      }
+
+      const close = document.createElement('button')
+      close.type = 'button'
+      close.className = 'tu-toast-close'
+      close.textContent = '×'
+      close.addEventListener('click', () => dismiss())
+      card.appendChild(close)
+
+      let timer
+      const dismiss = () => {
+        if (timer !== undefined) { clearTimeout(timer); toastTimers.delete(timer) }
+        card.remove()
+        // 容器空了就一并移除，避免留下一个空的 fixed 层挡住点击
+        if (host.childElementCount === 0) host.remove()
+      }
+      host.appendChild(card)
+      if (ttl > 0) {
+        timer = setTimeout(dismiss, ttl)
+        toastTimers.add(timer)
+      }
+      return dismiss
+    }
+
+    /** 关掉所有通知（插件卸载时调用）。 */
+    function clearToasts() {
+      for (const timer of toastTimers) clearTimeout(timer)
+      toastTimers.clear()
+      toastHostRef.current?.remove()
+      toastHostRef.current = null
+    }
+
     function apply(ctx) {
       // 每个注册都独立兜底：一处失败不应该让整块 UI 消失。
       ctx.effect(() => insertStyles(), 'token-metrics: 样式')
+
+      // —— 通知：订阅服务端推送 ——
+      // 用 EventSource 长连接；它自带重连，热重载时服务端会关掉流，
+      // 一秒后自动重连并收到新的 hello。
+      ctx.effect(() => {
+        if (typeof EventSource !== 'function') return () => {}
+        let source
+        try {
+          source = new EventSource(EVENTS_ROUTE, { withCredentials: true })
+        } catch {
+          return () => {}
+        }
+        const onAlert = (event) => {
+          try {
+            const payload = JSON.parse(event.data)
+            const list = Array.isArray(payload?.alerts) ? payload.alerts : []
+            // 最多同时弹 3 条，避免一次刷新全炸出来遮住界面
+            for (const alert of list.slice(0, 3)) showToast(alert)
+          } catch { /* 脏数据忽略 */ }
+        }
+        // hello 里带的是「当前已有告警」。连接前发生过的也补上，
+        // 但只在首次连接时弹，避免每次重连都重复。
+        let greeted = false
+        const onHello = (event) => {
+          if (greeted) return
+          greeted = true
+          try {
+            const payload = JSON.parse(event.data)
+            const list = Array.isArray(payload?.alerts) ? payload.alerts : []
+            for (const alert of list.slice(0, 2)) showToast(alert, { ttl: 6000 })
+          } catch { /* 忽略 */ }
+        }
+        source.addEventListener('alert', onAlert)
+        source.addEventListener('hello', onHello)
+        return () => {
+          source.removeEventListener('alert', onAlert)
+          source.removeEventListener('hello', onHello)
+          try { source.close() } catch { /* 已关闭 */ }
+          clearToasts()
+        }
+      }, 'token-metrics: 通知订阅')
 
       let t = (key) => key
       let currentLocale = () => 'zh'

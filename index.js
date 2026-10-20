@@ -42,6 +42,7 @@ import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
 import { probeOfficial, detectProvider } from './src/providers.js'
+import { createPushHub, evaluateAlerts, diffAlerts } from './src/push.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
@@ -111,6 +112,14 @@ const DEFAULTS = {
   retentionDays: 400,
   /** 统计页返回的会话明细上限。 */
   maxSessions: 500,
+  /**
+   * 告警阈值。
+   *
+   * 余额低于 `balanceLowUsd`、或配额窗口剩余低于 `quotaLowPercent` 时，
+   * 通过右下角通知提醒。设为 0 可关闭对应告警。
+   */
+  alertThresholds: { balanceLowUsd: 5, quotaLowPercent: 10 },
+
   /** 趋势图最多画多少条模型曲线（超出部分聚合为「其他」）。 */
   maxTrendSeries: 6,
 
@@ -147,6 +156,15 @@ function resolveConfig(raw) {
     retentionDays: number(source.retentionDays, DEFAULTS.retentionDays, 0, 3650),
     maxSessions: number(source.maxSessions, DEFAULTS.maxSessions, 0, 5000),
     maxTrendSeries: number(source.maxTrendSeries, DEFAULTS.maxTrendSeries, 1, 20),
+    alertThresholds: (() => {
+      const raw = source.alertThresholds !== null && typeof source.alertThresholds === 'object'
+        ? source.alertThresholds
+        : {}
+      return {
+        balanceLowUsd: number(raw.balanceLowUsd, DEFAULTS.alertThresholds.balanceLowUsd, 0, 1e6),
+        quotaLowPercent: number(raw.quotaLowPercent, DEFAULTS.alertThresholds.quotaLowPercent, 0, 100),
+      }
+    })(),
 
     maxSeenEntries: number(source.maxSeenEntries, DEFAULTS.maxSeenEntries, 1000, 2_000_000),
     showSessions: source.showSessions === true,
@@ -1855,6 +1873,9 @@ export function apply(ctx, rawConfig) {
   }
   syncProviderKinds()
   // 插件可能晚于本插件注册 provider，定期刷新一次即可，开销可忽略。
+  // 卸载时关掉所有 SSE 连接，避免残留半开连接
+  ctx.effect(() => () => pushHub.close(), 'token-metrics: SSE 关闭')
+
   ctx.effect(() => {
     const timer = setInterval(syncProviderKinds, 60_000)
     timer?.unref?.()
@@ -1864,6 +1885,37 @@ export function apply(ctx, rawConfig) {
   // —— 对 Client 暴露只读快照 ——
   // 用插件自己的同源 HTTP 路由，而不是类型化 Remote：宿主每次刷新都能拿到
   // 最新聚合结果，客户端不需要自己折叠会话事件。
+  // —— 通知推送 ——
+  // 用 SSE 长连接把告警推到所有打开的页面。DSH 没有通知服务，
+  // 但 webServer 允许 handler 持有响应，这正好是 SSE 需要的。
+  const pushHub = createPushHub({ logger })
+
+  /** 已推送过的告警 id（避免重复弹）。挂在 tracker 上以便跨重载保留。 */
+  const alertState = tracker.alertState ?? (tracker.alertState = { sent: {} })
+
+  /** 当前所有需要提醒的告警。 */
+  const currentAlerts = () => evaluateAlerts({
+    sites: tracker.balanceBook?.sites ?? [],
+    thresholds: tracker.config?.alertThresholds ?? {},
+  })
+
+  /** 求值并推送「新出现」与「已恢复」的告警。 */
+  const publishAlerts = () => {
+    const alerts = currentAlerts()
+    const { fresh, recovered } = diffAlerts(alerts, alertState)
+    const now = Date.now()
+    for (const alert of fresh) alertState.sent[alert.id] = now
+    for (const alert of recovered) delete alertState.sent[alert.id]
+    if (fresh.length > 0) {
+      pushHub.broadcast('alert', { alerts: fresh })
+      logger?.info?.(`token-metrics: 推送 ${fresh.length} 条告警`)
+    }
+    if (recovered.length > 0) {
+      pushHub.broadcast('alert', { alerts: recovered })
+    }
+    return { fresh, recovered }
+  }
+
   ctx.inject(['webServer'], (webCtx) => {
     const server = webCtx.webServer
     // 同一个 (kind, path) 只能注册一次，重复注册会抛错。第二个模块实例
@@ -1989,6 +2041,30 @@ export function apply(ctx, rawConfig) {
             // 强制重建：丢弃内存与磁盘的聚合结果，从会话日志重新算一遍。
             // 用户手动修数据、或升级后想确保口径一致时使用。
             // —— 余额：列表 / 配置 / 删除 / 探测 ——
+            // —— 通知：SSE 长连接 ——
+            // 客户端用 EventSource 订阅，收到 alert 事件就弹 toast。
+            if (url.pathname === '/api/dsh-token-metrics/events') {
+              if (!isGet) {
+                sendJson(res, 405, { error: 'method not allowed' })
+                return
+              }
+              // 连上时先告诉客户端当前已有的告警，避免错过连接前发生的
+              pushHub.attach(req, res, {
+                alerts: currentAlerts(),
+                version: BUILD_ID,
+              })
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/alerts') {
+              if (!isGet) {
+                sendJson(res, 405, { error: 'method not allowed' })
+                return
+              }
+              sendJson(res, 200, { alerts: currentAlerts() })
+              return
+            }
+
             // —— 供应商：模型发现 / 同步回 DSH ——
             if (url.pathname === '/api/dsh-token-metrics/supplier/models') {
               if (req.method !== 'POST') {
@@ -2158,6 +2234,8 @@ export function apply(ctx, rawConfig) {
                   tracker.balanceBook.upsertSite({ ...site, provider: platform })
                 }
                 tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                // 余额变了就重新求值告警：可能刚刚跌破阈值，或刚恢复
+                publishAlerts()
                 sendJson(res, 200, {
                   ok: result.ok,
                   result,
