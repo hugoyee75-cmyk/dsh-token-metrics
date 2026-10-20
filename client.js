@@ -70,32 +70,50 @@ window.__ModuleLoader__.load({
    * `balance` 说明余额/配额能否用 API key 查询。
    */
   const SERVICE_PRESETS = [
-    // —— 按量计费 ——
+    // ═══ 国内 · 国产模型（优先展示）═══
+    { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', balance: 'yes' },
+    { id: 'kimi', label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
+    { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimaxi.com/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'qwen', label: '阿里百炼（通义千问）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'volcano', label: '火山方舟（豆包）', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', api: 'openai-completions', balance: 'no' },
+    { id: 'qianfan', label: '百度千帆', baseUrl: 'https://qianfan.baidubce.com/v2', api: 'openai-completions', balance: 'no' },
+    { id: 'hunyuan', label: '腾讯混元', baseUrl: 'https://hunyuan.tencentcloudapi.com/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'baichuan', label: '百川智能', baseUrl: 'https://api.baichuan-ai.com/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
+    { id: 'siliconflow', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', balance: 'yes' },
+
+    // ═══ 国内 · Coding Plan（订阅制）═══
+    //
+    // 地址标注规则：**实测存在**的写真实地址（401/400 表示需鉴权而非不存在），
+    // 无法验证的留空让用户按官方文档填——给一个填了就 404 的地址比留空更糟。
+    { id: 'glm-coding', label: '智谱 GLM Coding Plan', baseUrl: 'https://open.bigmodel.cn/api/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '与按量计费的 /api/paas/v4 不同' },
+    { id: 'kimi-coding', label: 'Kimi Coding Plan', baseUrl: '', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '额度可查（/coding/v1/usages）；推理地址请按官方文档填写' },
+    { id: 'minimax-coding', label: 'MiniMax Coding Plan', baseUrl: '', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '推理地址请按官方文档填写' },
+    { id: 'qwen-coding', label: '阿里百炼 Coding Plan', baseUrl: 'https://dashscope.aliyuncs.com/apps/anthropic', api: 'anthropic-messages', balance: 'no', plan: true },
+    { id: 'volcano-coding', label: '火山方舟 Coding Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3/anthropic', api: 'anthropic-messages', balance: 'no', plan: true },
+
+    // ═══ 国际主流 ═══
     { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions', balance: 'admin', keyHint: 'sk- 开头；查用量需 sk-admin- 组织密钥' },
     { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', balance: 'no', keyHint: 'sk-ant- 开头' },
     { id: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'openai-completions', balance: 'no', keyHint: 'Google AI Studio 的 key' },
-    { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', balance: 'yes' },
+    { id: 'xai', label: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'together', label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'fireworks', label: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', api: 'openai-completions', balance: 'no' },
+    { id: 'deepinfra', label: 'DeepInfra', baseUrl: 'https://api.deepinfra.com/v1/openai', api: 'openai-completions', balance: 'no' },
+    { id: 'cerebras', label: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', api: 'openai-completions', balance: 'no' },
     { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', balance: 'yes' },
-    { id: 'kimi', label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', balance: 'yes' },
-    { id: 'glm', label: '智谱 GLM（按量计费）', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', balance: 'yes' },
-    { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', balance: 'yes' },
-    { id: 'siliconflow', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', balance: 'yes' },
     { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
-    { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },
 
-    // —— Coding Plan（订阅制）——
-    //
-    // 重要：只有**额度查询**端点是从 CC Switch 实现里核对过的
-    // （Kimi /coding/v1/usages、智谱 /api/monitor/usage/quota/limit）。
-    // 推理端点各家文档口径不一，且我无法在没有真实 key 的情况下验证，
-    // 所以这里只保留能确认的那一个，其余让用户按官方文档自己填——
-    // 宁可少一个预设，也不要给一个填了就 404 的地址。
-    { id: 'glm-coding', label: '智谱 GLM Coding Plan', baseUrl: 'https://open.bigmodel.cn/api/anthropic', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '实测该端点存在（401 需鉴权）；与按量计费的 /api/paas/v4 不同' },
-    { id: 'kimi-coding', label: 'Kimi Coding Plan（需填地址）', baseUrl: '', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '额度可查（/coding/v1/usages），但推理地址请按 Kimi 官方文档填写' },
-    { id: 'minimax-coding', label: 'MiniMax Coding Plan（需填地址）', baseUrl: '', api: 'anthropic-messages', balance: 'yes', plan: true, keyHint: '推理地址请按 MiniMax 官方文档填写' },
-
-    // —— 自定义 ——
-    { id: 'custom', label: '自定义端点', baseUrl: '', api: 'openai-completions', balance: 'auto' },
+    // ═══ 自定义中转站 ═══
+    // 按网关类型区分，从源头决定用哪个余额接口——不自动探测，
+    // 省掉「先试 sub2api 404 再试 new-api」的白等。
+    { id: 'custom-sub2api', label: '自定义 · Sub2API 中转', baseUrl: '', api: 'openai-completions', balance: 'yes', balanceKind: 'sub2api', keyHint: '余额走 /v1/usage' },
+    { id: 'custom-newapi', label: '自定义 · new-api 中转', baseUrl: '', api: 'openai-completions', balance: 'yes', balanceKind: 'newapi', keyHint: '余额走 /api/user/self' },
+    { id: 'custom-oneapi', label: '自定义 · one-api 中转', baseUrl: '', api: 'openai-completions', balance: 'yes', balanceKind: 'oneapi', keyHint: '余额走 /dashboard/billing' },
+    { id: 'custom', label: '自定义端点（不查余额）', baseUrl: '', api: 'openai-completions', balance: 'none', balanceKind: 'none' },
   ]
 
   const SUPPLIER_MODELS_ROUTE = '/api/dsh-token-metrics/supplier/models'
@@ -194,6 +212,7 @@ window.__ModuleLoader__.load({
       'supplier.servicePick': '选择服务',
       'supplier.customEndpoint': '自定义端点',
       'supplier.balanceCap': '余额查询',
+      'supplier.quotaCap': '用量与限额查询',
       'supplier.balanceYes': '支持',
       'supplier.balanceNo': '不支持',
       'supplier.balanceAdmin': '需管理员密钥',
@@ -537,6 +556,7 @@ window.__ModuleLoader__.load({
       'supplier.servicePick': 'Select a service',
       'supplier.customEndpoint': 'Custom endpoint',
       'supplier.balanceCap': 'Balance',
+      'supplier.quotaCap': 'Usage & quota',
       'supplier.balanceYes': 'supported',
       'supplier.balanceNo': 'not supported',
       'supplier.balanceAdmin': 'needs admin key',
@@ -1328,7 +1348,10 @@ window.__ModuleLoader__.load({
   box-sizing: border-box;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 9px;
-  background: var(--dsw-alias-bg-base);
+  /* 用 layer-2 而不是 base：base 在深色下是最暗的底色（950），
+     放在弹窗（overlay=700）里会显得像被挖空的洞。
+     layer-2 在深色下是 850、浅色下仍是白，两种主题都协调。 */
+  background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
   font-size: 13px;
@@ -1632,7 +1655,7 @@ window.__ModuleLoader__.load({
   flex: none;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 4px;
-  background: var(--dsw-alias-bg-base);
+  background: var(--dsw-alias-bg-layer-2);
   cursor: pointer;
   position: relative;
   transition: background 110ms ease, border-color 110ms ease;
@@ -5135,14 +5158,17 @@ window.__ModuleLoader__.load({
                       // 关键：切换服务必须**整组替换**地址与协议。
                       // 之前只在非 custom 时覆盖，导致「先选 DeepSeek 再切自定义」
                       // 会残留 deepseek 的地址，用户以为清空了其实没有。
-                      const isCustom = preset.id === 'custom'
+                      // 「自定义」类的预设地址由用户填，其余用预设地址
+                      const needsUrl = preset.baseUrl === ''
                       return {
                         ...current,
                         service: preset.id,
-                        baseUrl: isCustom ? '' : preset.baseUrl,
+                        baseUrl: needsUrl ? '' : preset.baseUrl,
                         api: preset.api,
+                        // 余额接口类型从预设直接带过来，不再让用户二次选
+                        balanceKind: preset.balanceKind ?? 'auto',
                         // 名称跟随服务走；自定义时清空让用户自己填
-                        label: isCustom ? '' : preset.label,
+                        label: needsUrl ? '' : preset.label,
                         // 换服务等于换站点，旧模型列表不再适用
                         models: [],
                         available: [],
@@ -5171,9 +5197,12 @@ window.__ModuleLoader__.load({
                 : preset.balance === 'admin' ? t('supplier.balanceAdmin')
                   : preset.balance === 'oauth' ? t('supplier.balanceOauth')
                     : t('supplier.balanceNo')
+              // 订阅制查的是「用量与限额」，不是账户余额——措辞要分开，
+              // 否则用户会以为 Coding Plan 也有余额概念。
+              const capLabel = preset.plan === true ? t('supplier.quotaCap') : t('supplier.balanceCap')
               return h('p', { className: 'tu-serviceinfo' },
                 h('span', { className: `tu-captag ${preset.balance === 'yes' ? 'tu-captag-ok' : 'tu-captag-no'}` },
-                  `${t('supplier.balanceCap')}：${balanceText}`),
+                  `${capLabel}：${balanceText}`),
                 preset.keyHint === undefined
                   ? null
                   : h('span', { className: 'tu-servicehint' }, `${t('supplier.keyHintLabel')}：${preset.keyHint}`),
@@ -5537,6 +5566,7 @@ window.__ModuleLoader__.load({
             keyEnv: form.keyEnv,
             api: form.api ?? 'openai-completions',
             service: form.service ?? 'custom',
+            balanceKind: form.balanceKind ?? 'auto',
             // 手填余额：保存成 lastBalance，页面就按它显示
             ...(form.manualBalance !== undefined && form.manualBalance !== ''
               ? { lastBalance: { usd: Number(form.manualBalance) }, lastCheckedAt: Date.now() }
@@ -6086,20 +6116,53 @@ window.__ModuleLoader__.load({
           try {
             const payload = JSON.parse(event.data)
             const list = Array.isArray(payload?.alerts) ? payload.alerts : []
-            // 最多同时弹 3 条，避免一次刷新全炸出来遮住界面
-            for (const alert of list.slice(0, 3)) showToast(alert)
+            // 服务端有冷却，但页面可能刚刷新过（hello 已弹过同一批），
+            // 所以这里同样要去重。
+            presentAlerts(list, {})
           } catch { /* 脏数据忽略 */ }
         }
-        // hello 里带的是「当前已有告警」。连接前发生过的也补上，
-        // 但只在首次连接时弹，避免每次重连都重复。
-        let greeted = false
+        // 本次页面会话里已经弹过的告警 id。放 localStorage 而不是内存：
+        // 页面刷新也算同一个「会话」，不该因为刷新就把同一批通知再弹一遍。
+        const SHOWN_KEY = 'dsh-token-metrics:shown-alerts'
+        const shownAlerts = (() => {
+          try {
+            const raw = localStorage.getItem(SHOWN_KEY)
+            const parsed = raw === null ? {} : JSON.parse(raw)
+            return parsed !== null && typeof parsed === 'object' ? parsed : {}
+          } catch { return {} }
+        })()
+        const SHOWN_TTL_MS = 6 * 60 * 60_000   // 6 小时内不重复弹同一条
+        const persistShown = () => {
+          try { localStorage.setItem(SHOWN_KEY, JSON.stringify(shownAlerts)) } catch { /* 隐私模式 */ }
+        }
+        /** 这条告警最近是否已经弹过（未过 TTL）。 */
+        const recentlyShown = (alert) => {
+          const at = shownAlerts[alert?.id]
+          if (at === undefined) return false
+          return Date.now() - Number(at) < SHOWN_TTL_MS
+        }
+        const markShown = (alert) => {
+          if (alert?.id === undefined) return
+          shownAlerts[alert.id] = Date.now()
+        }
+
+        /** 统一出口：去重后再弹。 */
+        const presentAlerts = (list, options) => {
+          const fresh = list.filter((alert) => !recentlyShown(alert))
+          for (const alert of fresh.slice(0, 3)) {
+            showToast(alert, options)
+            markShown(alert)
+          }
+          if (fresh.length > 0) persistShown()
+        }
+
+        // hello 带的是「当前已有告警」。它不经过服务端冷却，所以客户端
+        // 必须自己判断是否已经弹过——否则每次刷新页面都会重弹一遍。
         const onHello = (event) => {
-          if (greeted) return
-          greeted = true
           try {
             const payload = JSON.parse(event.data)
             const list = Array.isArray(payload?.alerts) ? payload.alerts : []
-            for (const alert of list.slice(0, 2)) showToast(alert, { ttl: 6000 })
+            presentAlerts(list, { ttl: 6000 })
           } catch { /* 忽略 */ }
         }
         source.addEventListener('alert', onAlert)
