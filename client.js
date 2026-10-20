@@ -171,6 +171,9 @@ window.__ModuleLoader__.load({
       'quota.left': '剩余',
       'quota.resetsIn': '后重置',
       'quota.resetAt': '重置于',
+      'unit.day': '天',
+      'unit.hour': '小时',
+      'unit.minute': '分',
       'quota.exhausted': '已用尽',
       'quota.noPlan': '无订阅',
       'quota.official': '官方余额',
@@ -481,6 +484,9 @@ window.__ModuleLoader__.load({
       'quota.left': 'left',
       'quota.resetsIn': 'until reset',
       'quota.resetAt': 'resets',
+      'unit.day': 'd',
+      'unit.hour': 'h',
+      'unit.minute': 'm',
       'quota.exhausted': 'used up',
       'quota.noPlan': 'no plan',
       'quota.official': 'Official balance',
@@ -991,53 +997,6 @@ window.__ModuleLoader__.load({
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 12px;
 }
-.tu-balsite {
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 11px;
-  background: var(--dsw-alias-bg-layer-1);
-  padding: 13px 15px;
-  min-width: 0;
-}
-.tu-balsite-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.tu-balsite-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-.tu-balsite-url {
-  font-size: 11.5px;
-  color: var(--dsw-alias-label-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-}
-.tu-balsite-actions {
-  display: flex;
-  gap: 6px;
-  flex: none;
-}
-/* 余额进度条：按「已用 / 总额度」画，剩得少就变色提醒 */
-.tu-balbar {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-layer-2);
-  overflow: hidden;
-  margin-bottom: 9px;
-}
-.tu-balbar-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 200ms ease;
-}
-.tu-balbar-fill[data-level='ok'] { background: var(--dsw-alias-state-success-primary); }
-.tu-balbar-fill[data-level='warn'] { background: var(--dsw-alias-state-warn-primary); }
-.tu-balbar-fill[data-level='danger'] { background: var(--dsw-alias-state-error-primary); }
 .tu-balmeta {
   display: flex;
   flex-wrap: wrap;
@@ -1117,6 +1076,11 @@ window.__ModuleLoader__.load({
   font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
+}
+.tu-balnoplan-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
 }
 .tu-balerror {
   margin-top: 8px;
@@ -1657,30 +1621,33 @@ window.__ModuleLoader__.load({
 }
 .tu-suplist { display: flex; flex-direction: column; gap: 10px; }
 .tu-supcard {
-  display: flex;
+  /* 三栏网格：信息 | 余额/配额 | 操作。
+     之前用 flex + flex-wrap，窄屏时余额块会被按钮挤到重叠，
+     网格显式声明列宽与换行规则更可控。 */
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(220px, 1.4fr) auto;
   align-items: center;
-  gap: 16px;
+  gap: 16px 20px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 12px;
   background: var(--dsw-alias-bg-layer-1);
   padding: 14px 17px;
-  flex-wrap: wrap;
-  transition: border-color 140ms ease, background 140ms ease;
+  transition: border-color 140ms ease;
 }
-.tu-supcard:hover {
-  border-color: var(--dsw-alias-border-l2);
-}
+.tu-supcard:hover { border-color: var(--dsw-alias-border-l2); }
 .tu-supcard-discovered { border-style: dashed; }
-.tu-supcard-main { flex: 1 1 240px; min-width: 0; }
+
+.tu-supcard-main { min-width: 0; }
 .tu-supcard-name {
   font-size: 13.5px;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  flex-wrap: wrap;
 }
 .tu-supcard-badge {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
   border: 1px solid var(--dsw-alias-border-l1);
@@ -1693,26 +1660,55 @@ window.__ModuleLoader__.load({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-top: 3px;
 }
-.tu-supcard-balance {
+
+/* 中栏：余额或配额 */
+.tu-supcard-value { min-width: 0; }
+.tu-supcard-money {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 2px;
-  flex: none;
+  gap: 1px;
 }
-.tu-supcard-balance-label { font-size: 11px; color: var(--dsw-alias-label-secondary); }
-.tu-supcard-balance-value {
-  font-size: 15px;
+.tu-supcard-money-label { font-size: 10.5px; color: var(--dsw-alias-label-secondary); }
+.tu-supcard-money-value {
+  font-size: 16px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-state-success-primary);
 }
-.tu-supcard-balance[data-empty='true'] .tu-supcard-balance-value {
-  color: var(--dsw-alias-label-secondary);
-  font-weight: 400;
+.tu-supcard-quotas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.tu-supcard-actions { display: flex; gap: 6px; flex: none; }
+
+/* 右栏：操作按钮，始终同一行 */
+.tu-supcard-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  justify-content: flex-end;
+}
+
+/* 状态说明横跨整行 */
+.tu-supcard-note {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  padding-top: 2px;
+}
+.tu-supcard-note-error { color: var(--dsw-alias-state-error-primary); }
+
+@media (max-width: 900px) {
+  .tu-supcard {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .tu-supcard-value { grid-column: 1 / -1; }
+  .tu-supcard-money { align-items: flex-start; }
+}
+
 .tu-notice {
   border-radius: 9px;
   padding: 9px 13px;
@@ -3239,9 +3235,14 @@ window.__ModuleLoader__.load({
       if (Number.isFinite(entry.resetsAt) && entry.resetsAt > 0) {
         const remainMs = entry.resetsAt - Date.now()
         if (remainMs > 0) {
-          const hours = Math.floor(remainMs / 3_600_000)
+          // 超过一天用「天」表达：周限/月限显示成 120h、432h 没法读
+          const days = Math.floor(remainMs / 86_400_000)
+          const hours = Math.floor((remainMs % 86_400_000) / 3_600_000)
           const minutes = Math.floor((remainMs % 3_600_000) / 60_000)
-          const relative = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+          let relative
+          if (days > 0) relative = `${days}${t('unit.day')} ${hours}${t('unit.hour')}`
+          else if (hours > 0) relative = `${hours}${t('unit.hour')} ${minutes}${t('unit.minute')}`
+          else relative = `${minutes}${t('unit.minute')}`
           resetText = `${relative} ${t('quota.resetsIn')}`
         } else {
           // 已过重置点：说明数据过期，提示刷新
@@ -3266,120 +3267,6 @@ window.__ModuleLoader__.load({
         resetText === undefined
           ? null
           : h('div', { className: 'tu-quota-reset' }, resetText),
-      )
-    }
-
-    /**
-     * 供应商余额卡片。
-     *
-     * 展示剩余额度与进度条：中转站的余额通常有总额度，用量占比一眼可见；
-     * 只知道剩余金额时退化为纯数字。
-     */
-    function BalanceCard({ site, t, locale, onProbe, onRemove, probing }) {
-      const balance = site.lastBalance
-      const hasLimit = typeof balance?.limitUsd === 'number' && balance.limitUsd > 0
-      const remaining = typeof balance?.usd === 'number' ? balance.usd : undefined
-      // 进度条按「已用 / 总额度」画；没有总额度就不画假进度。
-      const usedRatio = hasLimit && typeof remaining === 'number'
-        ? Math.max(0, Math.min(1, 1 - remaining / balance.limitUsd))
-        : undefined
-
-      // 币种：官方平台可能返回 CNY，不能一律当美元
-      const currency = balance?.currency
-      const money = (value) => {
-        if (typeof value !== 'number') return '—'
-        const symbol = currency === 'CNY' ? '¥' : '$'
-        return `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}`
-      }
-      // 官方平台标注来源，让用户知道这是官方余额而不是中转站余额
-      const officialLabel = balance?.label ?? (balance?.provider === undefined
-        ? undefined
-        : balance.provider)
-      const hasQuota = Array.isArray(balance?.quotas) && balance.quotas.length > 0
-      // 未查询过时没有 lastBalance，用站点配置里的平台信息预判类型：
-      // Coding Plan 类平台（Kimi / GLM）本质是订阅制，余额型则不是。
-      const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax'])
-      const looksLikeQuota = hasQuota
-        || (balance?.provider !== undefined && QUOTA_PLATFORMS.has(balance.provider))
-        || (balance === undefined && QUOTA_PLATFORMS.has(site.provider))
-
-      return h('div', { className: 'tu-balsite' },
-        h('div', { className: 'tu-balsite-head' },
-          h('div', null,
-            h('div', { className: 'tu-balsite-name' },
-              site.label || site.id,
-              // 余额型与订阅制是两种不同的计费模式，卡片上直接标出来，
-              // 免得用户把「订阅额度」当成「账户余额」。
-              looksLikeQuota
-                ? h('span', {
-                  className: 'tu-kindtag',
-                  'data-kind': 'quota',
-                  title: t('kind.quotaHint'),
-                }, t('kind.quota'))
-                : (typeof balance?.usd === 'number'
-                  ? h('span', {
-                    className: 'tu-kindtag',
-                    'data-kind': 'balance',
-                    title: t('kind.balanceHint'),
-                  }, t('kind.balance'))
-                  : null),
-            ),
-            h('div', { className: 'tu-balsite-url' }, site.baseUrl),
-          ),
-          h('div', { className: 'tu-balsite-actions' },
-            h('button', {
-              type: 'button', className: 'tu-button',
-              disabled: probing,
-              onClick: () => onProbe(site.id),
-            }, probing ? t('balance.probing') : t('balance.probe')),
-            h('button', {
-              type: 'button', className: 'tu-button',
-              onClick: () => onRemove(site.id),
-            }, t('balance.remove')),
-          ),
-        ),
-
-        // 官方平台的配额窗口（Kimi / GLM 的 Coding Plan）
-        Array.isArray(balance?.quotas) && balance.quotas.length > 0
-          ? h('div', { className: 'tu-quotas' },
-            ...balance.quotas.map((entry) => h(QuotaBar, {
-              key: entry.label, entry, t, locale,
-            })),
-          )
-          : null,
-
-        // 中转站的「已用 / 总额度」进度条
-        hasLimit && usedRatio !== undefined
-          ? h('div', { className: 'tu-balbar' },
-            h('div', {
-              className: 'tu-balbar-fill',
-              // 剩余不足 20% 标黄，不足 5% 标红，让用户一眼看出该充值了。
-              'data-level': usedRatio > 0.95 ? 'danger' : usedRatio > 0.8 ? 'warn' : 'ok',
-              style: { width: `${Math.round(usedRatio * 100)}%` },
-            }),
-          )
-          : null,
-
-        h('div', { className: 'tu-balmeta' },
-          officialLabel === undefined
-            ? null
-            : h('span', { className: 'tu-balprovider' }, officialLabel),
-          site.noPlan === true
-            ? h('span', { className: 'tu-balnoplan' }, t('quota.noPlan'))
-            : h('span', null, `${t('balance.remaining')} ${money(remaining)}`),
-          hasLimit ? h('span', null, `${t('balance.limit')} ${money(balance.limitUsd)}`) : null,
-          typeof balance?.usedUsd === 'number'
-            ? h('span', null, `${t('balance.used')} ${money(balance.usedUsd)}`)
-            : null,
-          site.lastCheckedAt > 0
-            ? h('span', { className: 'tu-balmeta-time' },
-              `${t('balance.lastChecked')} ${formatTime(site.lastCheckedAt, locale)}`)
-            : h('span', { className: 'tu-balmeta-time' }, t('balance.noData')),
-        ),
-
-        site.error === ''
-          ? null
-          : h('div', { className: 'tu-balerror' }, `${t('balance.error')}：${site.error}`),
       )
     }
 
@@ -4662,119 +4549,13 @@ window.__ModuleLoader__.load({
         { id: 'provider', labelKey: 'table.provider', columns: providerColumns, rows: providerRows },
         { id: 'account', labelKey: 'table.account', columns: accountColumns, rows: accountRows },
         { id: 'day', labelKey: 'table.day', columns: dayColumns, rows: dayRows },
-        // 余额不是「用量表」，用单独分支渲染（见下方 balanceView）
-        { id: 'balance', labelKey: 'balance.title', columns: [], rows: [] },
+        // 余额不在这里：它是「配置 + 状态」，与用量表性质不同，
+        // 统一放在顶部的「供应商」页面，避免同一个东西两处入口。
       ]
       if (data?.config?.showSessions === true) {
         tableViews.push({ id: 'session', labelKey: 'column.session', columns: sessionColumns, rows: sessionRows })
       }
       const activeView = tableViews.find((view) => view.id === tableView) ?? tableViews[0]
-
-      // 余额页：站点卡片 + 自动发现的端点 + 手动配置表单。
-      // 它不是用量表，因此不走 UsageTable，而是自成一栏。
-      const balanceView = (() => {
-        const sites = balanceState.sites ?? []
-        const discovered = (balanceState.discovered ?? [])
-          // 已经添加过的地址不再重复列出
-          .filter((entry) => !sites.some((site) => site.id === entry.id))
-        return h('div', { className: 'tu-balance' },
-          h('div', { className: 'tu-balance-head' },
-            h('div', { className: 'tu-balance-title' }, t('balance.title')),
-            h('button', {
-              type: 'button', className: 'tu-button',
-              onClick: () => setBalanceForm({ id: '', label: '', baseUrl: '', keyEnv: '' }),
-            }, t('balance.add')),
-          ),
-
-          sites.length === 0
-            ? h('p', { className: 'tu-hint' }, t('balance.empty'))
-            : h('div', { className: 'tu-balance-list' },
-              ...sites.map((site) => h(BalanceCard, {
-                key: site.id,
-                site,
-                t,
-                locale,
-                probing: balanceProbing === site.id,
-                onProbe: probeSite,
-                onRemove: removeSite,
-              }))),
-
-          discovered.length === 0
-            ? null
-            : h('div', { className: 'tu-balance-discovered' },
-              h('div', { className: 'tu-balance-subtitle' }, t('balance.discovered')),
-              ...discovered.map((entry) => h('div', { key: entry.id, className: 'tu-baldiscover' },
-                h('div', null,
-                  h('div', { className: 'tu-baldiscover-name' }, entry.label),
-                  h('div', { className: 'tu-balsite-url' }, entry.baseUrl),
-                ),
-                h('button', {
-                  type: 'button', className: 'tu-button',
-                  onClick: () => saveSite({
-                    id: entry.id, label: entry.label, baseUrl: entry.baseUrl,
-                  }),
-                }, t('balance.adopt')),
-              )),
-            ),
-
-          balanceForm === null
-            ? null
-            : h('div', { className: 'tu-balform' },
-              h('div', { className: 'tu-balance-subtitle' }, t('balance.manual')),
-              h('p', { className: 'tu-hint' }, t('balance.keyHint')),
-              h('div', { className: 'tu-balform-fields' },
-                h('label', { className: 'tu-pricefield' },
-                  h('span', null, t('balance.name')),
-                  h('input', {
-                    type: 'text', className: 'tu-priceinput',
-                    value: balanceForm.label,
-                    onChange: (event) => setBalanceForm((current) => (
-                      current === null ? null : { ...current, label: event.target.value })),
-                  }),
-                ),
-                h('label', { className: 'tu-pricefield' },
-                  h('span', null, t('balance.baseUrl')),
-                  h('input', {
-                    type: 'url', className: 'tu-priceinput', placeholder: 'https://relay.example.com',
-                    value: balanceForm.baseUrl,
-                    onChange: (event) => setBalanceForm((current) => (
-                      current === null ? null : { ...current, baseUrl: event.target.value })),
-                  }),
-                ),
-                h('label', { className: 'tu-pricefield' },
-                  h('span', null, t('balance.keyEnv')),
-                  h('input', {
-                    type: 'text', className: 'tu-priceinput', placeholder: 'RELAY_API_KEY',
-                    value: balanceForm.keyEnv,
-                    onChange: (event) => setBalanceForm((current) => (
-                      current === null ? null : { ...current, keyEnv: event.target.value })),
-                  }),
-                ),
-              ),
-              h('div', { className: 'tu-modal-actions' },
-                h('button', {
-                  type: 'button', className: 'tu-button',
-                  onClick: () => setBalanceForm(null),
-                }, t('balance.cancel')),
-                h('button', {
-                  type: 'button', className: 'tu-button tu-button-primary',
-                  onClick: () => {
-                    // id 用名称为准，保证同一站点不会重复添加
-                    const id = (balanceForm.label || balanceForm.baseUrl)
-                      .trim().replace(/\s+/g, '-').toLowerCase()
-                    if (id === '') return
-                    void saveSite({
-                      id,
-                      label: balanceForm.label || id,
-                      baseUrl: balanceForm.baseUrl,
-                      keyEnv: balanceForm.keyEnv,
-                    })
-                  },
-                }, t('balance.save')),
-              ),
-            ),
-        )
-      })()
 
       const emptyView = h('div', { className: 'tu-empty' }, t('empty'))
       const sections = empty
@@ -4826,14 +4607,11 @@ window.__ModuleLoader__.load({
                 `${formatNumber(dayRowsFiltered.length)} ${t('pager.rows')}`),
             )
             : null,
-          // 余额视图不是用量表，单独渲染
-          activeView.id === 'balance'
-            ? balanceView
-            : h(UsageTable, {
-              columns: activeView.columns,
-              rows: activeView.rows,
-              emptyText: t('empty'),
-            }),
+          h(UsageTable, {
+            columns: activeView.columns,
+            rows: activeView.rows,
+            emptyText: t('empty'),
+          }),
           // 只有日期视图需要分页。
           activeView.id === 'day' && pageCount > 1
             ? h('div', { className: 'tu-pager' },
@@ -5343,44 +5121,67 @@ window.__ModuleLoader__.load({
           .filter((entry) => !sites.some((site) => site.id === entry.id))
 
         /** 一张供应商卡片。 */
+        /** 一张供应商卡片：左侧信息，右侧余额/配额，最右操作按钮。 */
         const card = (site) => {
           const balance = site.lastBalance
+          const quotas = Array.isArray(balance?.quotas) ? balance.quotas : []
+          const currency = balance?.currency
+          const symbol = currency === 'CNY' ? '¥' : '$'
           const money = (value) => (typeof value === 'number'
-            ? `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
+            ? `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
           const modelCount = Array.isArray(site.models) ? site.models.length : 0
+          const hasQuota = quotas.length > 0
+          const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex'])
+          const looksLikeQuota = hasQuota
+            || (balance?.provider !== undefined && QUOTA_PLATFORMS.has(balance.provider))
+            || (balance === undefined && QUOTA_PLATFORMS.has(site.provider))
+
           return h('div', { key: site.id, className: 'tu-supcard' },
+            // ── 左：名称 / 地址 / 模型数 ──
             h('div', { className: 'tu-supcard-main' },
               h('div', { className: 'tu-supcard-name' },
                 site.label || site.id,
-                modelCount > 0 ? h('span', { className: 'tu-supcard-badge' },
-                  `${modelCount} ${t('supplier.models')}`) : null,
+                looksLikeQuota
+                  ? h('span', { className: 'tu-kindtag', 'data-kind': 'quota' }, t('kind.quota'))
+                  : (typeof balance?.usd === 'number'
+                    ? h('span', { className: 'tu-kindtag', 'data-kind': 'balance' }, t('kind.balance'))
+                    : null),
+                modelCount > 0
+                  ? h('span', { className: 'tu-supcard-badge' }, `${modelCount} ${t('supplier.models')}`)
+                  : null,
               ),
               h('div', { className: 'tu-supcard-url' }, site.baseUrl),
             ),
-            h('div', {
-              className: 'tu-supcard-balance',
-              'data-empty': typeof balance?.usd === 'number' ? 'false' : 'true',
-            },
-            h('span', { className: 'tu-supcard-balance-label' }, t('supplier.balance')),
-            typeof balance?.usd === 'number'
-              ? h('span', { className: 'tu-supcard-balance-value' }, money(balance.usd))
-              // 没有余额时给一个可点的入口：不是所有中转站都提供余额接口，
-              // 抓不到就让用户手填，而不是永远显示「—」。
-              : h('button', {
-                type: 'button', className: 'tu-balance-set',
-                onClick: () => setSupplierForm({
-                  id: site.id,
-                  label: site.label ?? '',
-                  baseUrl: site.baseUrl ?? '',
-                  apiKey: '',
-                  keyEnv: site.keyEnv ?? '',
-                  models: Array.isArray(site.models) ? site.models : [],
-                  available: Array.isArray(site.models) ? site.models : [],
-                  manualBalance: '',
-                  editing: true,
-                }),
-              }, t('supplier.setBalance')),
+
+            // ── 中：余额或配额窗口 ──
+            h('div', { className: 'tu-supcard-value' },
+              hasQuota
+                // 配额型：每个窗口一条进度条，5 小时与周限都要看到
+                ? h('div', { className: 'tu-supcard-quotas' },
+                  ...quotas.map((entry) => h(QuotaBar, {
+                    key: entry.label, entry, t, locale,
+                  })),
+                )
+                : (typeof balance?.usd === 'number'
+                  ? h('div', { className: 'tu-supcard-money' },
+                    h('span', { className: 'tu-supcard-money-label' }, t('supplier.balance')),
+                    h('span', { className: 'tu-supcard-money-value' }, money(balance.usd)),
+                  )
+                  : (site.noPlan === true
+                    ? h('span', { className: 'tu-balnoplan' }, t('quota.noPlan'))
+                    : h('button', {
+                      type: 'button', className: 'tu-balance-set',
+                      onClick: () => setSupplierForm({
+                        id: site.id, label: site.label ?? '', baseUrl: site.baseUrl ?? '',
+                        apiKey: '', keyEnv: site.keyEnv ?? '',
+                        models: Array.isArray(site.models) ? site.models : [],
+                        available: Array.isArray(site.models) ? site.models : [],
+                        manualBalance: '', editing: true,
+                      }),
+                    }, t('supplier.setBalance')))),
             ),
+
+            // ── 右：操作 ──
             h('div', { className: 'tu-supcard-actions' },
               h('button', {
                 type: 'button', className: 'tu-btn tu-btn-ghost',
@@ -5390,11 +5191,8 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button', className: 'tu-btn tu-btn-ghost',
                 onClick: () => setSupplierForm({
-                  id: site.id,
-                  label: site.label ?? '',
-                  baseUrl: site.baseUrl ?? '',
-                  apiKey: '',
-                  keyEnv: site.keyEnv ?? '',
+                  id: site.id, label: site.label ?? '', baseUrl: site.baseUrl ?? '',
+                  apiKey: '', keyEnv: site.keyEnv ?? '',
                   models: Array.isArray(site.models) ? site.models : [],
                   available: Array.isArray(site.models) ? site.models : [],
                   editing: true,
@@ -5405,9 +5203,14 @@ window.__ModuleLoader__.load({
                 onClick: () => { void removeSite(site.id) },
               }, t('supplier.remove')),
             ),
+
+            // 状态说明横跨整行，避免挤在按钮之间
             site.error === ''
               ? null
-              : h('div', { className: 'tu-balerror' }, `${t('balance.error')}：${site.error}`),
+              : site.noPlan === true
+                ? h('div', { className: 'tu-supcard-note' }, site.error)
+                : h('div', { className: 'tu-supcard-note tu-supcard-note-error' },
+                  `${t('balance.error')}：${site.error}`),
           )
         }
 
