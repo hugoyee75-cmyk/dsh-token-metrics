@@ -311,7 +311,7 @@ than landing on whichever reseller happens to be cheapest.
 
 ## Provider management
 
-A dedicated "Providers" tab manages relay stations and official platforms:
+A dedicated "Model Access" tab manages relay stations and official platforms:
 balances, available models, and one-click sync into the DSH model config.
 
 ### Adding a provider
@@ -372,11 +372,35 @@ Detected by `baseURL` hostname, each hitting its own endpoint:
   requests return 403 (verified)
 - **Gemini**: Google offers no public quota endpoint
 
-### Model sync
+### Model capability auto-detection
 
-The model list can be fetched from the endpoint (`GET {baseURL}/models`) and
-ticked, or IDs typed manually. Each model can carry an alias, context window,
-output limit, thinking levels, and attachment support.
+The plugin reads each model's capabilities from pi-ai's model catalog (1241
+models) and **fills them in automatically** when a model is ticked:
+
+| Capability | Source |
+| --- | --- |
+| Context window | catalog `contextWindow` |
+| Output limit | catalog `maxTokens` |
+| Thinking levels | catalog `thinkingLevelMap` (a `null` value means that level is unsupported) |
+| Attachments | catalog `input` (whether it includes `image`) |
+
+**Levels are not a fixed set of seven**: each model differs — `claude-fable-5`
+supports only `xhigh`/`max`, `glm-5.2` only `high`/`max`. The form lists exactly
+what the model supports; models absent from the catalog keep all seven levels
+available for manual ticking.
+
+### Custom wire values
+
+When a gateway does not accept the level name (for example it calls `max`
+`ultra`), each level can carry the exact value to send:
+
+```yaml
+reasoningEfforts:
+  low: low
+  max: ultra      # what the gateway actually accepts
+```
+
+### Syncing to DSH
 
 "Save and sync" writes the provider into the DSH `llm-pi-ai` config, after which
 its models appear in the model picker.

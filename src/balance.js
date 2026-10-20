@@ -541,7 +541,21 @@ function sanitizeSite(input) {
           // 思考档位：同步到 DSH 时转成 reasoningEfforts。
           // 白名单漏了它就会在保存时被剥掉，导致同步出去的配置没有档位。
           if (Array.isArray(model.thinkingLevels)) {
-            const levels = model.thinkingLevels.filter((level) => typeof level === 'string' && level !== '')
+            // 档位条目有两种形式：字符串（同档位名）或 { level, wire }
+            // （网关用别的拼写）。**两种都要保留**——早先只认字符串，
+            // 导致自定义协议值在保存时被过滤掉。
+            const levels = model.thinkingLevels
+              .map((item) => {
+                if (typeof item === 'string' && item !== '') return item
+                if (item !== null && typeof item === 'object'
+                  && typeof item.level === 'string' && item.level !== '') {
+                  const wire = typeof item.wire === 'string' && item.wire !== '' ? item.wire : item.level
+                  // 拼写与档位名相同时退化成字符串，保持数据简洁
+                  return wire === item.level ? item.level : { level: item.level, wire }
+                }
+                return undefined
+              })
+              .filter((item) => item !== undefined)
             if (levels.length > 0) entry.thinkingLevels = levels
           }
           // 附件能力：false 表示只接受文本
