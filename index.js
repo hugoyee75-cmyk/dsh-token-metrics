@@ -41,7 +41,7 @@ import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
-import { probeOfficial, detectProvider } from './src/providers.js'
+import { probeOfficial, detectProvider, loadModelCatalog } from './src/providers.js'
 import { createPushHub, evaluateAlerts, diffAlerts } from './src/push.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
@@ -56,7 +56,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '3.0.0'
+export const version = '0.3.0'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -548,6 +548,14 @@ class TokenUsageTracker {
      * 成本核算依赖它。构造时同步加载磁盘缓存（含内置兜底），所以即使
      * 首次启动还没联网，也能立刻算出成本。
      */
+    /**
+     * pi-ai 的模型目录：给出每个模型的推理能力、思考档位、容量。
+     *
+     * 这是权威数据，比让用户逐个手填准确——例如 claude-fable-5 只支持
+     * xhigh/max 两档，手填很容易填错。读不到时返回空映射，页面退回手填。
+     */
+    this.modelCatalog = loadModelCatalog({ home: this.home })
+
     this.priceBook = new PriceBook({
       dataDir: dataDir(this.home),
       log: (message) => logger?.info?.(message),
@@ -1037,6 +1045,12 @@ class TokenUsageTracker {
        * 队列 modelKey），这些代号无法从 DSH 元数据反查。页面据此把代号显示成
        * 真实模型名，明细表 / 占比图 / 趋势图统一生效。
        */
+      /**
+       * 模型能力目录（精简）。
+       *
+       * 只保留页面需要的四项，不把 1241 个模型的完整条目传过去。
+       */
+      modelCatalog: this.modelCatalog,
       modelAliases: {
         // 配置里写的别名先铺底，界面维护的优先（用户当场改的应立即生效）
         ...(this.config.modelAliases ?? {}),
