@@ -4320,42 +4320,91 @@ function formatMoneyText(value) {
         return aliases[rawName] ?? rawName
       }, [data])
 
+      /**
+       * 当前时间段覆盖的日期。
+       *
+       * 空数组表示「不按时间过滤」（全部）。`today` 用 Host 给出的今天，
+       * 避免客户端时区与 Host 不一致。
+       */
+      const rangeDays = useMemo(() => {
+        if (data === undefined) return []
+        if (range === 'all') return []
+        const days = Object.keys(data.byDay ?? {}).sort()
+        if (range === 'today') return data.today === undefined ? days.slice(-1) : [data.today]
+        return days.slice(-7)
+      }, [data, range])
+
+      /** 空计数器工厂（与 Host 的 emptyCounters 字段一致）。 */
+      const zeroCounters = () => ({
+        calls: 0, inputTokens: 0, outputTokens: 0,
+        cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
+      })
+
+      /** 把一组 counters 相加（就地累加进 target）。 */
+      const accCounters = (target, counters) => {
+        for (const field of Object.keys(target)) target[field] += counters?.[field] ?? 0
+      }
+
       const facetOf = useCallback((facetKey) => {
         if (data === undefined) return {}
-        if (selectedModels.length === 0) {
-          // 全局视图：直接用 host 的 byXxx 桶，避免重复求和。
-          const map = {
-            provider: data.byProvider,
-            project: data.byProject,
-            origin: data.byOrigin,
-            account: data.accounts,
-            day: data.byDay,
-          }
-          return map[facetKey] ?? {}
-        }
-        // 筛选视图：把选中模型的该维度桶逐个相加。
         const merged = {}
+        if (selectedModels.length === 0) {
+          // 全局视图：不需要时间过滤时直接用 Host 的桶，避免重复求和。
+          if (facetKey !== 'day' && rangeDays.length === 0) {
+            const map = {
+              provider: data.byProvider,
+              project: data.byProject,
+              origin: data.byOrigin,
+              account: data.accounts,
+              day: data.byDay,
+            }
+            return map[facetKey] ?? {}
+          }
+          // 需要按时间段过滤：把范围内的每一天该维度的桶相加。
+          for (const day of rangeDays.length === 0 ? Object.keys(data.byDay ?? {}) : rangeDays) {
+            const byFacet = data.byDayFacets?.[day]?.[facetKey]
+            if (byFacet === undefined) continue
+            for (const [key, counters] of Object.entries(byFacet)) {
+              accCounters(merged[key] ?? (merged[key] = zeroCounters()), counters)
+            }
+          }
+          return merged
+        }
+        // 筛选视图：把选中模型该维度的桶相加，并按时间段过滤。
+        const useDays = rangeDays.length > 0 || facetKey === 'day'
         for (const name of selectedModels) {
           const facets = data.byModelFacets?.[name]?.[facetKey]
           if (facets === undefined) continue
           for (const [key, counters] of Object.entries(facets)) {
-            const target = merged[key] ?? (merged[key] = {
-              calls: 0, inputTokens: 0, outputTokens: 0,
-              cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
-            })
-            for (const field of Object.keys(target)) {
-              target[field] += counters[field] ?? 0
-            }
+            // day 维度的键就是日期，直接判断是否在范围内
+            if (facetKey === 'day' && rangeDays.length > 0 && !rangeDays.includes(key)) continue
+            accCounters(merged[key] ?? (merged[key] = zeroCounters()), counters)
           }
         }
         return merged
-      }, [data, selectedModels])
+      }, [data, selectedModels, rangeDays])
 
       // 成本金额：按当前货币格式化。金额通常很小（几美元），
       // 用两位小数会显示成 0.00，所以小于 1 元时多给几位。
       const fx = data?.cost?.fx ?? {}
       const usdCny = Number(fx.usdCny) > 0 ? Number(fx.usdCny) : 7.2
-      const costUsd = data?.cost?.totalUsd ?? 0
+      // 金额卡片跟随「今日/近 7 天/全部」：按范围内每天的成本相加。
+      // Host 的 cost.byDay 已按峰谷分桶算好每天的成本（谷时价是峰时的一半），
+      // 直接在客户端求和即可，不需要重算。
+      const costUsd = (() => {
+        const total = data?.cost?.totalUsd ?? 0
+        if (rangeDays.length === 0) return total
+        const byDay = data?.cost?.byDay ?? {}
+        let sum = 0
+        let hit = false
+        for (const day of rangeDays) {
+          const value = byDay[day]
+          if (value === undefined) continue
+          sum += value
+          hit = true
+        }
+        return hit ? sum : total
+      })()
       const costValue = currency === 'cny' ? costUsd * usdCny : costUsd
       const costSymbol = currency === 'cny' ? '¥' : '$'
       const formatMoney = (value) => {
@@ -4369,7 +4418,22 @@ function formatMoneyText(value) {
 
       const modelRows = useMemo(() => {
         if (data === undefined) return []
-        return Object.entries(data.byModel ?? {})
+        // 时间段内按 provider/model 重新汇总。范围是「全部」时直接用 Host 的
+        // 全量桶；否则遍历范围内的每一天累加（byDayModel 的形状是
+        // day -> `${provider}/${model}` -> counters）。
+        const scopedByModel = (() => {
+          if (rangeDays.length === 0) return data.byModel ?? {}
+          const summed = {}
+          for (const day of rangeDays) {
+            const byDay = data.byDayModel?.[day]
+            if (byDay === undefined) continue
+            for (const [key, counters] of Object.entries(byDay)) {
+              accCounters(summed[key] ?? (summed[key] = zeroCounters()), counters)
+            }
+          }
+          return summed
+        })()
+        return Object.entries(scopedByModel)
           .map(([key, counters]) => {
             const slash = key.indexOf('/')
             const rawModel = slash === -1 ? key : key.slice(slash + 1)
@@ -4394,7 +4458,15 @@ function formatMoneyText(value) {
               // 成本：按当前货币显示；未定价的显示「—」并可点开补价。
               ...(() => {
                 const costEntry = data?.cost?.byModel?.[key]
-                const usd = costEntry?.usd ?? 0
+                const allCounters = data?.byModel?.[key]
+                let usd = costEntry?.usd ?? 0
+                // 按范围看时，成本按该范围的 token 占全量的比例折算。
+                // 峰谷价差无法在客户端还原，所以这是估算值。
+                if (rangeDays.length > 0 && allCounters !== undefined) {
+                  const all = allCounters.totalTokens ?? 0
+                  const part = counters.totalTokens ?? 0
+                  usd = all > 0 ? usd * (part / all) : 0
+                }
                 const value = currency === 'cny' ? usd * usdCny : usd
                 return {
                   cost: costEntry?.priced === false || costEntry === undefined
@@ -4409,7 +4481,7 @@ function formatMoneyText(value) {
             }
           })
           .sort((a, b) => b.sortKey - a.sortKey)
-      }, [data, currency, usdCny, costSymbol, displayModel])
+      }, [data, currency, usdCny, costSymbol, displayModel, rangeDays])
 
       const providerRows = useMemo(() => {
         if (data === undefined) return []
@@ -4613,7 +4685,19 @@ function formatMoneyText(value) {
         }
         // 用**模型名合并视图**：同一模型挂在多个供应商下时合并成一个扇区，
         // 否则环上会出现多个同名扇区、占比也被拆散。按供应商拆分看明细表。
-        const source = data.byModelName ?? {}
+        // 选了时间段就按范围内的每天重新汇总，让环图跟着变。
+        const source = (() => {
+          if (rangeDays.length === 0) return data.byModelName ?? {}
+          const summed = {}
+          for (const day of rangeDays) {
+            const byName = data.byDayModelName?.[day]
+            if (byName === undefined) continue
+            for (const [name, counters] of Object.entries(byName)) {
+              accCounters(summed[name] ?? (summed[name] = zeroCounters()), counters)
+            }
+          }
+          return summed
+        })()
         // 按显示名合并：两个代号映射到同一真实模型时应合成一个扇区。
         const mergedByName = {}
         for (const [rawName, counters] of Object.entries(source)) {
@@ -4639,14 +4723,18 @@ function formatMoneyText(value) {
           })
         }
         return top
-      }, [data, t, selectedModels, displayModel])
+      }, [data, t, selectedModels, displayModel, rangeDays])
 
       // 图表数据：按天升序。trend 由 Host 预先算好命中率，这里只做投影。
       const trendSeries = useMemo(() => {
+        // 趋势图只画当前时间段内的点。选「今日」时只有一天，
+        // TrendChart 会退化为单点显示（见该组件对 length===1 的处理）。
+        const days = (rangeDays.length > 0 ? rangeDays : Object.keys(data?.byDay ?? {}))
+          .slice()
+          .sort()
         // 选中模型时，趋势图换成所选模型的合并曲线。
         if (selectedModels.length > 0) {
-          return Object.keys(data?.byDay ?? {})
-            .sort()
+          return days
             .map((day) => {
               const merged = {
                 label: day.slice(5), total: 0, calls: 0,
@@ -4668,8 +4756,10 @@ function formatMoneyText(value) {
             })
         }
         if (data?.trend === undefined) return []
-        return Object.entries(data.trend)
-          .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        const trendEntries = Object.entries(data.trend).sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        return (rangeDays.length > 0
+          ? trendEntries.filter(([day]) => rangeDays.includes(day))
+          : trendEntries)
           .map(([day, counters]) => ({
             label: day.slice(5),
             total: counters.totalTokens ?? 0,
@@ -4680,7 +4770,7 @@ function formatMoneyText(value) {
             output: counters.outputTokens ?? 0,
             rate: counters.cacheHitRate ?? 0,
           }))
-      }, [data, selectedModels])
+      }, [data, selectedModels, rangeDays])
 
       // 右上角工具区：Star / 检查更新 / 重载，与刷新按钮并排。
       const starsUrl = props?.repositoryUrl ?? data?.repositoryUrl
