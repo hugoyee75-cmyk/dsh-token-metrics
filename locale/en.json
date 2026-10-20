@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token Usage",
-    "description": "Tracks every model call through dsh: token usage, cost, provider balances and quotas, with trend charts and bottom-right alerts."
+    "description": "Tracks every model call through dsh: token usage, cost (peak/off-peak aware), provider balances and quotas, with trend charts and alerts."
   }
 }

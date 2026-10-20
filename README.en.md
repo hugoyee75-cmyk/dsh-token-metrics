@@ -8,12 +8,38 @@
 
 A DeepSeek Harness plugin that records every model call that goes through DSH and gives you a Token usage panel in the sidebar.
 
-Once installed, you can see the following metrics:
+Once installed, you get a token usage dashboard in the sidebar, plus cost and
+provider-balance management.
+
+**Usage**
 
 - Token totals for today, the last 7 days, and all time, plus the trend direction
 - Usage ranking by model and by provider
 - Cache hit rate — whether you are paying to re-read the same input
 - Token spend by project and by subagent
+
+**Cost**
+
+- Per-model cost estimates, priced from LiteLLM's public table (~2800 models)
+- **Peak/off-peak pricing**: DeepSeek's off-peak rate is half of peak, applied by
+  each call's actual time so the estimate is not inflated
+- One-click USD / RMB toggle with a live exchange rate
+- Models with no matching price are listed as "unpriced" with an entry point to
+  set a price — never silently counted as zero
+
+**Model access**
+
+- 32 service presets, China-first, filling in URL and protocol on selection
+- Provider balances and quotas: Sub2API / new-api / one-api gateways plus eight
+  official platforms
+- Capabilities auto-detected from pi-ai's model catalog (1241 models): context
+  window, output limit, thinking levels, attachments
+- One-click sync of providers and models into the DSH model config
+
+**Alerts**
+
+- Seven alert types pushed to the bottom-right: low balance, low quota, quota
+  resetting soon, query failed, plugin update and more
 
 The data comes from DSH's own session logs. The plugin sends no extra requests and uploads nothing.
 

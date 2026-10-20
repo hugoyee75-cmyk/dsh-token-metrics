@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": false,
   "type": "module",
-  "description": "统计所有经过 DeepSeek Harness 的模型调用：Token 用量、成本核算、供应商余额与配额，带趋势图表、右下角告警与自更新。",
+  "description": "统计所有经过 DeepSeek Harness 的模型调用：Token 用量、成本核算（含峰谷计价）、供应商余额与配额，并按模型/供应商/项目/来源/账号/日期拆分。",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
