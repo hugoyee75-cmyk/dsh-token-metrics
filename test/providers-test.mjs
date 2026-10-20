@@ -6,7 +6,7 @@
  */
 
 import {
-  detectProvider, probeOfficial, isSupportedProvider, PROVIDER_LABELS,
+  detectProvider, probeOfficial, isSupportedProvider, PROVIDER_LABELS, windowLabel,
 } from '../src/providers.js'
 
 const failures = []
@@ -207,6 +207,69 @@ check('有展示名', PROVIDER_LABELS.deepseek, 'DeepSeek')
   check('GLM 无订阅被识别', noPlan.noPlan, true)
   check('GLM 无订阅带原因', noPlan.error.includes('coding plan'), true)
   check('GLM 无订阅不算成功', noPlan.ok, false)
+}
+
+//#endregion
+
+//#region 窗口名归一化
+
+// 不能只认写死的键，否则新窗口会静默丢失（周限额看不到就是这么来的）
+check('5 小时窗口', windowLabel('five_hour'), '5-hour')
+check('周窗口', windowLabel('weekly_limit'), 'Weekly')
+check('月窗口', windowLabel('monthly'), 'Monthly')
+check('日窗口', windowLabel('daily'), 'Daily')
+check('对象形态取键', windowLabel({ five_hour: {} }), '5-hour')
+check('未知窗口原样返回', windowLabel('custom_window'), 'custom_window')
+check('空对象', windowLabel({}), 'Quota')
+check('null 安全', windowLabel(null), 'Quota')
+
+//#endregion
+
+//#region 配额型：Codex / ChatGPT
+
+{
+  const codex = await probeOfficial({
+    baseUrl: 'https://chatgpt.com/backend-api',
+    apiKey: 'oauth-token',
+    fetchImpl: respond({
+      '/backend-api/codex/usage': {
+        rate_limit: {
+          primary: { used_percent: 35, limit_window_seconds: 18_000, resets_at: 1_900_000_000_000 },
+          secondary: { used_percent: 72, limit_window_seconds: 604_800 },
+        },
+      },
+    }),
+  })
+  check('Codex 平台识别', codex.provider, 'codex')
+  check('Codex 两个窗口', codex.quotas.length, 2)
+  check('Codex 5小时标签', codex.quotas[0].label, '5-hour')
+  check('Codex 5小时已用', codex.quotas[0].used, 35)
+  check('Codex 周窗口标签', codex.quotas[1].label, 'Weekly')
+  check('Codex 周窗口已用', codex.quotas[1].used, 72)
+
+  // 只有 credit 余额的形态
+  const credits = await probeOfficial({
+    baseUrl: 'https://chatgpt.com/backend-api',
+    apiKey: 't',
+    fetchImpl: respond({ '/backend-api/codex/usage': { credits: 12.5 } }),
+  })
+  check('Codex credit 余额', credits.usd, 12.5)
+  check('Codex credit 类型', credits.kind, 'balance')
+}
+
+//#endregion
+
+//#region Gemini
+
+{
+  const gemini = await probeOfficial({
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    apiKey: 'k',
+    fetchImpl: respond({ '/v1beta/models': { models: [] } }),
+  })
+  // Gemini 没有公开配额接口，如实说明而不是编数字
+  check('Gemini 不谎报余额', gemini.ok, false)
+  checkTrue('Gemini 说明原因', gemini.error.includes('配额'), gemini.error)
 }
 
 //#endregion

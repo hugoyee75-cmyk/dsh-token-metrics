@@ -29,6 +29,9 @@ const HOST_PATTERNS = [
   { id: 'stepfun', test: /(^|\.)api\.stepfun\.(ai|com)$/ },
   { id: 'anthropic', test: /(^|\.)api\.anthropic\.com$/ },
   { id: 'openai', test: /(^|\.)api\.openai\.com$/ },
+  // Codex / ChatGPT 订阅的用量接口在 chatgpt.com 上，不在 api.openai.com
+  { id: 'codex', test: /(^|\.)(chatgpt\.com|chat\.openai\.com)$/ },
+  { id: 'gemini', test: /(^|\.)(generativelanguage\.googleapis\.com|aistudio\.google\.com)$/ },
 ]
 
 /**
@@ -62,6 +65,8 @@ export const PROVIDER_LABELS = {
   stepfun: '阶跃星辰',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  codex: 'ChatGPT (Codex)',
+  gemini: 'Google Gemini',
 }
 
 //#region 工具
@@ -214,6 +219,36 @@ async function probeStepfun({ baseUrl, apiKey, fetchImpl }) {
 //#region 配额型适配器
 
 /**
+ * 配额窗口名归一化。
+ *
+ * 不能只认写死的几个键：不同账号/版本会返回不同窗口（five_hour、
+ * weekly_limit、monthly、甚至自定义名）。用写死白名单会静默丢限额——
+ * 「只看得到 5 小时限额、看不到周限额」就是这么来的。
+ */
+const WINDOW_LABELS = {
+  five_hour: '5-hour',
+  five_hourly: '5-hour',
+  hourly: 'Hourly',
+  daily: 'Daily',
+  weekly_limit: 'Weekly',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+}
+
+/** 把任意窗口标识（字符串或单键对象）转成展示名。 */
+export function windowLabel(window) {
+  if (window === undefined || window === null) return 'Quota'
+  if (typeof window === 'string') return WINDOW_LABELS[window] ?? window
+  if (typeof window === 'object') {
+    const keys = Object.keys(window)
+    if (keys.length === 0) return 'Quota'
+    return WINDOW_LABELS[keys[0]] ?? keys[0]
+  }
+  return 'Quota'
+}
+
+
+/**
  * Kimi（Moonshot）Coding Plan：`/coding/v1/usages`。
  *
  * 响应里 `limits[]` 每项给出一个时间窗口：
@@ -231,14 +266,7 @@ async function probeKimi({ baseUrl, apiKey, fetchImpl }) {
   const payload = body.data ?? body
   const quotas = []
 
-  const labelOf = (window) => {
-    if (window === undefined || window === null) return 'Quota'
-    if (typeof window === 'string') return window
-    if (window.five_hour !== undefined) return '5-hour'
-    if (window.weekly_limit !== undefined) return 'Weekly'
-    if (window.monthly !== undefined) return 'Monthly'
-    return 'Quota'
-  }
+
 
   // 形态 A：limits 数组
   if (Array.isArray(payload.limits)) {
@@ -250,7 +278,7 @@ async function probeKimi({ baseUrl, apiKey, fetchImpl }) {
       const used = num(detail?.used)
       const resetsAt = num(detail?.resetTime ?? detail?.resets_at)
       const q = quota(
-        labelOf(entry?.window),
+        windowLabel(entry?.window),
         used ?? (remaining !== undefined && limit !== undefined ? limit - remaining : undefined),
         limit ?? (remaining !== undefined && used !== undefined ? remaining + used : undefined),
         resetsAt,
@@ -260,15 +288,21 @@ async function probeKimi({ baseUrl, apiKey, fetchImpl }) {
     }
   }
 
-  // 形态 B：usage.five_hour / usage.weekly_limit 扁平结构
+  // 形态 B：usage 下平铺多个窗口。遍历全部键，避免漏掉未列举的窗口。
   const usage = payload.usage ?? payload
-  for (const [key, label] of [['five_hour', '5-hour'], ['weekly_limit', 'Weekly'], ['monthly', 'Monthly']]) {
-    const entry = usage?.[key]
-    if (entry === undefined || entry === null) continue
-    const used = num(entry.used_value_usd ?? entry.used)
-    const limit = num(entry.max_value_usd ?? entry.limit)
-    const q = quota(label, used, limit, num(entry.resets_at ?? entry.resetTime), 'USD')
-    if (q !== undefined) quotas.push(q)
+  if (usage !== null && typeof usage === 'object') {
+    for (const [key, entry] of Object.entries(usage)) {
+      if (entry === null || typeof entry !== 'object') continue
+      const used = num(entry.used_value_usd ?? entry.used)
+      const limit = num(entry.max_value_usd ?? entry.limit)
+      const q = quota(
+        WINDOW_LABELS[key] ?? key,
+        used, limit,
+        num(entry.resets_at ?? entry.resetTime),
+        entry.unit ?? 'USD',
+      )
+      if (q !== undefined && !quotas.some((item) => item.label === q.label)) quotas.push(q)
+    }
   }
 
   if (quotas.length === 0) {
@@ -307,14 +341,11 @@ async function probeGlm({ baseUrl, apiKey, fetchImpl }) {
   const quotas = []
   const list = Array.isArray(data?.limits) ? data.limits : Array.isArray(data) ? data : []
   for (const entry of list) {
-    const label = String(entry?.type ?? entry?.window ?? entry?.label ?? 'Quota')
+    const rawLabel = entry?.type ?? entry?.window ?? entry?.label
     const used = num(entry?.used ?? entry?.current ?? entry?.usage)
     const limit = num(entry?.limit ?? entry?.total ?? entry?.max)
     const resetsAt = num(entry?.resetTime ?? entry?.resets_at ?? entry?.reset_time)
-    const q = quota(
-      label === 'five_hour' ? '5-hour' : label === 'weekly_limit' ? 'Weekly' : label,
-      used, limit, resetsAt, entry?.unit,
-    )
+    const q = quota(windowLabel(rawLabel), used, limit, resetsAt, entry?.unit)
     if (q !== undefined) quotas.push(q)
   }
   if (quotas.length === 0) return { ok: false, error: '响应里没有配额字段' }
@@ -342,30 +373,36 @@ async function probeMinimax({ baseUrl, apiKey, fetchImpl }) {
   }
   const data = body.data ?? body
   const quotas = []
-  for (const [key, label] of [['five_hour', '5-hour'], ['weekly_limit', 'Weekly'], ['limits', undefined]]) {
-    if (key === 'limits' && Array.isArray(data?.limits)) {
-      for (const entry of data.limits) {
-        const q = quota(
-          String(entry?.type ?? entry?.window ?? 'Quota'),
-          num(entry?.used ?? entry?.current),
-          num(entry?.limit ?? entry?.total),
-          num(entry?.resetTime ?? entry?.resets_at),
-          entry?.unit,
-        )
-        if (q !== undefined) quotas.push(q)
-      }
-      continue
+
+  // limits 数组形态
+  if (Array.isArray(data?.limits)) {
+    for (const entry of data.limits) {
+      const q = quota(
+        windowLabel(entry?.type ?? entry?.window),
+        num(entry?.used ?? entry?.current),
+        num(entry?.limit ?? entry?.total),
+        num(entry?.resetTime ?? entry?.resets_at),
+        entry?.unit,
+      )
+      if (q !== undefined) quotas.push(q)
     }
-    const entry = data?.[key]
-    if (entry === undefined || entry === null || typeof entry !== 'object') continue
-    const q = quota(
-      label,
-      num(entry.used_value_usd ?? entry.used),
-      num(entry.max_value_usd ?? entry.limit),
-      num(entry.resets_at ?? entry.resetTime),
-      'USD',
-    )
-    if (q !== undefined) quotas.push(q)
+  }
+
+  // 平铺形态：遍历全部窗口键，不写死白名单
+  if (quotas.length === 0 && data !== null && typeof data === 'object') {
+    for (const [key, entry] of Object.entries(data)) {
+      if (entry === null || typeof entry !== 'object') continue
+      // 跳过明显的非窗口字段
+      if (key === 'base_resp' || key === 'balance' || key === 'remaining') continue
+      const q = quota(
+        windowLabel(key),
+        num(entry.used_value_usd ?? entry.used),
+        num(entry.max_value_usd ?? entry.limit),
+        num(entry.resets_at ?? entry.resetTime),
+        entry.unit ?? 'USD',
+      )
+      if (q !== undefined) quotas.push(q)
+    }
   }
   const balance = num(data?.balance ?? data?.remaining)
   if (quotas.length === 0) {
@@ -377,6 +414,117 @@ async function probeMinimax({ baseUrl, apiKey, fetchImpl }) {
 
 //#endregion
 
+/**
+ * ChatGPT / Codex 订阅用量。
+ *
+ * 结构与 CC Switch 里的 `CodexUsageResponse` 一致：
+ *   { rate_limit: { primary: { used_percent, limit_window_seconds, resets_at },
+ *                   secondary: {...} } }
+ * primary 通常是 5 小时窗口，secondary 是周窗口。
+ *
+ * 注意：这个接口需要 ChatGPT 的 OAuth token，不是普通的 API key。
+ */
+async function probeCodex({ baseUrl, apiKey, fetchImpl }) {
+  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
+  const result = await getJson(`${origin}/backend-api/codex/usage`, apiKey, fetchImpl)
+  if (result.body === undefined) {
+    return { ok: false, error: result.error ?? `HTTP ${result.status}` }
+  }
+  const rateLimit = result.body.rate_limit ?? result.body
+  const quotas = []
+
+  /** 把一个 CodexRateLimitWindow 转成配额条目。 */
+  const toQuota = (window, fallbackLabel) => {
+    if (window === null || typeof window !== 'object') return undefined
+    const usedPercent = num(window.used_percent)
+    if (usedPercent === undefined) return undefined
+    // 窗口长度换算成可读标签
+    const seconds = num(window.limit_window_seconds)
+    let label = fallbackLabel
+    if (seconds !== undefined && seconds > 0) {
+      if (seconds <= 6 * 3600) label = '5-hour'
+      else if (seconds <= 8 * 86400) label = 'Weekly'
+      else if (seconds <= 32 * 86400) label = 'Monthly'
+    }
+    // used_percent 是「已用百分比」，转成 used/limit 的 100 分制
+    return quota(
+      label,
+      usedPercent,
+      100,
+      num(window.resets_at ?? window.resets_in_seconds),
+      '%',
+    )
+  }
+
+  const primary = toQuota(rateLimit?.primary, '5-hour')
+  const secondary = toQuota(rateLimit?.secondary, 'Weekly')
+  if (primary !== undefined) quotas.push(primary)
+  if (secondary !== undefined) quotas.push(secondary)
+
+  if (quotas.length === 0) {
+    // 也可能是 credit 余额形式
+    const credits = num(result.body.credits ?? result.body.balance)
+    if (credits !== undefined) return { ok: true, kind: 'balance', usd: credits }
+    return { ok: false, error: '响应里没有用量窗口' }
+  }
+  return { ok: true, kind: 'quota', quotas }
+}
+
+/**
+ * OpenAI 平台余额。
+ *
+ * 官方没有公开的「查询账户余额」接口，只有用量接口（需要 organization
+ * admin key）。所以这里尝试 billing 端点，失败就明确说明需要什么权限。
+ */
+async function probeOpenai({ baseUrl, apiKey, fetchImpl }) {
+  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
+  // 用量接口：需要 sk-admin- 开头的组织密钥
+  const result = await getJson(
+    `${origin}/v1/organization/costs?start_time=${Math.floor(Date.now() / 1000) - 30 * 86400}`,
+    apiKey, fetchImpl,
+  )
+  if (result.body !== undefined && Array.isArray(result.body.data)) {
+    const usedUsd = result.body.data.reduce((total, bucket) => {
+      const amount = num(bucket?.results?.[0]?.amount?.value) ?? 0
+      return total + amount
+    }, 0)
+    return {
+      ok: true, kind: 'quota',
+      quotas: [quota('30-day', usedUsd, undefined, undefined, 'USD')].filter(Boolean),
+    }
+  }
+  return {
+    ok: false,
+    error: result.status === 401 || result.status === 403
+      ? '需要组织管理员密钥（sk-admin-）才能查询用量'
+      : (result.error ?? `HTTP ${result.status}`),
+  }
+}
+
+/**
+ * Google Gemini 配额。
+ *
+ * 结构与 CC Switch 的 `GeminiQuotaResponse` 一致：
+ *   { buckets: [{ remainingFraction, resetTime, modelId }] }
+ * `remainingFraction` 是「剩余比例」，要转成已用。
+ */
+async function probeGemini({ baseUrl, apiKey, fetchImpl }) {
+  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
+  const result = await getJson(
+    `${origin}/v1beta/models?key=${encodeURIComponent(apiKey)}`, '', fetchImpl,
+  )
+  // Gemini 没有统一的配额查询接口；能查到模型列表说明 key 有效，
+  // 但拿不到额度。这里如实说明，而不是编一个数字。
+  if (result.body !== undefined) {
+    return {
+      ok: false,
+      error: 'Gemini 未提供公开的配额查询接口，仅能确认密钥有效',
+      keyValid: true,
+    }
+  }
+  return { ok: false, error: result.error ?? `HTTP ${result.status}` }
+}
+
 /** 平台 id -> 探测函数。 */
 const ADAPTERS = {
   deepseek: probeDeepseek,
@@ -387,6 +535,9 @@ const ADAPTERS = {
   siliconflow: probeSiliconflow,
   novita: probeNovita,
   stepfun: probeStepfun,
+  codex: probeCodex,
+  openai: probeOpenai,
+  gemini: probeGemini,
 }
 
 /**
