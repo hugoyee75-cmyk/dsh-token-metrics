@@ -2393,6 +2393,14 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
+/* 预算项的告警色：超过阈值转黄、超支转红 */
+.tu-heat-stat-value[data-level='warn'] { color: var(--dsw-alias-state-warn-primary); }
+.tu-heat-stat-value[data-level='over'] { color: var(--dsw-alias-state-error-primary); }
+.tu-heat-stat-hint {
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
 .tu-heat-title {
   font-size: 13px;
   font-weight: 600;
@@ -4101,8 +4109,14 @@ function formatMoneyText(value) {
             ...(summary ?? []).map((item) => h('div', {
               key: item.label, className: 'tu-heat-stat',
             },
-            h('span', { className: 'tu-heat-stat-value' }, item.value),
+            h('span', {
+              className: 'tu-heat-stat-value',
+              'data-level': item.level,
+            }, item.value),
             h('span', { className: 'tu-heat-stat-label' }, item.label),
+            item.hint === undefined
+              ? null
+              : h('span', { className: 'tu-heat-stat-hint' }, item.hint),
             )),
           ),
       )
@@ -5576,25 +5590,6 @@ function formatMoneyText(value) {
         h('div', { className: 'tu-card-value' },
           formatMoney(costValue)),
         // 预算进度：给花费一个参照系。没有配置预算时完全不显示。
-        budgetInfo === undefined
-          ? null
-          : h('div', { className: 'tu-budget', 'data-level': budgetInfo.over ? 'over' : budgetInfo.warn ? 'warn' : 'ok' },
-            h('div', { className: 'tu-budget-bar' },
-              h('div', {
-                className: 'tu-budget-fill',
-                style: { width: `${Math.min(100, Math.round(budgetInfo.ratio * 100))}%` },
-              }),
-            ),
-            // 拆两行：卡片窄，挤在一行会被省略号截掉金额——
-            // 而金额恰恰是这行最该看到的东西。
-            h('div', { className: 'tu-budget-text' },
-              h('span', null, `${budgetInfo.label} ${budgetInfo.percent}%`),
-              h('span', { className: 'tu-budget-amount' },
-                budgetInfo.over
-                  ? `${t('budget.over')} ${formatMoney(budgetInfo.used - budgetInfo.limit)}`
-                  : `${t('budget.left')} ${formatMoney(Math.max(0, budgetInfo.limit - budgetInfo.used))}`),
-            ),
-          ),
         ),
         h(MetricCard, {
           label: t('field.cacheHitRate'),
@@ -5848,7 +5843,7 @@ function formatMoneyText(value) {
           if (value > peakValue) { peakValue = value; peakDay = day }
         }
         const average = activeDays > 0 ? tokenSum / activeDays : 0
-        return [
+        const items = [
           { label: t('heat.days'), value: `${activeDays} / ${days.length}` },
           { label: t('heat.average'), value: formatCompact(average) },
           {
@@ -5857,6 +5852,19 @@ function formatMoneyText(value) {
             hint: peakDay === '' ? undefined : peakDay.slice(5),
           },
         ]
+        // 预算放在这里而不是成本卡片里：卡片高度一致，且这排本来就是
+        // 「当期关键数字」——预算正是当期最该看的那个。
+        if (budgetInfo !== undefined) {
+          items.push({
+            label: budgetInfo.label,
+            value: `${budgetInfo.percent}%`,
+            hint: budgetInfo.over
+              ? `${t('budget.over')} ${formatMoney(budgetInfo.used - budgetInfo.limit)}`
+              : `${t('budget.left')} ${formatMoney(Math.max(0, budgetInfo.limit - budgetInfo.used))}`,
+            level: budgetInfo.over ? 'over' : budgetInfo.warn ? 'warn' : 'ok',
+          })
+        }
+        return items
       })()
 
       const heatmap = empty
