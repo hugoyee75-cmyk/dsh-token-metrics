@@ -32,6 +32,10 @@ const HOST_PATTERNS = [
   { id: 'siliconflow', test: /(^|\.)api\.siliconflow\.(cn|com)$/ },
   { id: 'novita', test: /(^|\.)api\.novita\.ai$/ },
   { id: 'stepfun', test: /(^|\.)api\.stepfun\.(ai|com)$/ },
+  // 火山方舟（豆包）：余额在 /api/v3/billing/balance，需 AK/SK 或 API Key
+  { id: 'volcano', test: /(^|\.)ark\.cn-beijing\.volces\.com$/ },
+  // 阿里百炼（通义千问）：官方没有公开的余额接口，只识别以便给出准确说明
+  { id: 'qwen', test: /(^|\.)dashscope(-intl)?\.aliyuncs\.com$/ },
   { id: 'anthropic', test: /(^|\.)api\.anthropic\.com$/ },
   { id: 'openai', test: /(^|\.)api\.openai\.com$/ },
   // 下面两个能识别但**不支持查询**，识别它们只是为了给出准确说明，
@@ -71,6 +75,8 @@ export const PROVIDER_LABELS = {
   siliconflow: 'SiliconFlow',
   novita: 'Novita AI',
   stepfun: '阶跃星辰',
+  volcano: '火山方舟（豆包）',
+  qwen: '阿里百炼（通义千问）',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   codex: 'ChatGPT (Codex)',
@@ -345,6 +351,32 @@ async function probeStepfun({ baseUrl, apiKey, fetchImpl }) {
   return { ok: false, error: '没有找到余额字段' }
 }
 
+/**
+ * 火山方舟（豆包）：/api/v3/billing/balance。
+ *
+ * 实测该端点存在（无鉴权返回 401），返回结构未公开文档化，
+ * 所以按多个可能的字段名尝试；都拿不到就明确说「没找到余额字段」，
+ * 而不是编一个 0。
+ */
+async function probeVolcano({ baseUrl, apiKey, fetchImpl }) {
+  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
+  const candidate = [
+    '/api/v3/billing/balance',
+    '/api/v3/account/balance',
+    '/api/v3/billing/account',
+  ]
+  for (const path of candidate) {
+    const result = await getJson(`${origin}${path}`, apiKey, fetchImpl)
+    if (result.body === undefined) continue
+    const data = result.body?.data ?? result.body?.result ?? result.body
+    const total = num(data?.balance ?? data?.available_balance ?? data?.total_balance ?? data?.remain)
+    if (total !== undefined) {
+      return { ok: true, kind: 'balance', usd: total, currency: 'CNY' }
+    }
+  }
+  return { ok: false, error: '没有找到余额字段' }
+}
+
 //#endregion
 
 //#region 配额型适配器
@@ -437,13 +469,38 @@ async function probeKimi({ baseUrl, apiKey, fetchImpl }) {
   }
 
   if (quotas.length === 0) {
+    // 没有 Coding Plan 配额时，回退查按量计费余额。
+    // 很多用户是「有充值、没订阅」，只查配额会误报「无订阅」而错过余额。
+    const balance = await probeKimiBalance({ baseUrl, apiKey, fetchImpl })
+    if (balance.ok === true) return balance
     // 明确的「没有订阅」比含糊的解析失败更有用
     if (String(body.msg ?? body.message ?? '').toLowerCase().includes('coding plan')) {
-      return { ok: false, error: '该账号没有 Coding Plan 订阅', noPlan: true }
+      return { ok: false, error: '该账号没有 Coding Plan 订阅，也没有可查的余额', noPlan: true }
     }
-    return { ok: false, error: '响应里没有配额字段' }
+    return balance.ok === false && balance.error !== undefined
+      ? balance
+      : { ok: false, error: '响应里没有配额字段' }
   }
   return { ok: true, kind: 'quota', quotas }
+}
+
+/**
+ * Kimi 按量计费余额：`/v1/users/me/balance`。
+ *
+ * 实测端点存在（无鉴权返回 401）。与 Coding Plan 配额是两套体系：
+ * 订阅走窗口限流，充值余额按量扣减，两者可以同时存在。
+ */
+async function probeKimiBalance({ baseUrl, apiKey, fetchImpl }) {
+  const origin = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`).origin
+  const result = await getJson(`${origin}/v1/users/me/balance`, apiKey, fetchImpl)
+  if (result.body === undefined) {
+    return { ok: false, error: result.error ?? `HTTP ${result.status}` }
+  }
+  const data = result.body?.data ?? result.body
+  const total = num(data?.available_balance ?? data?.balance ?? data?.total_balance)
+  if (total === undefined) return { ok: false, error: '没有找到余额字段' }
+  // 上游金额单位不确定，先按元处理；页面会标注币种
+  return { ok: true, kind: 'balance', usd: total, currency: 'CNY' }
 }
 
 /**
@@ -584,6 +641,8 @@ async function probeOpenai({ baseUrl, apiKey, fetchImpl }) {
  * 不如直接说明为什么查不了。
  */
 const UNSUPPORTED_REASONS = {
+  // 阿里百炼没有公开的余额接口：控制台里的额度只在网页端可见
+  qwen: '阿里百炼没有公开的余额查询接口，请到百炼控制台查看',
   codex: 'ChatGPT 订阅额度绑定在账号登录态上，API key 无法查询。请在 ChatGPT 官网查看用量。',
   gemini: 'Google 未提供公开的配额查询接口，API key 无法查询余额。',
 }
@@ -598,6 +657,7 @@ const ADAPTERS = {
   siliconflow: probeSiliconflow,
   novita: probeNovita,
   stepfun: probeStepfun,
+  volcano: probeVolcano,
   openai: probeOpenai,
 }
 

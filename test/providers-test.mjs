@@ -55,6 +55,52 @@ check('Codex 标记为不支持查询', isSupportedProvider('https://chatgpt.com
 check('中转站标记为不支持', isSupportedProvider('https://relay.test'), false)
 check('有展示名', PROVIDER_LABELS.deepseek, 'DeepSeek')
 
+// —— 新增平台的识别与查询 ——
+{
+  // 火山方舟：域名识别 + 余额查询
+  check('识别火山方舟', detectProvider('https://ark.cn-beijing.volces.com/api/v3'), 'volcano')
+  const volcano = await probeOfficial({
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    apiKey: 'k',
+    fetchImpl: async () => ({
+      ok: true, status: 200,
+      async json() { return { data: { balance: 128.5 } } },
+    }),
+  })
+  check('火山方舟查到余额', volcano.ok, true)
+  check('火山方舟余额值', volcano.usd, 128.5)
+
+  // 阿里百炼：能识别但明确说不支持，不发请求
+  check('识别阿里百炼', detectProvider('https://dashscope.aliyuncs.com/compatible-mode/v1'), 'qwen')
+  let qwenCalled = false
+  const qwen = await probeOfficial({
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: 'k',
+    fetchImpl: async () => { qwenCalled = true; return { ok: false, status: 404 } },
+  })
+  check('百炼标记为不支持', qwen.unsupported, true)
+  checkTrue('百炼说明原因', String(qwen.error).includes('控制台'), String(qwen.error))
+  check('百炼不发请求', qwenCalled, false)
+
+  // Kimi：没有 Coding Plan 配额时回退查余额
+  const kimiFallback = await probeOfficial({
+    baseUrl: 'https://api.kimi.com',
+    apiKey: 'k',
+    fetchImpl: async (url) => {
+      if (String(url).includes('/coding/v1/usages')) {
+        return { ok: true, status: 200, async json() { return { data: {} } } }
+      }
+      if (String(url).includes('/v1/users/me/balance')) {
+        return { ok: true, status: 200, async json() { return { data: { available_balance: 66.8 } } } }
+      }
+      return { ok: false, status: 404 }
+    },
+  })
+  check('Kimi 无配额时回退余额', kimiFallback.ok, true)
+  check('Kimi 余额类型', kimiFallback.kind, 'balance')
+  check('Kimi 余额值', kimiFallback.usd, 66.8)
+}
+
 //#endregion
 
 //#region DeepSeek
