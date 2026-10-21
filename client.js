@@ -389,6 +389,8 @@ window.__ModuleLoader__.load({
       'alias.none': '暂无可设置的别名。',
       'alias.manage': '管理别名',
       'column.cost': '成本',
+      'column.ttft': '首字',
+      'column.tps': '速度',
       'field.input': '输入',
       'field.output': '输出',
       'field.cacheRead': '缓存读',
@@ -792,6 +794,8 @@ window.__ModuleLoader__.load({
       'alias.none': 'No aliases to configure.',
       'alias.manage': 'Manage aliases',
       'column.cost': 'Cost',
+      'column.ttft': 'TTFT',
+      'column.tps': 'TPS',
       'field.input': 'Input',
       'field.output': 'Output',
       'field.cacheRead': 'Cache read',
@@ -5080,6 +5084,18 @@ function formatMoneyText(value) {
                   modelName: slash === -1 ? key : key.slice(slash + 1),
                 }
               })(),
+              // 该模型的平均首字延迟与输出速度（按模型分桶）
+              ...(() => {
+                const perf = data?.performance?.byModel?.[key]
+                return {
+                  ttft: perf === undefined || perf.ttftMs === null
+                    ? '—'
+                    : formatDuration(perf.ttftMs),
+                  tps: perf === undefined || perf.tps === null
+                    ? '—'
+                    : `${Math.round(perf.tps)}`,
+                }
+              })(),
               sortKey: counters.totalTokens ?? 0,
             }
           })
@@ -5709,6 +5725,9 @@ function formatMoneyText(value) {
         { key: 'reasoning', label: t('field.reasoning') },
         { key: 'hitRate', label: t('field.cacheHitRate') },
         { key: 'total', label: t('field.total') },
+        // 性能两列：来自实时事件时间戳，历史数据补不出来，缺值显示「—」
+        { key: 'ttft', label: t('column.ttft') },
+        { key: 'tps', label: t('column.tps') },
         { key: 'cost', label: t('column.cost') },
       ]
 
