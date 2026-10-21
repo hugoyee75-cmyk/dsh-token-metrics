@@ -348,6 +348,11 @@ const css = insertedStyles[0]?.textContent ?? ''
 const allowedLiterals = new Set([
   '#3b7dd8', '#18a45f', '#e08a2a', '#d94a5a', '#8358c9', '#2aa5b0', '#8a7f64',
   '#66aaf0', '#47cf8c', '#f2b053', '#f0778a', '#ab8bef', '#52d0d9', '#b6ab8e',
+  // 热力图色阶（5 档 × 亮暗两套）。同样不能用语义 token：
+  // brand-primary 在浅色下是 #0f1115（近黑），拿它做色阶会变成一片灰黑，
+  // 深浅完全分不出来 —— 这正是之前浅色模式配色发怪的原因。
+  '#eef0f3', '#d8ecd9', '#a7d8ab', '#6bc072', '#2f9e44',
+  '#1b1f26', '#1e3a24', '#2c6b37', '#43a04f', '#6bd07a',
 ])
 const colorLiterals = [...css.matchAll(/(?:^|[^-\w])(#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/g)]
   .map((m) => m[1])

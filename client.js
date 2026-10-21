@@ -980,6 +980,23 @@ window.__ModuleLoader__.load({
   --tu-c6: #2aa5b0;
   --tu-c7: #8a7f64;
 }
+/* 热力图色阶：5 档，浅色下用绿色系（与「用量健康」的直觉一致），
+   深色下提亮。
+
+   为什么不用 brand-primary：它在 DSH 里是**前景反差色**——
+   浅色主题下是接近纯黑的深色、深色主题下接近纯白。拿它做色阶，
+   浅色下会变成一片灰黑、深浅难分，这正是之前「配色怪」的根源。
+   分类/色阶必须用固定色值，不能用会随主题反转的语义 token。 */
+.tu-root,
+.tu-modal-backdrop,
+.tu-toasts {
+  --tu-heat-1: #d8ecd9;
+  --tu-heat-2: #a7d8ab;
+  --tu-heat-3: #6bc072;
+  --tu-heat-4: #2f9e44;
+  --tu-heat-0: #eef0f3;
+}
+
 /* 分类色在深色下另取一套。
    选择器不只限定 .tu-root：弹窗与通知挂在 document.body 下，
    虽然它们当前只用语义 token，但放宽选择器可避免以后加分类色时踩坑。 */
@@ -993,6 +1010,11 @@ window.__ModuleLoader__.load({
   --tu-c5: #ab8bef;
   --tu-c6: #52d0d9;
   --tu-c7: #b6ab8e;
+  --tu-heat-0: #1b1f26;
+  --tu-heat-1: #1e3a24;
+  --tu-heat-2: #2c6b37;
+  --tu-heat-3: #43a04f;
+  --tu-heat-4: #6bd07a;
 }
 .tu-root {
   height: 100%;
@@ -2467,10 +2489,11 @@ window.__ModuleLoader__.load({
   transition: transform 90ms ease;
 }
 .tu-heat-cell:hover { transform: scale(1.25); }
-.tu-heat-cell[data-level='1'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 25%, transparent); }
-.tu-heat-cell[data-level='2'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); }
-.tu-heat-cell[data-level='3'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); }
-.tu-heat-cell[data-level='4'] { background: var(--dsw-alias-brand-primary); }
+.tu-heat-cell[data-level='0'] { background: var(--tu-heat-0); }
+.tu-heat-cell[data-level='1'] { background: var(--tu-heat-1); }
+.tu-heat-cell[data-level='2'] { background: var(--tu-heat-2); }
+.tu-heat-cell[data-level='3'] { background: var(--tu-heat-3); }
+.tu-heat-cell[data-level='4'] { background: var(--tu-heat-4); }
 .tu-heat-cell[data-active='true'] {
   outline: 2px solid var(--dsw-alias-label-primary);
   outline-offset: 1px;
@@ -2489,10 +2512,11 @@ window.__ModuleLoader__.load({
   border-radius: 2px;
   background: var(--dsw-alias-bg-layer-2);
 }
-.tu-heat-dot[data-level='1'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 25%, transparent); }
-.tu-heat-dot[data-level='2'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); }
-.tu-heat-dot[data-level='3'] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); }
-.tu-heat-dot[data-level='4'] { background: var(--dsw-alias-brand-primary); }
+.tu-heat-dot[data-level='0'] { background: var(--tu-heat-0); }
+.tu-heat-dot[data-level='1'] { background: var(--tu-heat-1); }
+.tu-heat-dot[data-level='2'] { background: var(--tu-heat-2); }
+.tu-heat-dot[data-level='3'] { background: var(--tu-heat-3); }
+.tu-heat-dot[data-level='4'] { background: var(--tu-heat-4); }
 .tu-heat-hint { margin-left: 6px; opacity: 0.75; }
 
 .tu-budget-section {
@@ -3904,9 +3928,18 @@ function formatMoneyText(value) {
       const path = smoothPath(coords)
       const area = `${path} L${coords[coords.length - 1].x.toFixed(2)},${baseY.toFixed(2)}`
         + ` L${coords[0].x.toFixed(2)},${baseY.toFixed(2)} Z`
+      /**
+       * 曲线颜色。
+       *
+       * 总量模式用分类色 --tu-c1（蓝）而不是 brand-primary：
+       * 后者是前景反差色，浅色主题下接近黑、深色下接近白，
+       * 画在浅色背景上就是一条黑线 —— 与「用量趋势」的语义也不搭。
+       *
+       * 命中率/成本用语义色是合适的：这两者表达的是「好/需注意」的状态。
+       */
       const stroke = mode === 'cache' ? 'var(--dsw-alias-state-success-primary)'
         : mode === 'cost' ? 'var(--dsw-alias-state-warn-primary)'
-          : 'var(--dsw-alias-brand-primary)'
+          : 'var(--tu-c1)'
       const gradientId = `tu-grad-${mode}`
 
       const hovered = hoverIndex >= 0 ? coords[hoverIndex] : undefined
