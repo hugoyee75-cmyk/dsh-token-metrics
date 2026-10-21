@@ -2312,10 +2312,8 @@ window.__ModuleLoader__.load({
 }
 .tu-budget[data-level='warn'] .tu-budget-text { color: var(--dsw-alias-state-warn-primary); }
 .tu-budget[data-level='over'] .tu-budget-text { color: var(--dsw-alias-state-error-primary); }
-/* 分组预算：成本卡片下方独立一块 */
-/* —— 预算页 —— */
-/* —— 活动热力图 ——
-   8 周 × 7 天 = 56 格。按列排（每列一周），从周一到周日。 */
+/* 热力图：竖排。标题 → 网格（含月份）→ 图例 → 三个数字。
+   放在右侧栏（环形图下方），宽度约 500px，10~26 周刚好铺满。 */
 .tu-heat {
   margin-top: 18px;
   padding: 16px 18px;
@@ -2330,85 +2328,61 @@ window.__ModuleLoader__.load({
   margin-bottom: 14px;
   flex-wrap: wrap;
 }
-/* 两栏：左热力图，右 KPI 统计条。
-   KPI 均分剩余宽度并各自居中——这样右侧不是「三个数字飘在空白里」，
-   而是一条完整的统计带。分隔线用短的（36px 高、垂直居中），
-   而不是贯穿整行的高度。 */
 .tu-heat-body {
   display: flex;
-  align-items: center;
-  gap: 24px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
 }
-.tu-heat-main { flex: none; }
 /* 月份与格子共用同一套列宽，标签自然对齐到对应周 */
 .tu-heat-months,
 .tu-heat-grid {
   display: grid;
-  grid-template-columns: repeat(var(--tu-heat-weeks, 8), 13px);
+  grid-template-columns: repeat(var(--tu-heat-weeks, 8), 14px);
   gap: 3px;
 }
 .tu-heat-grid {
-  grid-template-rows: repeat(7, 13px);
+  grid-template-rows: repeat(7, 14px);
   grid-auto-flow: column;
 }
-.tu-heat-months { margin-bottom: 5px; }
 .tu-heat-month {
   font-size: 9.5px;
   line-height: 1;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
-/* KPI 统计带：每项等分，内容居中 */
+/* 三个关键数字：横排一行，紧跟图例 */
 .tu-heat-summary {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  align-items: stretch;
-  /* 淡背景 + 圆角：让它读成一块「统计面板」，而不是几个数字浮在空白里 */
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 10px;
-  padding: 12px 8px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0;
+  width: 100%;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }
 .tu-heat-stat {
-  position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  flex: 1 1 0;
+  gap: 3px;
+  align-items: flex-start;
+  padding-left: 16px;
+  border-left: 1px solid var(--dsw-alias-border-l1);
   min-width: 0;
-  padding: 0 12px;
 }
-/* 短分隔线：只占 36px 高并垂直居中，避免贯穿整行的长竖线 */
-.tu-heat-stat + .tu-heat-stat::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1px;
-  height: 34px;
-  background: var(--dsw-alias-border-l1);
-  opacity: 0.8;
+.tu-heat-stat:first-child { border-left: none; padding-left: 0; }
+.tu-heat-stat-value {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
 }
 .tu-heat-stat-label {
   font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
-}
-.tu-heat-stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-}
-.tu-heat-stat-hint {
-  font-size: 10px;
-  color: var(--dsw-alias-label-secondary);
 }
 .tu-heat-title {
   font-size: 13px;
@@ -3018,6 +2992,16 @@ window.__ModuleLoader__.load({
   min-height: 26px;
 }
 /* 图表与饼图都撑满各自单元格，配合网格的等高拉伸实现上下对齐 */
+/* 右列：环形图 + 热力图竖排 */
+.tu-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.tu-stack > .tu-section { margin-bottom: 0; }
+.tu-stack .tu-heat { margin-top: 0; }
+
 .tu-grid-2 > .tu-section {
   display: flex;
   flex-direction: column;
@@ -4067,64 +4051,59 @@ function formatMoneyText(value) {
           // 列数随数据跨度变化，CSS 用它算网格列宽
           style: { '--tu-heat-weeks': String(WEEKS) },
         },
-          // —— 左：热力图本体（含月份标签）——
-          h('div', { className: 'tu-heat-main' },
-            h('div', { className: 'tu-heat-months' },
-              // 月份标签按「周列」定位：同一个月只在它第一次出现的周上标一次。
-              // 早先在每个周首都标，一个月跨 4 周就会显示 4 次「9月」。
-              ...(() => {
-                const labels = []
-                let lastColumn = -99
-                cells.forEach((c, index) => {
-                  if (!c.isWeekStart) return
-                  const column = Math.floor(index / WEEK) + 1
-                  // 与上一个标签至少隔 2 列再标：窗口跨月时「8月9月」会挤在
-                  // 相邻两列上互相重叠，宁可少标一个也不要叠字。
-                  if (column - lastColumn < 2) return
-                  lastColumn = column
-                  labels.push(h('span', {
-                    key: c.key,
-                    className: 'tu-heat-month',
-                    style: { gridColumn: String(column) },
-                  }, monthLabel(c.date)))
-                })
-                return labels
-              })(),
-            ),
-            h('div', { className: 'tu-heat-grid' },
-              ...cells.map((cell) => h('button', {
-                key: cell.key,
-                type: 'button',
-                className: 'tu-heat-cell',
-                'data-level': String(levelOf(cell.value)),
-                'data-active': activeDay === cell.key ? 'true' : 'false',
-                title: `${cell.key} · ${formatCompact(cell.value)} tokens`,
-                onClick: () => onPickDay?.(cell.key),
-              })),
-            ),
-            h('div', { className: 'tu-heat-foot' },
-              h('span', null, t('heat.less')),
-              ...[0, 1, 2, 3, 4].map((lv) =>
-                h('i', { key: lv, className: 'tu-heat-dot', 'data-level': String(lv) })),
-              h('span', null, t('heat.more')),
-              h('span', { className: 'tu-heat-hint' }, `· ${t('heat.click')}`),
-            ),
+          h('div', { className: 'tu-heat-months' },
+            // 月份标签两条规则同时满足才显示：
+            //   ① 月份变了（同一月只标一次）
+            //   ② 与上一个标签至少隔 2 列（否则跨月时「8月9月」会叠字）
+            ...(() => {
+              const labels = []
+              let lastMonth = -1
+              let lastColumn = -99
+              cells.forEach((c, index) => {
+                if (!c.isWeekStart) return
+                const column = Math.floor(index / WEEK) + 1
+                if (c.month === lastMonth) return
+                if (column - lastColumn < 2) return
+                lastMonth = c.month
+                lastColumn = column
+                labels.push(h('span', {
+                  key: c.key,
+                  className: 'tu-heat-month',
+                  style: { gridColumn: String(column) },
+                }, monthLabel(c.date)))
+              })
+              return labels
+            })(),
           ),
-          // —— 右：当期关键数字，填补横向空白 ——
-          summary === undefined
-            ? null
-            : h('div', { className: 'tu-heat-summary' },
-              ...(summary ?? []).map((item) => h('div', {
-                key: item.label, className: 'tu-heat-stat',
-              },
-              h('span', { className: 'tu-heat-stat-label' }, item.label),
-              h('span', { className: 'tu-heat-stat-value' }, item.value),
-              item.hint === undefined
-                ? null
-                : h('span', { className: 'tu-heat-stat-hint' }, item.hint),
-              )),
-            ),
+          h('div', { className: 'tu-heat-grid' },
+            ...cells.map((cell) => h('button', {
+              key: cell.key,
+              type: 'button',
+              className: 'tu-heat-cell',
+              'data-level': String(levelOf(cell.value)),
+              'data-active': activeDay === cell.key ? 'true' : 'false',
+              title: `${cell.key} · ${formatCompact(cell.value)} tokens`,
+              onClick: () => onPickDay?.(cell.key),
+            })),
+          ),
+          h('div', { className: 'tu-heat-foot' },
+            h('span', null, t('heat.less')),
+            ...[0, 1, 2, 3, 4].map((lv) =>
+              h('i', { key: lv, className: 'tu-heat-dot', 'data-level': String(lv) })),
+            h('span', null, t('heat.more')),
+          ),
         ),
+        // 三个关键数字：横排在热力图下方，不占右侧空间
+        summary === undefined
+          ? null
+          : h('div', { className: 'tu-heat-summary' },
+            ...(summary ?? []).map((item) => h('div', {
+              key: item.label, className: 'tu-heat-stat',
+            },
+            h('span', { className: 'tu-heat-stat-value' }, item.value),
+            h('span', { className: 'tu-heat-stat-label' }, item.label),
+            )),
+          ),
       )
     }
 
@@ -5916,16 +5895,25 @@ function formatMoneyText(value) {
               modelTrend: data?.modelTrend,
             }),
           ),
-          modelPieItems.length > 0
-            ? h('section', { className: 'tu-section' },
-              // 与左侧用同一个标题容器：左侧标题行含模式切换按钮、更高，
-              // 若右侧直接放裸 h2，两列卡片顶部就会错位。
-              h('div', { className: 'tu-section-head' },
-                h('h2', { className: 'tu-section-title' }, t('chart.pie.title')),
-              ),
-              h(DonutChart, { items: modelPieItems, t, centerLabel: t('chart.pie.total') }),
-            )
-            : null,
+          /**
+           * 右列：环形图 + 热力图竖排。
+           *
+           * 热力图天然是「小方块」——10~26 周也就 150~420px 宽，
+           * 放进整行卡片会让左右失衡。放右侧栏（约 500px）正合适。
+           */
+          h('div', { className: 'tu-stack' },
+            modelPieItems.length > 0
+              ? h('section', { className: 'tu-section' },
+                // 与左侧用同一个标题容器：左侧标题行含模式切换按钮、更高，
+                // 若右侧直接放裸 h2，两列卡片顶部就会错位。
+                h('div', { className: 'tu-section-head' },
+                  h('h2', { className: 'tu-section-title' }, t('chart.pie.title')),
+                ),
+                h(DonutChart, { items: modelPieItems, t, centerLabel: t('chart.pie.total') }),
+              )
+              : null,
+            heatmap,
+          ),
         )
         : null
 
@@ -7464,7 +7452,7 @@ function formatMoneyText(value) {
       }
 
       return h('div', { className: 'tu-root' },
-        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, heatmap, charts, sections,
+        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, charts, sections,
         warn, note, versionModal, priceModal, aliasModal)
     }
 
