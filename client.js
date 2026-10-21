@@ -999,7 +999,15 @@ window.__ModuleLoader__.load({
 
 /* 分类色在深色下另取一套。
    选择器不只限定 .tu-root：弹窗与通知挂在 document.body 下，
-   虽然它们当前只用语义 token，但放宽选择器可避免以后加分类色时踩坑。 */
+   虽然它们当前只用语义 token，但放宽选择器可避免以后加分类色时踩坑。
+
+   深色标记是 body[data-ds-dark-theme]（DSH 用
+   document.body.toggleAttribute('data-ds-dark-theme', dark) 设置），
+   不是 data-theme="dark"。早先写成后者，导致这一整块从未生效：
+   深色下用的还是浅色的分类色与热力色阶，热力图才会显示成一片白方块。 */
+body[data-ds-dark-theme] .tu-root,
+body[data-ds-dark-theme] .tu-modal-backdrop,
+body[data-ds-dark-theme] .tu-toasts,
 [data-theme='dark'] .tu-root,
 [data-theme='dark'] .tu-modal-backdrop,
 [data-theme='dark'] .tu-toasts {
