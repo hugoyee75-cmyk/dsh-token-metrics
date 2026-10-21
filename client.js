@@ -2324,6 +2324,8 @@ window.__ModuleLoader__.load({
    放在右侧栏（环形图下方），宽度约 500px，10~26 周刚好铺满。 */
 .tu-heat {
   margin-top: 18px;
+  /* 下方留白：明细视图紧贴热力图时，两块内容会糊在一起分不清 */
+  margin-bottom: 26px;
   padding: 16px 18px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 12px;
@@ -2374,23 +2376,25 @@ window.__ModuleLoader__.load({
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 0;
-  width: 100%;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--dsw-alias-border-l1);
+  /* 与热力图拉开距离，不要紧贴 */
+  margin-top: 16px;
+  /* 独立面板：淡背景 + 圆角，读成一块整体而不是「一排浮着的数字」 */
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
 }
 .tu-heat-stat {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   align-items: flex-start;
-  padding-left: 16px;
-  border-left: 1px solid var(--dsw-alias-border-l1);
   min-width: 0;
+  padding: 0 16px;
 }
-.tu-heat-stat:first-child { border-left: none; padding-left: 0; }
+.tu-heat-stat:first-child { padding-left: 0; }
+.tu-heat-stat:last-child { padding-right: 0; }
 .tu-heat-stat-value {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   font-variant-numeric: tabular-nums;

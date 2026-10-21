@@ -864,6 +864,22 @@ class TokenUsageTracker {
     return budget
   }
 
+  /**
+   * 单独记录一次调用的计时（TTFT / 解码时长）。
+   *
+   * 与 `record()` 分开：那条通路负责 token 用量、带完整去重；这条只管
+   * 性能指标，且可能被调用多次（同一会话的不同 step）。两者互不干扰。
+   */
+  recordTiming({ provider, model, ttftMs, decodeMs, outputTokens }) {
+    const timing = { ttftMs, decodeMs, outputTokens }
+    if (!Number.isFinite(timing.ttftMs) || !Number.isFinite(timing.decodeMs)) return
+    this.store.performance ??= { total: emptyTiming(), byModel: {} }
+    addTiming(this.store.performance.total, timing)
+    const key = `${provider ?? 'unknown'}/${model ?? 'unknown'}`
+    this.store.performance.byModel[key] ??= emptyTiming()
+    addTiming(this.store.performance.byModel[key], timing)
+  }
+
   record({
     sessionId, provider, model, turn, step, usage, time, purpose, parentSession,
     cwd, origin, delegationDepth, accountId, timing,
@@ -2059,49 +2075,13 @@ export function apply(ctx, rawConfig) {
 
   // —— 主通路：会话日志增量 ——
   // 覆盖所有 agent loop 调用，包括子代理 / teammate / workflow 子会话。
-  /**
-   * 每个 step 的计时：起点（step/start）与首个分片时间（首字节）。
-   *
-   * DSH 自己算 TTFT 就是这个口径：firstTokenTime - stepStartTime。
-   * 解码时长 = 完成时间 - 首片时间，输出速度 = outputTokens / 解码时长。
-   *
-   * 键是 `sessionId:turn:step`，用完即删，避免长会话累积内存。
-   */
-  const stepTiming = new Map()
-  const stepKey = (sessionId, data) => `${sessionId ?? ''}:${data?.turn ?? ''}:${data?.step ?? ''}`
-
   ctx.on('session/event', (session, event) => {
     try {
       const sessionId = session?.id
       const header = session?.header
-      // —— 计时采集：只需时间戳，不碰用量 ——
-      if (event?.type === 'step/start') {
-        stepTiming.set(stepKey(sessionId, event.data), { start: event.time })
-        return
-      }
-      if (event?.type === 'assistant/live-chunk') {
-        const key = stepKey(sessionId, event.data)
-        const entry = stepTiming.get(key)
-        // 只记第一个分片：它就是「首字」的时刻
-        if (entry !== undefined && entry.first === undefined) entry.first = event.time
-        return
-      }
       if (event?.type === 'assistant/message') {
         const data = event.data ?? {}
         const source = data.message?.source ?? {}
-        // 组装本次调用的计时；任一端缺失就整组放弃，不拿 0 冒充
-        const key = stepKey(sessionId, data)
-        const mark = stepTiming.get(key)
-        stepTiming.delete(key)
-        let timing
-        if (mark !== undefined && typeof mark.start === 'number'
-          && typeof mark.first === 'number' && typeof event.time === 'number') {
-          timing = {
-            ttftMs: Math.max(0, mark.first - mark.start),
-            decodeMs: Math.max(0, event.time - mark.first),
-            outputTokens: finite(data.usage?.outputTokens),
-          }
-        }
         tracker.record({
           sessionId,
           provider: source.provider,
@@ -2114,7 +2094,6 @@ export function apply(ctx, rawConfig) {
           cwd: header?.cwd,
           origin: sessionOrigin(header),
           delegationDepth: header?.delegationDepth,
-          timing,
         })
       } else if (event?.type === 'assistant/attempt') {
         // 失败重试的中间态：只记次数（以及上游真报了 token 时的用量）。
@@ -2142,20 +2121,66 @@ export function apply(ctx, rawConfig) {
     const model = options?.model
     const sessionId = options?.sessionId
     const purpose = options?.purpose
-    // 只在「日志不会记录」的情况下补记，避免与主通路重复。
+    // 只在「日志不会记录」的情况下补记用量，避免与主通路重复。
+    // 注意：**计时不受这个条件限制**——每条调用都要量首字与速度，
+    // 所以 tap 必须包住所有调用，不能在这里提前 return。
     const needsSupplement = purpose === 'compaction'
       || purpose === 'session-title'
       || sessionId === undefined
 
-    if (!needsSupplement) return inner
-
     return (async function* tap() {
+      /**
+       * 首字延迟与输出速度只能在这里量。
+       *
+       * `assistant/live-chunk` 是瞬时事件，不经 session/event 派发，
+       * 所以从事件流拿不到分片时间戳。`llm/stream` 是 waterfall，
+       * 每个 chunk 都在这里经过，且能就地取到精确时间。
+       *
+       *   TTFT = 首个内容 chunk 的时刻 - 请求发起时刻
+       *   TPS  = 输出 token / (最后一个内容 chunk 的时刻 - 首片时刻)
+       *
+       * 只统计文本/推理增量：`usage` 与 `finish` 是元数据 chunk，
+       * 它们的时刻不代表模型真的吐了字。
+       */
+      const startedAt = Date.now()
+      let firstChunkAt
+      let lastChunkAt
       let lastUsage
       for await (const chunk of inner) {
-        if (chunk?.type === 'usage' && chunk.usage !== undefined) lastUsage = chunk.usage
+        const type = chunk?.type
+        if (type === 'text-delta' || type === 'reasoning-delta' || type === 'tool-call-delta') {
+          const now = Date.now()
+          if (firstChunkAt === undefined) firstChunkAt = now
+          lastChunkAt = now
+        }
+        if (type === 'usage' && chunk.usage !== undefined) lastUsage = chunk.usage
         yield chunk
       }
+
+      // —— 计时写入：与用量分开记，因为补记通路本身不落 usage ——
+      if (firstChunkAt !== undefined && lastUsage !== undefined) {
+        const outputTokens = finite(lastUsage.outputTokens)
+        // 解码时长至少要有个下限，否则单 token 调用会算出天文数字
+        const decodeMs = Math.max(1, (lastChunkAt ?? firstChunkAt) - firstChunkAt)
+        if (outputTokens > 0) {
+          try {
+            tracker.recordTiming({
+              provider,
+              model,
+              ttftMs: firstChunkAt - startedAt,
+              decodeMs,
+              outputTokens,
+            })
+          } catch (error) {
+            logger?.warn?.(`token-metrics: 记录计时失败（${error?.message ?? error}）`)
+          }
+        }
+      }
+
+      // 累计输出 token，供每秒速度计算
+      if (needsSupplement && lastUsage === undefined) return
       if (lastUsage === undefined) return
+      if (!needsSupplement) return
       try {
         tracker.record({
           sessionId,
