@@ -989,11 +989,12 @@ window.__ModuleLoader__.load({
 .tu-root,
 .tu-modal-backdrop,
 .tu-toasts {
-  /* 蓝色阶：与 DSH 标志蓝 #4D6BFE 同源，逐档加深 */
-  --tu-heat-0: #eef1f8;
-  --tu-heat-1: #dbe2fd;
-  --tu-heat-2: #aebcfb;
-  --tu-heat-3: #7c92f9;
+  /* 蓝色阶：与 DSH 标志蓝 #4D6BFE 同源。
+     空格子取极淡的灰（不是淡蓝）——淡蓝会让人误以为「有一点数据」。 */
+  --tu-heat-0: #f0f1f4;
+  --tu-heat-1: #d6defb;
+  --tu-heat-2: #a8b8f8;
+  --tu-heat-3: #7b92f5;
   --tu-heat-4: #4d6bfe;
 }
 
@@ -1018,13 +1019,16 @@ body[data-ds-dark-theme] .tu-toasts,
   --tu-c5: #ab8bef;
   --tu-c6: #52d0d9;
   --tu-c7: #b6ab8e;
-  /* 深色：空格子比卡片底色略提一点，最高档用提亮后的标志蓝 ——
-     直接用 #4D6BFE 在暗背景上偏闷，提亮一档更清楚 */
-  --tu-heat-0: #1a1d24;
-  --tu-heat-1: #232a4a;
-  --tu-heat-2: #2f3d78;
-  --tu-heat-3: #3f54b8;
-  --tu-heat-4: #6b84ff;
+  /* 深色。三条原则：
+     ① 空格子几乎等于底色 —— 156 个格子同时出现时，稍亮一点就是
+        一片视觉噪音（之前比底色略亮一档就踩了这个坑）
+     ② 有数据的档位单调递增，跨度拉开，让人一眼分出「多/少」
+     ③ 最高档不取纯 #4D6BFE —— 它在暗底上偏闷，用略提亮的版本 */
+  --tu-heat-0: #171a20;
+  --tu-heat-1: #1f2a47;
+  --tu-heat-2: #2b3d70;
+  --tu-heat-3: #3a55a8;
+  --tu-heat-4: #5c7cff;
 }
 .tu-root {
   height: 100%;
@@ -2499,7 +2503,11 @@ body[data-ds-dark-theme] .tu-toasts,
   transition: transform 90ms ease;
 }
 .tu-heat-cell:hover { transform: scale(1.25); }
-.tu-heat-cell[data-level='0'] { background: var(--tu-heat-0); }
+/* 空格子：几乎融进底色，只留极淡的轮廓让人看出「这天没数据」 */
+.tu-heat-cell[data-level='0'] {
+  background: var(--tu-heat-0);
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l1);
+}
 .tu-heat-cell[data-level='1'] { background: var(--tu-heat-1); }
 .tu-heat-cell[data-level='2'] { background: var(--tu-heat-2); }
 .tu-heat-cell[data-level='3'] { background: var(--tu-heat-3); }
