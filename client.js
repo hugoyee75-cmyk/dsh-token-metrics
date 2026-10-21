@@ -194,6 +194,13 @@ window.__ModuleLoader__.load({
       'supplier.subtitle': '接入第三方中转站与官方平台：余额、可用模型，并同步到 DSH 模型配置',
       'supplier.add': '添加供应商',
       'supplier.added': '已添加',
+      'supplier.sectionBalance': '余额',
+      'supplier.sectionBalanceHint': '预充值、按量扣减的站点',
+      'supplier.sectionQuota': '限额用量',
+      'supplier.sectionQuotaHint': '订阅制，按 5h / 周 / 月窗口限流',
+      'supplier.sectionBothHint': '同时有余额与订阅额度',
+      'supplier.noBalance': '还没有可查余额的站点',
+      'supplier.noQuota': '还没有订阅制站点',
       'supplier.discovered': '可添加',
       'supplier.models': '个模型',
       'models.title': '可用模型',
@@ -600,6 +607,13 @@ window.__ModuleLoader__.load({
       'supplier.subtitle': 'Add relay stations and official platforms: balances, models, and DSH config sync',
       'supplier.add': 'Add supplier',
       'supplier.added': 'Added',
+      'supplier.sectionBalance': 'Balance',
+      'supplier.sectionBalanceHint': 'Prepaid sites that deduct by usage',
+      'supplier.sectionQuota': 'Quota usage',
+      'supplier.sectionQuotaHint': 'Subscription sites rate-limited by 5h / week / month windows',
+      'supplier.sectionBothHint': 'Has both balance and subscription quota',
+      'supplier.noBalance': 'No sites with a queryable balance yet',
+      'supplier.noQuota': 'No subscription sites yet',
       'supplier.discovered': 'Available',
       'supplier.models': 'models',
       'models.title': 'Available models',
@@ -1966,10 +1980,20 @@ window.__ModuleLoader__.load({
 .tu-page-sub { font-size: 12px; color: var(--dsw-alias-label-secondary); margin: 0; }
 .tu-page-actions { display: flex; gap: 8px; flex: none; }
 .tu-page-grouphead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   font-size: 12px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
   margin-bottom: 9px;
+}
+/* 分组说明：解释这一组是什么口径，避免「余额」与「限额」混为一谈 */
+.tu-group-hint {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  opacity: 0.75;
 }
 .tu-suplist { display: flex; flex-direction: column; gap: 10px; }
 .tu-supcard {
@@ -7144,6 +7168,38 @@ function formatMoneyText(value) {
         const discovered = (balanceState.discovered ?? [])
           .filter((entry) => !sites.some((site) => site.id === entry.id))
 
+          /**
+           * 已添加站点按**数据性质**分成两组：
+           *   - 余额：能查账户余额的（预充值、按量扣减）
+           *   - 限额用量：订阅制，按 5h / 周 / 月窗口限流
+           *
+           * 两者都支持的站点两边都出现——用户想看哪种数据就翻哪组，
+           * 不必先记住「这个站点属于哪类」。
+           *
+           * 分类判据与卡片上的标签一致：有配额窗口、平台本身是订阅制、
+           * 或明确回报「无订阅」都算限额型。
+           */
+          const classifySite = (site) => {
+            const balance = site.lastBalance
+            const quotas = Array.isArray(balance?.quotas) ? balance.quotas : []
+            const provider = balance?.provider ?? site.provider
+            const looksQuota = quotas.length > 0
+              || site.noPlan === true
+              || (provider !== undefined && QUOTA_PLATFORMS.has(provider))
+            // 有数值余额才算余额型；报错的站点两边都不进，避免把「查不到」
+            // 当成「没有」
+            const hasBalance = typeof balance?.usd === 'number'
+            return { hasBalance, looksQuota }
+          }
+          const balanceSites = sites.filter((site) => classifySite(site).hasBalance)
+          const quotaSites = sites.filter((site) => classifySite(site).looksQuota)
+          // 两类都不属于的站点（例如刚添加还没查过）：仍要出现在「已添加」里，
+          // 否则用户加完就找不到它了。
+          const otherSites = sites.filter((site) => {
+            const c = classifySite(site)
+            return !c.hasBalance && !c.looksQuota
+          })
+
         /** 一张供应商卡片。 */
         /** 一张供应商卡片：左侧信息，右侧余额/配额，最右操作按钮。 */
         const card = (site) => {
@@ -7157,7 +7213,7 @@ function formatMoneyText(value) {
             ? `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
           const modelCount = Array.isArray(site.models) ? site.models.length : 0
           const hasQuota = quotas.length > 0
-          const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex'])
+          const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo'])
           // 订阅型判定：有配额数据、或平台本身是订阅制、或明确回报「无订阅」。
           // 最后一条很关键：GLM 没订阅时也属于订阅平台，按钮该说「刷新用量」
           // 而不是「查询余额」。
@@ -7322,13 +7378,44 @@ function formatMoneyText(value) {
             }, supplierNotice.text),
 
           // 已添加
-          h('div', { className: 'tu-page-group' },
-            h('div', { className: 'tu-page-grouphead' },
-              `${t('supplier.added')} · ${sites.length}`),
-            sites.length === 0
-              ? h('p', { className: 'tu-hint' }, t('supplier.empty'))
-              : h('div', { className: 'tu-suplist' }, ...sites.map(card)),
-          ),
+          sites.length === 0
+            ? h('div', { className: 'tu-page-group' },
+              h('div', { className: 'tu-page-grouphead' },
+                `${t('supplier.added')} · 0`),
+              h('p', { className: 'tu-hint' }, t('supplier.empty')),
+            )
+            : null,
+
+          // —— 余额分组 ——
+          balanceSites.length === 0
+            ? null
+            : h('div', { className: 'tu-page-group' },
+              h('div', { className: 'tu-page-grouphead' },
+                h('span', null, `${t('supplier.sectionBalance')} · ${balanceSites.length}`),
+                h('span', { className: 'tu-group-hint' }, t('supplier.sectionBalanceHint')),
+              ),
+              h('div', { className: 'tu-suplist' }, ...balanceSites.map(card)),
+            ),
+
+          // —— 限额用量分组 ——
+          quotaSites.length === 0
+            ? null
+            : h('div', { className: 'tu-page-group' },
+              h('div', { className: 'tu-page-grouphead' },
+                h('span', null, `${t('supplier.sectionQuota')} · ${quotaSites.length}`),
+                h('span', { className: 'tu-group-hint' }, t('supplier.sectionQuotaHint')),
+              ),
+              h('div', { className: 'tu-suplist' }, ...quotaSites.map(card)),
+            ),
+
+          // —— 尚未查询 / 两类都判不出的站点 ——
+          otherSites.length === 0
+            ? null
+            : h('div', { className: 'tu-page-group' },
+              h('div', { className: 'tu-page-grouphead' },
+                `${t('supplier.added')} · ${otherSites.length}`),
+              h('div', { className: 'tu-suplist' }, ...otherSites.map(card)),
+            ),
 
           // 可添加（从 DSH 配置自动发现）
           discovered.length === 0
