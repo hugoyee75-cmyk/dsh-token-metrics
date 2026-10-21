@@ -171,7 +171,7 @@ window.__ModuleLoader__.load({
       'budget.emptyModels': '还没有可选的模型',
       'budget.noGroups': '还没有分组。给某几个模型单独设额度时再添加。',
       'heat.title': '活动热力图',
-      'heat.subtitle': '过去 8 周每天用了多少，颜色越深用得越多',
+      'heat.subtitle': '过去 {n} 周每天用了多少，颜色越深用得越多',
       'heat.less': '少',
       'heat.more': '多',
       'heat.click': '点击某天可筛选当天数据',
@@ -572,7 +572,7 @@ window.__ModuleLoader__.load({
       'budget.emptyModels': 'No models available yet',
       'budget.noGroups': 'No groups yet. Add one to budget specific models separately.',
       'heat.title': 'Activity heatmap',
-      'heat.subtitle': 'Daily usage over the last 8 weeks; darker means more',
+      'heat.subtitle': 'Daily usage over the last {n} weeks; darker means more',
       'heat.less': 'less',
       'heat.more': 'more',
       'heat.click': 'Click a day to filter to it',
@@ -2330,24 +2330,26 @@ window.__ModuleLoader__.load({
   margin-bottom: 14px;
   flex-wrap: wrap;
 }
-/* 两栏：左热力图，右 KPI 条。KPI 均分剩余宽度并加分隔线，
-   避免之前「数字沉底、中间大片空白」的失衡。 */
+/* 两栏：左热力图，右 KPI 统计条。
+   KPI 均分剩余宽度并各自居中——这样右侧不是「三个数字飘在空白里」，
+   而是一条完整的统计带。分隔线用短的（36px 高、垂直居中），
+   而不是贯穿整行的高度。 */
 .tu-heat-body {
   display: flex;
   align-items: center;
-  gap: 36px;
+  gap: 24px;
   flex-wrap: wrap;
 }
 .tu-heat-main { flex: none; }
-/* 月份与格子共用同一套 8 列网格，标签自然对齐到对应周 */
+/* 月份与格子共用同一套列宽，标签自然对齐到对应周 */
 .tu-heat-months,
 .tu-heat-grid {
   display: grid;
-  grid-template-columns: repeat(8, 11px);
+  grid-template-columns: repeat(var(--tu-heat-weeks, 8), 13px);
   gap: 3px;
 }
 .tu-heat-grid {
-  grid-template-rows: repeat(7, 11px);
+  grid-template-rows: repeat(7, 13px);
   grid-auto-flow: column;
 }
 .tu-heat-months { margin-bottom: 5px; }
@@ -2357,32 +2359,48 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
-/* KPI 条：等分剩余宽度 */
+/* KPI 统计带：每项等分，内容居中 */
 .tu-heat-summary {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 0;
+  align-items: stretch;
+  /* 淡背景 + 圆角：让它读成一块「统计面板」，而不是几个数字浮在空白里 */
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  padding: 12px 8px;
 }
 .tu-heat-stat {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+  flex: 1 1 0;
   min-width: 0;
-  padding: 0 16px;
-  border-left: 1px solid var(--dsw-alias-border-l1);
+  padding: 0 12px;
 }
-.tu-heat-stat:first-child { border-left: none; }
+/* 短分隔线：只占 36px 高并垂直居中，避免贯穿整行的长竖线 */
+.tu-heat-stat + .tu-heat-stat::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 34px;
+  background: var(--dsw-alias-border-l1);
+  opacity: 0.8;
+}
 .tu-heat-stat-label {
   font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
 .tu-heat-stat-value {
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   font-variant-numeric: tabular-nums;
@@ -2403,8 +2421,8 @@ window.__ModuleLoader__.load({
 }
 .tu-heat-cell {
   appearance: none;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   padding: 0;
   border: none;
   border-radius: 2.5px;
@@ -2430,8 +2448,8 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 .tu-heat-dot {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 2px;
   background: var(--dsw-alias-bg-layer-2);
 }
@@ -3976,15 +3994,24 @@ function formatMoneyText(value) {
      */
     function ActivityHeatmap({ byDay, t, onPickDay, activeDay, summary }) {
       const WEEK = 7
-      const WEEKS = 8
       const days = Object.keys(byDay ?? {}).sort()
+      // 周数按数据实际跨度决定，夹在 [8, 26]。
+      // 固定 26 周对刚开始用的用户会显示大片空白；固定 8 周又装不下
+      // 用了一年的用户。自适应两头都照顾到。
+      const WEEKS = (() => {
+        if (days.length === 0) return 8
+        const first = new Date(`${days[0]}T00:00:00`)
+        const lastDay = new Date(`${days[days.length - 1]}T00:00:00`)
+        const spanWeeks = Math.ceil((lastDay - first) / (7 * 86_400_000)) + 1
+        return Math.max(8, Math.min(26, spanWeeks))
+      })()
 
       /** 月份标签：只在对齐月份第一周时显示，避免堆满。 */
       const monthLabel = (date) => `${date.getMonth() + 1}月`
 
       const head = h('div', { className: 'tu-heat-head' },
         h('span', { className: 'tu-heat-title' }, t('heat.title')),
-        h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
+        h('span', { className: 'tu-heat-sub' }, t('heat.subtitle').replace('{n}', String(WEEKS))),
       )
 
       if (days.length === 0) {
@@ -3992,12 +4019,17 @@ function formatMoneyText(value) {
           h('p', { className: 'tu-chart-empty' }, t('chart.empty')))
       }
 
-      // 从最后一天往回推 8 周（56 天）。缺的天补 0 —— 空白也要占位，
-      // 否则格子会挤在一起，看不出时间跨度。
+      // 网格对齐到「周」：每一列必须是从周日开始的连续 7 天，
+      // 否则行不对应固定星期（第 1 行有时是周三、有时是周六），
+      // 热力图就失去了「每周节奏」这个最重要的读法。
+      //
+      // 做法：先算出窗口起点，再回退到它所在周的周日。
       const last = days[days.length - 1]
       const lastDate = new Date(`${last}T00:00:00`)
       const start = new Date(lastDate)
       start.setDate(start.getDate() - (WEEKS * WEEK - 1))
+      // getDay(): 0=周日。回退到本周周日
+      start.setDate(start.getDate() - start.getDay())
 
       const cells = []
       const cursor = new Date(start)
@@ -4030,23 +4062,30 @@ function formatMoneyText(value) {
 
       return h('div', { className: 'tu-heat' },
         head,
-        h('div', { className: 'tu-heat-body' },
+        h('div', {
+          className: 'tu-heat-body',
+          // 列数随数据跨度变化，CSS 用它算网格列宽
+          style: { '--tu-heat-weeks': String(WEEKS) },
+        },
           // —— 左：热力图本体（含月份标签）——
           h('div', { className: 'tu-heat-main' },
             h('div', { className: 'tu-heat-months' },
               // 月份标签按「周列」定位：同一个月只在它第一次出现的周上标一次。
               // 早先在每个周首都标，一个月跨 4 周就会显示 4 次「9月」。
               ...(() => {
-                const seen = new Set()
                 const labels = []
+                let lastColumn = -99
                 cells.forEach((c, index) => {
-                  if (!c.isWeekStart || seen.has(c.month)) return
-                  seen.add(c.month)
+                  if (!c.isWeekStart) return
+                  const column = Math.floor(index / WEEK) + 1
+                  // 与上一个标签至少隔 2 列再标：窗口跨月时「8月9月」会挤在
+                  // 相邻两列上互相重叠，宁可少标一个也不要叠字。
+                  if (column - lastColumn < 2) return
+                  lastColumn = column
                   labels.push(h('span', {
                     key: c.key,
                     className: 'tu-heat-month',
-                    // 定位到第几周列（1-based）
-                    style: { gridColumn: String(Math.floor(index / WEEK) + 1) },
+                    style: { gridColumn: String(column) },
                   }, monthLabel(c.date)))
                 })
                 return labels
