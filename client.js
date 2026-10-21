@@ -78,6 +78,11 @@ window.__ModuleLoader__.load({
     { id: 'qwen', label: '阿里百炼（通义千问）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-completions', balance: 'no', keyHint: '无公开余额接口，请到百炼控制台查看' },
     { id: 'volcano', label: '火山方舟（豆包）', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', api: 'openai-completions', balance: 'yes', keyHint: '余额走 /api/v3/billing/balance' },
     { id: 'qianfan', label: '百度千帆', baseUrl: 'https://qianfan.baidubce.com/v2', api: 'openai-completions', balance: 'no' },
+    // 小米 MiMo：地址取自 pi-ai 的官方目录（api.xiaomimimo.com 实测 401 存在）。
+    // 余额接口实测全是 404，没有公开端点，所以标为不可查。
+    { id: 'mimo', label: '小米 MiMo', baseUrl: 'https://api.xiaomimimo.com/v1', api: 'openai-completions', balance: 'no', keyHint: '无公开余额接口' },
+    // MiMo Token Plan（订阅制）：独立域名，同样是 OpenAI 兼容协议
+    { id: 'mimo-plan', label: '小米 MiMo Token Plan', baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1', api: 'openai-completions', balance: 'no', plan: true, keyHint: '订阅制；额度请在 MiMo 控制台查看' },
     { id: 'hunyuan', label: '腾讯混元', baseUrl: 'https://hunyuan.tencentcloudapi.com/v1', api: 'openai-completions', balance: 'no' },
     { id: 'baichuan', label: '百川智能', baseUrl: 'https://api.baichuan-ai.com/v1', api: 'openai-completions', balance: 'no' },
     { id: 'stepfun', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', balance: 'yes' },

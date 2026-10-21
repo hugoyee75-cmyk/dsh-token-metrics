@@ -36,6 +36,9 @@ const HOST_PATTERNS = [
   { id: 'volcano', test: /(^|\.)ark\.cn-beijing\.volces\.com$/ },
   // 阿里百炼（通义千问）：官方没有公开的余额接口，只识别以便给出准确说明
   { id: 'qwen', test: /(^|\.)dashscope(-intl)?\.aliyuncs\.com$/ },
+  // 小米 MiMo：api 与 token-plan 两个域名。余额接口实测全部 404，
+  // 识别它们是为了给出准确提示，而不是让用户对着 404 猜。
+  { id: 'mimo', test: /(^|\.)(api|token-plan-cn)\.xiaomimimo\.com$/ },
   { id: 'anthropic', test: /(^|\.)api\.anthropic\.com$/ },
   { id: 'openai', test: /(^|\.)api\.openai\.com$/ },
   // 下面两个能识别但**不支持查询**，识别它们只是为了给出准确说明，
@@ -77,6 +80,7 @@ export const PROVIDER_LABELS = {
   stepfun: '阶跃星辰',
   volcano: '火山方舟（豆包）',
   qwen: '阿里百炼（通义千问）',
+  mimo: '小米 MiMo',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   codex: 'ChatGPT (Codex)',
@@ -643,6 +647,7 @@ async function probeOpenai({ baseUrl, apiKey, fetchImpl }) {
 const UNSUPPORTED_REASONS = {
   // 阿里百炼没有公开的余额接口：控制台里的额度只在网页端可见
   qwen: '阿里百炼没有公开的余额查询接口，请到百炼控制台查看',
+  mimo: '小米 MiMo 没有公开的余额查询接口（实测各候选端点均 404），请到 MiMo 控制台查看',
   codex: 'ChatGPT 订阅额度绑定在账号登录态上，API key 无法查询。请在 ChatGPT 官网查看用量。',
   gemini: 'Google 未提供公开的配额查询接口，API key 无法查询余额。',
 }

@@ -82,6 +82,19 @@ check('有展示名', PROVIDER_LABELS.deepseek, 'DeepSeek')
   checkTrue('百炼说明原因', String(qwen.error).includes('控制台'), String(qwen.error))
   check('百炼不发请求', qwenCalled, false)
 
+  // 小米 MiMo：能识别两个域名，但没有公开余额接口 -> 不发请求
+  check('识别 MiMo API', detectProvider('https://api.xiaomimimo.com/v1'), 'mimo')
+  check('识别 MiMo Token Plan', detectProvider('https://token-plan-cn.xiaomimimo.com/v1'), 'mimo')
+  let mimoCalled = false
+  const mimo = await probeOfficial({
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    apiKey: 'k',
+    fetchImpl: async () => { mimoCalled = true; return { ok: false, status: 404 } },
+  })
+  check('MiMo 标记为不支持', mimo.unsupported, true)
+  checkTrue('MiMo 说明原因', String(mimo.error).includes('控制台'), String(mimo.error))
+  check('MiMo 不发请求', mimoCalled, false)
+
   // Kimi：没有 Coding Plan 配额时回退查余额
   const kimiFallback = await probeOfficial({
     baseUrl: 'https://api.kimi.com',
