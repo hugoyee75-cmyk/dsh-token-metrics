@@ -399,6 +399,33 @@ function storePath(home) {
 }
 
 /** 空的用量计数器。 */
+/**
+ * 空的性能计数器（TTFT / 解码时长）。
+ *
+ * 单独存一份而不是塞进 emptyCounters：性能数据只在实时事件里有，
+ * 回扫日志拿不到，混进主计数器会让历史数据的均值失真。
+ */
+function emptyTiming() {
+  return { ttftMsSum: 0, ttftCount: 0, decodeMsSum: 0, outputTokens: 0 }
+}
+
+/** 把一次调用的计时累加进目标。缺值的项跳过，不当 0 算。 */
+function addTiming(target, timing) {
+  if (timing === undefined || timing === null) return
+  const ttft = finite(timing.ttftMs)
+  const decode = finite(timing.decodeMs)
+  const output = finite(timing.outputTokens)
+  // TTFT 为 0 通常表示「没记录到首个分片」，不是「瞬间出字」，不计入均值
+  if (ttft > 0) {
+    target.ttftMsSum += ttft
+    target.ttftCount += 1
+  }
+  if (decode > 0) {
+    target.decodeMsSum += decode
+    target.outputTokens += output
+  }
+}
+
 function emptyCounters() {
   return {
     calls: 0,
@@ -512,6 +539,12 @@ function emptyStore(buildId) {
      */
     byModelPeak: {},
     /**
+     * 性能数据：首字延迟（TTFT）与解码时长，用于算平均首字和输出速度。
+     *
+     * 只从实时事件累计——会话日志里没有分片级时间戳，回扫补不回来。
+     */
+    performance: { total: emptyTiming(), byModel: {} },
+    /**
      * 数据结构版本号，见 loadStore 里的说明。
      *
      * 全新库直接标为当前版本：没有历史数据要迁移，不该触发重建。
@@ -603,6 +636,10 @@ function loadStore(logger, home) {
       byDayFacets: parsed.byDayFacets ?? {},
       byDayPeak: parsed.byDayPeak ?? {},
       byModelPeak: parsed.byModelPeak ?? {},
+      performance: {
+        total: { ...emptyTiming(), ...(parsed.performance?.total ?? {}) },
+        byModel: parsed.performance?.byModel ?? {},
+      },
       /**
        * 数据结构版本号。新增分桶结构时递增，回扫完成后写入。
        *
@@ -829,7 +866,7 @@ class TokenUsageTracker {
 
   record({
     sessionId, provider, model, turn, step, usage, time, purpose, parentSession,
-    cwd, origin, delegationDepth, accountId,
+    cwd, origin, delegationDepth, accountId, timing,
   }) {
     if (usage === undefined || usage === null) return false
     const stamp = typeof time === 'number' && Number.isFinite(time) ? time : Date.now()
@@ -853,6 +890,14 @@ class TokenUsageTracker {
     const modelKey = `${providerKey}/${model || 'unknown'}`
     this.store.byModel[modelKey] ??= emptyCounters()
     addUsage(this.store.byModel[modelKey], usage)
+
+    // 性能数据：只在实时事件里带了 timing 时累计
+    if (timing !== undefined && timing !== null) {
+      this.store.performance ??= { total: emptyTiming(), byModel: {} }
+      addTiming(this.store.performance.total, timing)
+      this.store.performance.byModel[modelKey] ??= emptyTiming()
+      addTiming(this.store.performance.byModel[modelKey], timing)
+    }
 
     // 峰谷用量分桶：DeepSeek 系分时段计价，谷时价是峰时的一半。
     // 只对「有谷时价的模型」记录，其余模型不需要这份数据，
@@ -1424,6 +1469,32 @@ class TokenUsageTracker {
        * 而不是只有指标卡跟着变。
        */
       /**
+       * 性能指标：平均首字延迟（TTFT）与输出速度（TPS）。
+       *
+       * 从实时事件的 step/start、首个 assistant/live-chunk、
+       * assistant/message 三个时间戳算出，与 DSH 自带统计口径一致。
+       * 会话日志没有分片时间戳，所以回扫补不出来——历史数据缺失时
+       * 这两项为 null，页面显示「—」而不是假的 0。
+       */
+      performance: (() => {
+        const perf = this.store.performance ?? { total: emptyTiming(), byModel: {} }
+        const summarize = (entry) => {
+          const timing = entry ?? emptyTiming()
+          return {
+            // 平均首字延迟（毫秒）
+            ttftMs: timing.ttftCount > 0 ? timing.ttftMsSum / timing.ttftCount : null,
+            // 输出速度（token/秒）：总输出 token / 总解码秒数
+            tps: timing.decodeMsSum > 0 ? timing.outputTokens / (timing.decodeMsSum / 1000) : null,
+            samples: timing.ttftCount,
+          }
+        }
+        const byModel = {}
+        for (const [key, entry] of Object.entries(perf.byModel ?? {})) {
+          byModel[key] = summarize(entry)
+        }
+        return { total: summarize(perf.total), byModel }
+      })(),
+      /**
        * day -> 各维度 -> counters。前端按时间段重算明细表与图表。
        */
       byDayFacets: this.store.byDayFacets,
@@ -1988,13 +2059,49 @@ export function apply(ctx, rawConfig) {
 
   // —— 主通路：会话日志增量 ——
   // 覆盖所有 agent loop 调用，包括子代理 / teammate / workflow 子会话。
+  /**
+   * 每个 step 的计时：起点（step/start）与首个分片时间（首字节）。
+   *
+   * DSH 自己算 TTFT 就是这个口径：firstTokenTime - stepStartTime。
+   * 解码时长 = 完成时间 - 首片时间，输出速度 = outputTokens / 解码时长。
+   *
+   * 键是 `sessionId:turn:step`，用完即删，避免长会话累积内存。
+   */
+  const stepTiming = new Map()
+  const stepKey = (sessionId, data) => `${sessionId ?? ''}:${data?.turn ?? ''}:${data?.step ?? ''}`
+
   ctx.on('session/event', (session, event) => {
     try {
       const sessionId = session?.id
       const header = session?.header
+      // —— 计时采集：只需时间戳，不碰用量 ——
+      if (event?.type === 'step/start') {
+        stepTiming.set(stepKey(sessionId, event.data), { start: event.time })
+        return
+      }
+      if (event?.type === 'assistant/live-chunk') {
+        const key = stepKey(sessionId, event.data)
+        const entry = stepTiming.get(key)
+        // 只记第一个分片：它就是「首字」的时刻
+        if (entry !== undefined && entry.first === undefined) entry.first = event.time
+        return
+      }
       if (event?.type === 'assistant/message') {
         const data = event.data ?? {}
         const source = data.message?.source ?? {}
+        // 组装本次调用的计时；任一端缺失就整组放弃，不拿 0 冒充
+        const key = stepKey(sessionId, data)
+        const mark = stepTiming.get(key)
+        stepTiming.delete(key)
+        let timing
+        if (mark !== undefined && typeof mark.start === 'number'
+          && typeof mark.first === 'number' && typeof event.time === 'number') {
+          timing = {
+            ttftMs: Math.max(0, mark.first - mark.start),
+            decodeMs: Math.max(0, event.time - mark.first),
+            outputTokens: finite(data.usage?.outputTokens),
+          }
+        }
         tracker.record({
           sessionId,
           provider: source.provider,
@@ -2007,6 +2114,7 @@ export function apply(ctx, rawConfig) {
           cwd: header?.cwd,
           origin: sessionOrigin(header),
           delegationDepth: header?.delegationDepth,
+          timing,
         })
       } else if (event?.type === 'assistant/attempt') {
         // 失败重试的中间态：只记次数（以及上游真报了 token 时的用量）。

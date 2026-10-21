@@ -179,6 +179,8 @@ window.__ModuleLoader__.load({
       'heat.days': '活跃天数',
       'heat.average': '日均',
       'heat.peak': '单日峰值',
+      'heat.ttft': '首字延迟',
+      'heat.tps': '输出速度',
       'balance.title': '供应商余额',
       'view.stats': '统计',
       'view.suppliers': '模型接入',
@@ -580,6 +582,8 @@ window.__ModuleLoader__.load({
       'heat.days': 'Active days',
       'heat.average': 'Daily avg',
       'heat.peak': 'Peak day',
+      'heat.ttft': 'First token',
+      'heat.tps': 'Output speed',
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
       'view.suppliers': 'Model Access',
@@ -5820,6 +5824,12 @@ function formatMoneyText(value) {
        *
        * 点击某天会切到「按日期」明细并定位到那天——比只看颜色更有用。
        */
+      /** 毫秒 -> 可读时长：<1s 用 ms，否则用 s。 */
+      const formatDuration = (ms) => {
+        if (!Number.isFinite(ms) || ms <= 0) return '—'
+        return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
+      }
+
       /**
        * 热力图右侧的关键数字。
        *
@@ -5854,6 +5864,21 @@ function formatMoneyText(value) {
         ]
         // 预算放在这里而不是成本卡片里：卡片高度一致，且这排本来就是
         // 「当期关键数字」——预算正是当期最该看的那个。
+        // 性能指标：来自实时事件时间戳。历史数据没有分片时间戳，
+        // 回扫补不出来，所以可能为 null —— 显示「—」而不是假 0。
+        const perf = data?.performance?.total
+        if (perf !== undefined && perf !== null) {
+          items.push({
+            label: t('heat.ttft'),
+            value: formatDuration(perf.ttftMs),
+          })
+          items.push({
+            label: t('heat.tps'),
+            value: Number.isFinite(perf.tps) && perf.tps > 0
+              ? `${Math.round(perf.tps)} tok/s`
+              : '—',
+          })
+        }
         if (budgetInfo !== undefined) {
           items.push({
             label: budgetInfo.label,
