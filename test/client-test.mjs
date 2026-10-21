@@ -141,6 +141,14 @@ globalThis.fetch = async () => ({
       },
       providerKinds: { 'official-route': 'apikey', 'balance-route': 'balance' },
       modelAliases: { qfmodel: 'deepseek-v4.1-flash' },
+      // 性能指标：回归点是「formatDuration 先用后声明」导致白屏，
+      // 而组件测试在 data 为空时那行代码根本执行不到 —— 必须带真实数据。
+      performance: {
+        total: { ttftMs: 245.4, tps: 38.6, samples: 10 },
+        byModel: {
+          'workbuddy/deepseek-v4.1-flash': { ttftMs: 189.2, tps: 52.1, samples: 6 },
+        },
+      },
       byModel: { 'workbuddy/deepseek-v4.1-flash': { calls: 12, inputTokens: 3400, outputTokens: 900, totalTokens: 5500 } },
       byModelName: {
         'deepseek-v4.1-flash': { calls: 9, inputTokens: 2400, outputTokens: 600, totalTokens: 4000, cacheHitRate: 0.3 },

@@ -395,6 +395,7 @@ window.__ModuleLoader__.load({
       'field.output': '输出',
       'field.cacheRead': '缓存读',
       'field.cacheWrite': '缓存写',
+      'field.avgTtft': '平均首字',
       'field.reasoning': '推理',
       'field.calls': '调用次数',
       'section.byModel': '按模型',
@@ -800,6 +801,7 @@ window.__ModuleLoader__.load({
       'field.output': 'Output',
       'field.cacheRead': 'Cache read',
       'field.cacheWrite': 'Cache write',
+      'field.avgTtft': 'Avg TTFT',
       'field.reasoning': 'Reasoning',
       'field.calls': 'Calls',
       'section.byModel': 'By model',
@@ -3511,15 +3513,26 @@ function formatMoneyText(value) {
     //#region 视图
 
     /** 一张指标卡。`suffix` 用于百分比，`rate` 给它一个强调色。 */
-    function MetricCard({ label, value, accent, rate, suffix }) {
-      const text = suffix === undefined ? formatCompact(value) : `${value}${suffix}`
+    /**
+     * 指标卡。
+     *
+     * `raw: true` 表示 value 已经是格式化好的文本（如 `245ms`），
+     * 直接显示，不再过 formatCompact —— 否则字符串会被当成 0。
+     */
+    function MetricCard({ label, value, accent, rate, suffix, raw }) {
+      const text = raw === true
+        ? String(value)
+        : suffix === undefined ? formatCompact(value) : `${value}${suffix}`
       return h('div', {
         className: 'tu-card',
         'data-accent': accent === true ? 'true' : 'false',
         'data-rate': rate === true ? 'true' : 'false',
       },
       h('div', { className: 'tu-card-label' }, label),
-      h('div', { className: 'tu-card-value', title: formatNumber(value) }, text),
+      h('div', {
+        className: 'tu-card-value',
+        title: raw === true ? undefined : formatNumber(value),
+      }, text),
       )
     }
 
@@ -5027,6 +5040,12 @@ function formatMoneyText(value) {
       }
 
 
+      /** 毫秒 -> 可读时长：<1s 用 ms，否则用 s。 */
+      const formatDuration = (ms) => {
+        if (!Number.isFinite(ms) || ms <= 0) return '—'
+        return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
+      }
+
       const modelRows = useMemo(() => {
         if (data === undefined) return []
         // 时间段内按 provider/model 重新汇总。范围是「全部」时直接用 Host 的
@@ -5593,6 +5612,20 @@ function formatMoneyText(value) {
           : null,
       )
 
+      /**
+       * 平均首字延迟。没有采样时返回 undefined，卡片显示「—」。
+       *
+       * 只从实时事件累计，历史数据补不出来——所以值很可能比调用次数少，
+       * 这是预期行为，不是 bug。
+       */
+      const ttftAverage = (() => {
+        const perf = data?.performance?.total
+        if (perf === undefined || perf === null || perf.ttftMs === null) return undefined
+        const ms = perf.ttftMs
+        if (!Number.isFinite(ms) || ms <= 0) return undefined
+        return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
+      })()
+
       const cards = h('div', { className: 'tu-cards' },
         h(MetricCard, { label: t('field.total'), value: totals?.totalTokens ?? 0, accent: true }),
         // 成本卡片：整张卡可点，点击在 USD / RMB 之间切换。
@@ -5624,7 +5657,15 @@ function formatMoneyText(value) {
         h(MetricCard, { label: t('field.input'), value: totals?.inputTokens ?? 0 }),
         h(MetricCard, { label: t('field.output'), value: totals?.outputTokens ?? 0 }),
         h(MetricCard, { label: t('field.cacheRead'), value: totals?.cacheReadTokens ?? 0 }),
-        h(MetricCard, { label: t('field.cacheWrite'), value: totals?.cacheWriteTokens ?? 0 }),
+        // 「缓存写」换成「平均首字」：
+        // DeepSeek 的计费只有「缓存命中 / 未命中」两档，没有独立的缓存写，
+        // 各 provider 也都不上报 cacheWriteTokens —— 那个卡片恒为 0，
+        // 占着位置没有信息量。首字延迟才是真正关心调用质量的指标。
+        h(MetricCard, {
+          label: t('field.avgTtft'),
+          value: ttftAverage ?? '—',
+          raw: true,
+        }),
         h(MetricCard, { label: t('field.reasoning'), value: totals?.reasoningTokens ?? 0 }),
         h(MetricCard, { label: t('field.calls'), value: totals?.calls ?? 0 }),
       )
@@ -5847,12 +5888,6 @@ function formatMoneyText(value) {
        *
        * 点击某天会切到「按日期」明细并定位到那天——比只看颜色更有用。
        */
-      /** 毫秒 -> 可读时长：<1s 用 ms，否则用 s。 */
-      const formatDuration = (ms) => {
-        if (!Number.isFinite(ms) || ms <= 0) return '—'
-        return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
-      }
-
       /**
        * 热力图右侧的关键数字。
        *
@@ -5889,12 +5924,10 @@ function formatMoneyText(value) {
         // 「当期关键数字」——预算正是当期最该看的那个。
         // 性能指标：来自实时事件时间戳。历史数据没有分片时间戳，
         // 回扫补不出来，所以可能为 null —— 显示「—」而不是假 0。
+        // 只放输出速度：平均首字已经提到上面的指标卡区了，
+        // 两处都显示同一个数字是冗余。
         const perf = data?.performance?.total
         if (perf !== undefined && perf !== null) {
-          items.push({
-            label: t('heat.ttft'),
-            value: formatDuration(perf.ttftMs),
-          })
           items.push({
             label: t('heat.tps'),
             value: Number.isFinite(perf.tps) && perf.tps > 0
