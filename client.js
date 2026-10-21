@@ -171,7 +171,7 @@ window.__ModuleLoader__.load({
       'budget.emptyModels': '还没有可选的模型',
       'budget.noGroups': '还没有分组。给某几个模型单独设额度时再添加。',
       'heat.title': '活动热力图',
-      'heat.subtitle': '过去 {n} 周每天用了多少，颜色越深用得越多',
+      'heat.subtitle': '过去一年每天用了多少，颜色越深用得越多',
       'heat.less': '少',
       'heat.more': '多',
       'heat.click': '点击某天可筛选当天数据',
@@ -572,7 +572,7 @@ window.__ModuleLoader__.load({
       'budget.emptyModels': 'No models available yet',
       'budget.noGroups': 'No groups yet. Add one to budget specific models separately.',
       'heat.title': 'Activity heatmap',
-      'heat.subtitle': 'Daily usage over the last {n} weeks; darker means more',
+      'heat.subtitle': 'Daily usage over the past year; darker means more',
       'heat.less': 'less',
       'heat.more': 'more',
       'heat.click': 'Click a day to filter to it',
@@ -2332,24 +2332,33 @@ window.__ModuleLoader__.load({
   display: flex;
   flex-direction: column;
   gap: 6px;
-  align-items: flex-start;
+  width: 100%;
+  align-items: center;
 }
 /* 月份与格子共用同一套列宽，标签自然对齐到对应周 */
 .tu-heat-months,
 .tu-heat-grid {
   display: grid;
-  grid-template-columns: repeat(var(--tu-heat-weeks, 8), 14px);
+  /* 列宽用 1fr 均分容器宽度；配合格子的 aspect-ratio: 1，
+     格子始终是正方形并铺满整行——这是「热力图永远填满卡片」的关键。 */
+  grid-template-columns: repeat(var(--tu-heat-weeks, 53), minmax(0, 1fr));
   gap: 3px;
+  width: 100%;
+  max-width: var(--tu-heat-maxw, 100%);
+  margin: 0 auto;
 }
 .tu-heat-grid {
-  grid-template-rows: repeat(7, 14px);
   grid-auto-flow: column;
+  grid-template-rows: repeat(7, auto);
 }
 .tu-heat-month {
   font-size: 9.5px;
   line-height: 1;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
+  /* 1fr 列可能在标签多的月份被压窄，允许溢出到右侧空白而不是撑列 */
+  overflow: visible;
+  min-width: 0;
 }
 /* 三个关键数字：横排一行，紧跟图例 */
 .tu-heat-summary {
@@ -2395,11 +2404,13 @@ window.__ModuleLoader__.load({
 }
 .tu-heat-cell {
   appearance: none;
-  width: 13px;
-  height: 13px;
+  /* 宽度由 grid 的 1fr 决定，aspect-ratio 保证正方形；
+     不再写死 13px，否则在宽卡片里格子会缩成一小撮。 */
+  width: 100%;
+  aspect-ratio: 1;
   padding: 0;
   border: none;
-  border-radius: 2.5px;
+  border-radius: 2px;
   cursor: pointer;
   background: var(--dsw-alias-bg-layer-2);
   transition: transform 90ms ease;
@@ -2992,16 +3003,6 @@ window.__ModuleLoader__.load({
   min-height: 26px;
 }
 /* 图表与饼图都撑满各自单元格，配合网格的等高拉伸实现上下对齐 */
-/* 右列：环形图 + 热力图竖排 */
-.tu-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-.tu-stack > .tu-section { margin-bottom: 0; }
-.tu-stack .tu-heat { margin-top: 0; }
-
 .tu-grid-2 > .tu-section {
   display: flex;
   flex-direction: column;
@@ -3979,23 +3980,20 @@ function formatMoneyText(value) {
     function ActivityHeatmap({ byDay, t, onPickDay, activeDay, summary }) {
       const WEEK = 7
       const days = Object.keys(byDay ?? {}).sort()
-      // 周数按数据实际跨度决定，夹在 [8, 26]。
-      // 固定 26 周对刚开始用的用户会显示大片空白；固定 8 周又装不下
-      // 用了一年的用户。自适应两头都照顾到。
-      const WEEKS = (() => {
-        if (days.length === 0) return 8
-        const first = new Date(`${days[0]}T00:00:00`)
-        const lastDay = new Date(`${days[days.length - 1]}T00:00:00`)
-        const spanWeeks = Math.ceil((lastDay - first) / (7 * 86_400_000)) + 1
-        return Math.max(8, Math.min(26, spanWeeks))
-      })()
+      // 固定 53 周（一年）。参考 GitHub 日历风：格子边长由容器宽度反算，
+      // 一年 53 列正好把整行铺满（约 22px/格）；若只显示 10 周，
+      // 每格会被撑到 100px 以上，变成一堆大方块。
+      const WEEKS = 53
+      // 格子边长上限 22px：超宽屏下不让格子无限变大，居中留白即可
+      const MAX_CELL = 22
+      const GAP = 3
 
       /** 月份标签：只在对齐月份第一周时显示，避免堆满。 */
       const monthLabel = (date) => `${date.getMonth() + 1}月`
 
       const head = h('div', { className: 'tu-heat-head' },
         h('span', { className: 'tu-heat-title' }, t('heat.title')),
-        h('span', { className: 'tu-heat-sub' }, t('heat.subtitle').replace('{n}', String(WEEKS))),
+        h('span', { className: 'tu-heat-sub' }, t('heat.subtitle')),
       )
 
       if (days.length === 0) {
@@ -4048,8 +4046,11 @@ function formatMoneyText(value) {
         head,
         h('div', {
           className: 'tu-heat-body',
-          // 列数随数据跨度变化，CSS 用它算网格列宽
-          style: { '--tu-heat-weeks': String(WEEKS) },
+          style: {
+            '--tu-heat-weeks': String(WEEKS),
+            // 网格最大宽度 = 列数 × 上限边长 + 间隙，超宽屏时居中而不撑大格子
+            '--tu-heat-maxw': `${WEEKS * MAX_CELL + (WEEKS - 1) * GAP}px`,
+          },
         },
           h('div', { className: 'tu-heat-months' },
             // 月份标签两条规则同时满足才显示：
@@ -5901,19 +5902,16 @@ function formatMoneyText(value) {
            * 热力图天然是「小方块」——10~26 周也就 150~420px 宽，
            * 放进整行卡片会让左右失衡。放右侧栏（约 500px）正合适。
            */
-          h('div', { className: 'tu-stack' },
-            modelPieItems.length > 0
-              ? h('section', { className: 'tu-section' },
-                // 与左侧用同一个标题容器：左侧标题行含模式切换按钮、更高，
-                // 若右侧直接放裸 h2，两列卡片顶部就会错位。
-                h('div', { className: 'tu-section-head' },
-                  h('h2', { className: 'tu-section-title' }, t('chart.pie.title')),
-                ),
-                h(DonutChart, { items: modelPieItems, t, centerLabel: t('chart.pie.total') }),
-              )
-              : null,
-            heatmap,
-          ),
+          modelPieItems.length > 0
+            ? h('section', { className: 'tu-section' },
+              // 与左侧用同一个标题容器：左侧标题行含模式切换按钮、更高，
+              // 若右侧直接放裸 h2，两列卡片顶部就会错位。
+              h('div', { className: 'tu-section-head' },
+                h('h2', { className: 'tu-section-title' }, t('chart.pie.title')),
+              ),
+              h(DonutChart, { items: modelPieItems, t, centerLabel: t('chart.pie.total') }),
+            )
+            : null,
         )
         : null
 
@@ -7452,7 +7450,7 @@ function formatMoneyText(value) {
       }
 
       return h('div', { className: 'tu-root' },
-        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, charts, sections,
+        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, charts, heatmap, sections,
         warn, note, versionModal, priceModal, aliasModal)
     }
 
