@@ -980,8 +980,7 @@ window.__ModuleLoader__.load({
   --tu-c6: #2aa5b0;
   --tu-c7: #8a7f64;
 }
-/* 热力图色阶：5 档，浅色下用绿色系（与「用量健康」的直觉一致），
-   深色下提亮。
+/* 热力图色阶：5 档，用 DSH 标志蓝（#4D6BFE）的同源色阶。
 
    为什么不用 brand-primary：它在 DSH 里是**前景反差色**——
    浅色主题下是接近纯黑的深色、深色主题下接近纯白。拿它做色阶，
@@ -990,11 +989,12 @@ window.__ModuleLoader__.load({
 .tu-root,
 .tu-modal-backdrop,
 .tu-toasts {
-  --tu-heat-1: #d8ecd9;
-  --tu-heat-2: #a7d8ab;
-  --tu-heat-3: #6bc072;
-  --tu-heat-4: #2f9e44;
-  --tu-heat-0: #eef0f3;
+  /* 蓝色阶：与 DSH 标志蓝 #4D6BFE 同源，逐档加深 */
+  --tu-heat-0: #eef1f8;
+  --tu-heat-1: #dbe2fd;
+  --tu-heat-2: #aebcfb;
+  --tu-heat-3: #7c92f9;
+  --tu-heat-4: #4d6bfe;
 }
 
 /* 分类色在深色下另取一套。
@@ -1018,11 +1018,13 @@ body[data-ds-dark-theme] .tu-toasts,
   --tu-c5: #ab8bef;
   --tu-c6: #52d0d9;
   --tu-c7: #b6ab8e;
-  --tu-heat-0: #1b1f26;
-  --tu-heat-1: #1e3a24;
-  --tu-heat-2: #2c6b37;
-  --tu-heat-3: #43a04f;
-  --tu-heat-4: #6bd07a;
+  /* 深色：空格子比卡片底色略提一点，最高档用提亮后的标志蓝 ——
+     直接用 #4D6BFE 在暗背景上偏闷，提亮一档更清楚 */
+  --tu-heat-0: #1a1d24;
+  --tu-heat-1: #232a4a;
+  --tu-heat-2: #2f3d78;
+  --tu-heat-3: #3f54b8;
+  --tu-heat-4: #6b84ff;
 }
 .tu-root {
   height: 100%;

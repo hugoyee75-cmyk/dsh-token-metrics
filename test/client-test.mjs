@@ -351,8 +351,8 @@ const allowedLiterals = new Set([
   // 热力图色阶（5 档 × 亮暗两套）。同样不能用语义 token：
   // brand-primary 在浅色下是 #0f1115（近黑），拿它做色阶会变成一片灰黑，
   // 深浅完全分不出来 —— 这正是之前浅色模式配色发怪的原因。
-  '#eef0f3', '#d8ecd9', '#a7d8ab', '#6bc072', '#2f9e44',
-  '#1b1f26', '#1e3a24', '#2c6b37', '#43a04f', '#6bd07a',
+  '#eef1f8', '#dbe2fd', '#aebcfb', '#7c92f9', '#4d6bfe',
+  '#1a1d24', '#232a4a', '#2f3d78', '#3f54b8', '#6b84ff',
 ])
 const colorLiterals = [...css.matchAll(/(?:^|[^-\w])(#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/g)]
   .map((m) => m[1])
