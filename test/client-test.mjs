@@ -194,6 +194,13 @@ globalThis.fetch = async () => ({
         '2026-10-18': { calls: 3, inputTokens: 200, outputTokens: 30, cacheReadTokens: 500, totalTokens: 730, cacheHitRate: 0.71 },
         '2026-10-19': { calls: 3, inputTokens: 300, outputTokens: 40, cacheReadTokens: 600, totalTokens: 940, cacheHitRate: 0.67 },
       },
+      // 「按模型」趋势改为前端按范围重建，取的是 byDayModelName。
+      // 夹具必须提供它，否则 scopedModelTrend 拿不到数据（空图）。
+      byDayModelName: {
+        '2026-10-17': { 'deepseek-v4.1-flash': { calls: 2, totalTokens: 300 }, qfmodel: { calls: 1, totalTokens: 100 } },
+        '2026-10-18': { 'deepseek-v4.1-flash': { calls: 3, totalTokens: 400 }, qfmodel: { calls: 1, totalTokens: 200 } },
+        '2026-10-19': { 'deepseek-v4.1-flash': { calls: 3, totalTokens: 500 }, qfmodel: { calls: 1, totalTokens: 150 } },
+      },
       modelTrend: {
         days: ['2026-10-17', '2026-10-18', '2026-10-19'],
         series: [
@@ -559,6 +566,49 @@ function renderWithTab(tabLabel) {
   check('预算页有全局预算配置', budgetView.flat.includes('全局预算'))
   check('预算页有每日预算输入标签', budgetView.flat.includes('每日预算'))
   // 切回统计页：后续既有断言都在统计视图上找元素，停在预算页会误伤
+  renderWithTab('统计')
+}
+
+// —— 按模型 / 成本 两个图表模式必须随时间范围联动 ——
+// 回归点：Host 的 modelTrend 是全量的，此前直接透传，切「今日」时曲线
+// 仍显示全部历史；成本模式的今日视图 costUsd 硬编码 0，画出来是一条零线。
+{
+  // 今日 + 按模型：图表时间轴只应出现当天（10-19），不回退到历史。
+  // 注意不能分两轮 resetHooks 连点（状态会丢），必须同一棵树上一次点完。
+  const todayModelChart = (() => {
+    resetHooks()
+    const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    walkTree(tree, (node) => {
+      if (node?.type !== 'button' || !Array.isArray(node.children)) return
+      const text = node.children.filter((c) => typeof c === 'string').join('')
+      if (text === '今日' || text === '按模型') node.props?.onClick?.()
+    })
+    resetHooks()
+    const rendered = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    let chartNode
+    walkTree(rendered, (node) => {
+      if (node?.props?.className === 'tu-chart') chartNode = node
+    })
+    return chartNode === undefined ? '' : textsOf(chartNode)
+  })()
+  // 这个文件的 check 是「真值断言」：传 false 会被判失败，所以这里传取反后的正条件
+  check('今日+按模型不显示历史日期',
+    !(todayModelChart.includes('10-17') || todayModelChart.includes('10-18')))
+  // 这两个模式切换会改变全局状态：重置回默认（全部 / 总量）再继续
+  renderWithTab('统计')
+  renderWithTab('全部')
+
+  // 成本模式在今日视图必须有非零刻度（此前恒为 $0.000）
+  resetHooks()
+  tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((c) => c === '成本')) node.props?.onClick?.()
+  })
+  resetHooks()
+  const costMode = textsOf(panel.component({ t: panelInject.t, locale: panelInject.locale }))
+  check('成本模式渲染金额刻度', costMode.includes('$'), true)
+  // 切回统计视图，避免影响后续断言
   renderWithTab('统计')
 }
 

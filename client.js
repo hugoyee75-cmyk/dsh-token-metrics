@@ -3772,13 +3772,17 @@ function formatMoneyText(value) {
       const days = modelTrend?.days ?? []
       const series = modelTrend?.series ?? []
 
-      if (days.length < 2 || series.length === 0) {
+      // 只有 1 天也要画：今日视图按模型看，本来就只有一个时间点。
+      // 早先 days.length < 2 直接返回「数据不足」，导致「今日 + 按模型」
+      // 永远空白 —— 切到今日就看不到当天各模型的占比了。
+      if (series.length === 0) {
         return h('div', { className: 'tu-chart-empty' }, t('chart.empty'))
       }
 
       const innerWidth = CHART.width - CHART.padLeft - CHART.padRight
       const innerHeight = CHART.height - CHART.padTop - CHART.padBottom
-      const stepX = innerWidth / (days.length - 1)
+      // 单点时 stepX 取整段宽度，点会落在左侧起点（与主曲线一致）
+      const stepX = days.length > 1 ? innerWidth / (days.length - 1) : 0
       const toX = (index) => CHART.padLeft + index * stepX
 
       // 单一缩放基准：所有序列共用一个 max，曲线高低才可比较。
@@ -3915,6 +3919,8 @@ function formatMoneyText(value) {
       // 「按模型」模式：多条曲线共用一张图，与单曲线模式分开实现——
       // 多序列需要自己的色板、图例与缩放基准。
       if (mode === 'model') {
+        // modelTrend 由调用方按当前范围算好后传入（见 scopedModelTrend）——
+        // 组件内部不能引用面板作用域的变量，那是跨作用域引用，实际拿不到。
         return h(ModelTrendChart, { modelTrend, t, seriesLabel })
       }
 
@@ -5631,6 +5637,56 @@ function formatMoneyText(value) {
 
       // 图表数据：按天升序。trend 由 Host 预先算好命中率，这里只做投影。
       /**
+       * 按当前时间范围重建「按模型」趋势。
+       *
+       * 为什么必须在前端重建：Host 的 modelTrend 是**全量**（含所有天），
+       * 直接透传会导致切到「今日」时曲线仍显示历史 —— 用户实测发现了这点。
+       *
+       * @returns {{days: string[], series: Array<{key,label,values}>}}
+       */
+      const scopedModelTrend = useMemo(() => {
+        if (data === undefined) return { days: [], series: [] }
+        const byDayModelName = data.byDayModelName ?? {}
+        // 范围天：全部 = 所有天；否则取 rangeDays（今日/近7天/年份已算好）
+        const allDays = Object.keys(byDayModelName).sort()
+        const days = rangeDays.length > 0 ? rangeDays.filter((d) => byDayModelName[d] !== undefined) : allDays
+        if (days.length === 0) return { days: [], series: [] }
+
+        // 先按模型名汇总，排名取前 N 条，其余合并为「其他」
+        const totals = new Map()
+        for (const day of days) {
+          for (const [name, counters] of Object.entries(byDayModelName[day] ?? {})) {
+            totals.set(name, (totals.get(name) ?? 0) + (counters.totalTokens ?? 0))
+          }
+        }
+        const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1])
+        const limit = data.config?.maxTrendSeries ?? 6
+        const top = ranked.slice(0, limit).map(([k]) => k)
+        const topSet = new Set(top)
+        const hasRest = ranked.length > top.length
+
+        const series = top.map((name) => ({
+          key: name,
+          label: name,
+          values: Object.fromEntries(days.map((d) => [d, byDayModelName[d]?.[name]?.totalTokens ?? 0])),
+        }))
+        if (hasRest) {
+          series.push({
+            key: '__rest__',
+            label: 'rest',
+            values: Object.fromEntries(days.map((d) => {
+              let sum = 0
+              for (const [name, c] of Object.entries(byDayModelName[d] ?? {})) {
+                if (!topSet.has(name)) sum += c.totalTokens ?? 0
+              }
+              return [d, sum]
+            })),
+          })
+        }
+        return { days, series }
+      }, [data, rangeDays])
+
+      /**
        * 时间粒度：随范围自动切换。
        *
        *   今日   -> 按小时（一天只有一个点画不出曲线，看不出节奏）
@@ -5671,14 +5727,22 @@ function formatMoneyText(value) {
         if (trendGranularity === 'hour') {
           const today = data.today
           const byHourToday = data.byHour?.[today] ?? {}
+          // 当天总成本与总 token：小时级成本按「该小时 token 占当天比例」分摊。
+          // 早先这里硬编码 costUsd: 0，导致「今日 + 成本」模式是一条全平的零线
+          // —— 用户实测发现的联动 bug。峰谷价差无法在小时粒度还原，故为估算值。
+          const todayCost = (data.cost?.byDay ?? {})[today] ?? 0
+          const todayTokens = Object.values(byHourToday)
+            .reduce((sum, c) => sum + (c.totalTokens ?? 0), 0)
           // 固定铺 0~23 点：只画有数据的时段会让「几点最忙」看不出来
           return Array.from({ length: 24 }, (_, hour) => {
             const key = String(hour).padStart(2, '0')
             const counters = byHourToday[key] ?? {}
+            const tokens = counters.totalTokens ?? 0
+            const costUsd = todayTokens > 0 ? todayCost * (tokens / todayTokens) : 0
             return toTrendPoint(
               `${key}:00`,
               counters,
-              { day: `${today}T${key}`, costUsd: 0 },
+              { day: `${today}T${key}`, costUsd },
             )
           })
         }
@@ -6287,12 +6351,10 @@ function formatMoneyText(value) {
       const heatmap = empty
         ? null
         : h(ActivityHeatmap, {
-          // 选了年份就只画该年：否则热力图始终显示全部年份，
-          // 与顶部范围/趋势图不一致（评审指出的遗漏）。
-          byDay: selectedYear === null
-            ? data?.byDay
-            : Object.fromEntries(Object.entries(data?.byDay ?? {})
-              .filter(([day]) => day.startsWith(selectedYear))),
+          // 热力图是**全局视图**：固定显示近一年，刻意不跟随顶部的
+          // 范围/年份筛选。它的用途是看长期使用节奏，跟着筛选变反而会
+          // 失去「一年里什么时候用得多」这个唯一的参照。
+          byDay: data?.byDay,
           t,
           summary: heatSummary,
           activeDay: dayFrom,
@@ -6324,7 +6386,9 @@ function formatMoneyText(value) {
               points: trendSeries,
               mode: chartMode,
               t,
-              modelTrend: data?.modelTrend,
+              // 传按范围重建的版本，而不是 Host 的全量 modelTrend ——
+              // 否则切「今日」时曲线仍显示全部历史（用户实测发现）
+              modelTrend: scopedModelTrend,
             }),
           ),
           /**

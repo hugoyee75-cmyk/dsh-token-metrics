@@ -57,7 +57,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.3.1'
+export const version = '0.3.2'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
