@@ -526,9 +526,25 @@ export class PriceBook {
       return false
     }
     try {
-      const response = await fetchImpl(PRICE_LIST_URL, {
-        headers: { 'user-agent': 'dsh-token-metrics' },
-      })
+      /**
+       * 拉价目表必须带超时、禁重定向。
+       *
+       * 早先这里什么都没加：网络卡住时 fetch 会一直挂着，启动流程被拖死；
+       * 而 `redirect: 'error'` 与其他出站请求保持一致 —— 避免请求被转到
+       * 别的域名（价目表 URL 是固定的公开地址，不需要跟随重定向）。
+       */
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined
+      const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), 20_000)
+      let response
+      try {
+        response = await fetchImpl(PRICE_LIST_URL, {
+          headers: { 'user-agent': 'dsh-token-metrics' },
+          signal: controller?.signal,
+          redirect: 'error',
+        })
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const raw = await response.json()
       const table = extractChatPrices(raw)
@@ -551,9 +567,19 @@ export class PriceBook {
     const fetchImpl = this.fetchImpl ?? globalThis.fetch
     if (typeof fetchImpl !== 'function') return false
     try {
-      const response = await fetchImpl(FX_URL, {
-        headers: { 'user-agent': 'dsh-token-metrics' },
-      })
+      // 与价目表一致：带超时、禁重定向。汇率接口卡住同样会拖住启动。
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined
+      const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), 10_000)
+      let response
+      try {
+        response = await fetchImpl(FX_URL, {
+          headers: { 'user-agent': 'dsh-token-metrics' },
+          signal: controller?.signal,
+          redirect: 'error',
+        })
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const body = await response.json()
       const rate = Number(body?.rates?.CNY)

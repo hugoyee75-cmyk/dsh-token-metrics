@@ -1,6 +1,7 @@
 # dsh-token-metrics
 
 [![powered by dsh](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/hugoyee75-cmyk/dsh-token-metrics)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-339933.svg)](package.json)
 
@@ -77,10 +78,10 @@ When you want to skip the npm registry, or need a version not yet published:
 plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics
 ```
 
-Pin a version with `#v0.3.1`:
+Pin a version with `#v0.3.2`:
 
 ```
-plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics#v0.3.1
+plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics#v0.3.2
 ```
 
 ### Local development (link)
