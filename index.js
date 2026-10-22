@@ -490,6 +490,20 @@ function mergeCounters(target, source) {
 }
 
 /** 本地日期键 YYYY-MM-DD（用户本地时区，不是 UTC）。 */
+/**
+ * 小时键，形如 `2026-10-21T14`。
+ *
+ * 「今日」范围的趋势图要按小时画——一天只有 1~2 个点画不出曲线，
+ * 看不出「今天什么时候用得最多」。只保留今天的数据就够：
+ * 历史上的小时分布对「今日」视图没有意义，存了也是白占空间。
+ */
+function hourKey(time) {
+  const d = new Date(time)
+  const day = dayKey(time)
+  const hour = String(d.getHours()).padStart(2, '0')
+  return `${day}T${hour}`
+}
+
 function dayKey(time) {
   const d = new Date(time)
   const year = d.getFullYear()
@@ -513,6 +527,13 @@ function emptyStore(buildId) {
     total: emptyCounters(),
     /** day -> counters。 */
     byDay: {},
+    /**
+     * 小时桶：`day -> hourKey -> counters`。
+     *
+     * 只为「今日趋势按小时画」服务，所以只保留最近两天的 —— 再早的
+     * 小时分布没有意义。裁剪在 record 里顺带做。
+     */
+    byHour: {},
     /** provider -> counters。 */
     byProvider: {},
     /** `${provider}/${model}` -> counters。明细表按供应商拆分时用它。 */
@@ -627,6 +648,7 @@ function loadStore(logger, home) {
       ...parsed,
       total: { ...base.total, ...(parsed.total ?? {}) },
       byDay: parsed.byDay ?? {},
+      byHour: parsed.byHour ?? {},
       byProvider: parsed.byProvider ?? {},
       byModel: parsed.byModel ?? {},
       byModelName: parsed.byModelName ?? {},
@@ -898,6 +920,20 @@ class TokenUsageTracker {
     const day = dayKey(stamp)
     this.store.byDay[day] ??= emptyCounters()
     addUsage(this.store.byDay[day], usage)
+
+    // 小时桶：只留最近两天，避免长期累积。今日视图最多用到当天与前一天的
+    // 交界（跨零点时），两天足够。
+    this.store.byHour ??= {}
+    this.store.byHour[day] ??= {}
+    const hour = hourKey(stamp).slice(-2)
+    this.store.byHour[day][hour] ??= emptyCounters()
+    addUsage(this.store.byHour[day][hour], usage)
+    const hourDays = Object.keys(this.store.byHour).sort()
+    if (hourDays.length > 2) {
+      for (const stale of hourDays.slice(0, hourDays.length - 2)) {
+        delete this.store.byHour[stale]
+      }
+    }
 
     const providerKey = provider || 'unknown'
     this.store.byProvider[providerKey] ??= emptyCounters()
@@ -1259,6 +1295,16 @@ class TokenUsageTracker {
         alertThresholds: this.config.alertThresholds,
       },
       byDay: Object.fromEntries(days.map((day) => [day, this.store.byDay[day]])),
+      /**
+       * 小时桶：`day -> 'HH' -> counters`。供「今日」趋势按小时画。
+       * 只含最近两天，历史部分本来就没记。
+       */
+      byHour: Object.fromEntries(
+        Object.entries(this.store.byHour ?? {}).map(([day, hours]) => [
+          day,
+          Object.fromEntries(Object.entries(hours).map(([h, v]) => [h, withRate(v)])),
+        ]),
+      ),
       /**
        * 每个模型的每日序列（跨 provider 合并），不做条数截断。
        *

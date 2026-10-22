@@ -130,9 +130,20 @@ globalThis.fetch = async () => ({
         week: { calls: 10, inputTokens: 3000, outputTokens: 700, cacheReadTokens: 900, cacheWriteTokens: 0, reasoningTokens: 250, totalTokens: 4600 },
       },
       byDay: {
+        // 跨月数据：趋势图「全部」范围按月聚合，只有 1 个月就画不出线
+        '2026-08-15': { calls: 1, inputTokens: 200, outputTokens: 50, totalTokens: 250 },
+        '2026-09-10': { calls: 2, inputTokens: 400, outputTokens: 80, totalTokens: 480 },
         '2026-10-17': { calls: 2, inputTokens: 500, outputTokens: 100, totalTokens: 600 },
         '2026-10-18': { calls: 3, inputTokens: 700, outputTokens: 150, totalTokens: 850 },
         '2026-10-19': { calls: 3, inputTokens: 800, outputTokens: 200, totalTokens: 1100 },
+      },
+      // 小时桶：供「今日」范围按小时画曲线
+      byHour: {
+        '2026-10-19': {
+          '09': { calls: 1, inputTokens: 200, outputTokens: 40, totalTokens: 240 },
+          '10': { calls: 1, inputTokens: 300, outputTokens: 60, totalTokens: 360 },
+          '14': { calls: 1, inputTokens: 300, outputTokens: 100, totalTokens: 400 },
+        },
       },
       byProvider: {
         'official-route': { calls: 5, inputTokens: 1000, outputTokens: 100, totalTokens: 1100 },
@@ -508,6 +519,19 @@ function renderWithTab(tabLabel) {
     rendered = panel.component({ t: panelInject.t, locale: panelInject.locale })
   }
   return { rendered, clicked, flat: textsOf(rendered) }
+}
+
+// —— 趋势图粒度随范围切换 ——
+// 今日按小时、近7天按天、全部按月（跨年则按年）。
+{
+  const todayView = renderWithTab('今日')
+  check('今日切到按小时', todayView.flat.includes('按小时'), true)
+  const weekView = renderWithTab('近 7 天')
+  check('近7天按天', weekView.flat.includes('按天'), true)
+  const allView = renderWithTab('全部')
+  // 测试数据同一年 -> 按月；若将来改数据跨年则会变按年，两者都算对
+  check('全部按月或按年',
+    allView.flat.includes('按月') || allView.flat.includes('按年'), true)
 }
 
 const modelView = renderWithTab('模型')

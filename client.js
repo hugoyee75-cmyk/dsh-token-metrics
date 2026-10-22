@@ -416,6 +416,10 @@ window.__ModuleLoader__.load({
       'section.bySession': '按会话',
       'field.cacheHitRate': '缓存命中率',
       'chart.title': '用量趋势',
+      'chart.granularity.hour': '按小时',
+      'chart.granularity.day': '按天',
+      'chart.granularity.month': '按月',
+      'chart.granularity.year': '按年',
       'chart.mode.total': '总量',
       'chart.mode.cache': '命中率',
       'chart.mode.cost': '成本',
@@ -829,6 +833,10 @@ window.__ModuleLoader__.load({
       'section.bySession': 'By session',
       'field.cacheHitRate': 'Cache hit rate',
       'chart.title': 'Usage trend',
+      'chart.granularity.hour': 'by hour',
+      'chart.granularity.day': 'by day',
+      'chart.granularity.month': 'by month',
+      'chart.granularity.year': 'by year',
       'chart.mode.total': 'Total',
       'chart.mode.cache': 'Hit rate',
       'chart.mode.cost': 'Cost',
@@ -5465,55 +5473,137 @@ function formatMoneyText(value) {
       }, [data, t, selectedModels, displayModel, rangeDays])
 
       // 图表数据：按天升序。trend 由 Host 预先算好命中率，这里只做投影。
+      /**
+       * 时间粒度：随范围自动切换。
+       *
+       *   今日   -> 按小时（一天只有一个点画不出曲线，看不出节奏）
+       *   近7天  -> 按天
+       *   全部   -> 按月；跨年时按年（点太多会挤成一团）
+       *
+       * 数据来源相应变化：小时用 byHour、天用 trend、月/年从 byDay 聚合。
+       */
+      const trendGranularity = (() => {
+        if (range === 'today') return 'hour'
+        if (range === 'week') return 'day'
+        // 全部：跨年就按年，否则按月
+        const days = Object.keys(data?.byDay ?? {})
+        const years = new Set(days.map((day) => day.slice(0, 4)))
+        if (years.size > 1) return 'year'
+        // 单年内：按月；若数据不足 3 个月，按月也没几个点，仍按月
+        return 'month'
+      })()
+
+      /** 把一组 counters 折成趋势点。 */
+      const toTrendPoint = (label, counters, extra = {}) => ({
+        label,
+        total: counters.totalTokens ?? 0,
+        calls: counters.calls ?? 0,
+        input: counters.inputTokens ?? 0,
+        cacheRead: counters.cacheReadTokens ?? 0,
+        output: counters.outputTokens ?? 0,
+        rate: counters.cacheHitRate ?? (counters.input + counters.cacheRead > 0
+          ? counters.cacheRead / (counters.input + counters.cacheRead)
+          : 0),
+        ...extra,
+      })
+
       const trendSeries = useMemo(() => {
-        // 趋势图只画当前时间段内的点。选「今日」时只有一天，
-        // TrendChart 会退化为单点显示（见该组件对 length===1 的处理）。
-        const days = (rangeDays.length > 0 ? rangeDays : Object.keys(data?.byDay ?? {}))
-          .slice()
-          .sort()
-        // 选中模型时，趋势图换成所选模型的合并曲线。
-        if (selectedModels.length > 0) {
-          return days
-            .map((day) => {
-              const merged = {
-                label: day.slice(5), total: 0, calls: 0,
-                input: 0, cacheRead: 0, output: 0,
-              }
-              for (const name of selectedModels) {
-                const counters = data?.byModelDay?.[name]?.[day]
-                if (counters === undefined) continue
-                merged.total += counters.totalTokens ?? 0
-                merged.calls += counters.calls ?? 0
-                merged.input += counters.inputTokens ?? 0
-                merged.cacheRead += counters.cacheReadTokens ?? 0
-                merged.output += counters.outputTokens ?? 0
-              }
-              merged.rate = merged.cacheRead + merged.input > 0
-                ? merged.cacheRead / (merged.cacheRead + merged.input)
-                : 0
-              return merged
-            })
+        if (data === undefined) return []
+
+        // —— ① 今日：按小时 ——
+        if (trendGranularity === 'hour') {
+          const today = data.today
+          const byHourToday = data.byHour?.[today] ?? {}
+          // 固定铺 0~23 点：只画有数据的时段会让「几点最忙」看不出来
+          return Array.from({ length: 24 }, (_, hour) => {
+            const key = String(hour).padStart(2, '0')
+            const counters = byHourToday[key] ?? {}
+            return toTrendPoint(
+              `${key}:00`,
+              counters,
+              { day: `${today}T${key}`, costUsd: 0 },
+            )
+          })
         }
-        if (data?.trend === undefined) return []
-        const trendEntries = Object.entries(data.trend).sort((a, b) => (a[0] < b[0] ? -1 : 1))
-        return (rangeDays.length > 0
-          ? trendEntries.filter(([day]) => rangeDays.includes(day))
-          : trendEntries)
-          .map(([day, counters]) => ({
-            label: day.slice(5),
-            day,
-            total: counters.totalTokens ?? 0,
-            // 悬停提示要显示当天调用次数，缺了它会恒显示 0。
-            calls: counters.calls ?? 0,
-            input: counters.inputTokens ?? 0,
-            cacheRead: counters.cacheReadTokens ?? 0,
-            output: counters.outputTokens ?? 0,
-            rate: counters.cacheHitRate ?? 0,
-            // 当天成本（美元）。成本趋势与 token 趋势不是一回事——
-            // 峰谷价和模型混用会让两条线分叉。
-            costUsd: (data?.cost?.byDay ?? {})[day] ?? 0,
-          }))
-      }, [data, selectedModels, rangeDays])
+
+        // 选中模型时按模型过滤（仅按天/月/年有效，小时维度没有分模型数据）
+        const sumForRange = (predicate) => {
+          const merged = {
+            calls: 0, inputTokens: 0, outputTokens: 0,
+            cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
+          }
+          const byDay = data.byDay ?? {}
+          for (const [day, counters] of Object.entries(byDay)) {
+            if (!predicate(day)) continue
+            for (const key of Object.keys(merged)) merged[key] += counters[key] ?? 0
+          }
+          return merged
+        }
+
+        // —— ② 近 7 天 / ③ 全部（月、年）：从 byDay 聚合 ——
+        /**
+         * 按给定分组键聚合。`bucketOf(day)` 返回该天所属的桶键。
+         *
+         * 选中模型时改用 byModelDay 求和，保证与其它视图口径一致。
+         */
+        const bucketize = (bucketKeyOf, labelOf) => {
+          const buckets = new Map()
+          const source = data.byDay ?? {}
+          const days = Object.keys(source).sort()
+          for (const day of days) {
+            const bucket = bucketKeyOf(day)
+            if (bucket === undefined) continue
+            const target = buckets.get(bucket) ?? {
+              counters: {
+                calls: 0, inputTokens: 0, outputTokens: 0,
+                cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
+              },
+              costUsd: 0,
+            }
+            if (selectedModels.length === 0) {
+              for (const key of Object.keys(target.counters)) {
+                target.counters[key] += source[day]?.[key] ?? 0
+              }
+            } else {
+              for (const name of selectedModels) {
+                const c = data.byModelDay?.[name]?.[day]
+                if (c === undefined) continue
+                for (const key of Object.keys(target.counters)) target.counters[key] += c[key] ?? 0
+              }
+            }
+            target.costUsd += (data.cost?.byDay ?? {})[day] ?? 0
+            buckets.set(bucket, target)
+          }
+          return [...buckets.entries()]
+            .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+            .map(([bucket, entry]) => toTrendPoint(labelOf(bucket), entry.counters, {
+              day: bucket,
+              costUsd: entry.costUsd,
+            }))
+        }
+
+        if (trendGranularity === 'day') {
+          // 近 7 天：保留每一天的原始桶
+          const allowed = new Set(rangeDays.length > 0 ? rangeDays : Object.keys(data.byDay ?? {}))
+          return bucketize(
+            (day) => (allowed.has(day) ? day : undefined),
+            (day) => day.slice(5),
+          )
+        }
+
+        if (trendGranularity === 'month') {
+          return bucketize(
+            (day) => day.slice(0, 7),
+            (month) => `${Number(month.slice(5))}月`,
+          )
+        }
+
+        // year
+        return bucketize(
+          (day) => day.slice(0, 4),
+          (year) => year,
+        )
+      }, [data, selectedModels, rangeDays, range, trendGranularity])
 
       // 右上角工具区：Star / 检查更新 / 重载，与刷新按钮并排。
       const starsUrl = props?.repositoryUrl ?? data?.repositoryUrl
@@ -6047,7 +6137,8 @@ function formatMoneyText(value) {
         ? h('div', { className: 'tu-grid-2' },
           h('section', { className: 'tu-section' },
             h('div', { className: 'tu-section-head' },
-              h('h2', { className: 'tu-section-title' }, t('chart.title')),
+              h('h2', { className: 'tu-section-title' },
+                `${t('chart.title')} · ${t(`chart.granularity.${trendGranularity}`)}`),
               h('div', { className: 'tu-tabs tu-tabs-sm' },
                 chartModes.map((option) => h('button', {
                   key: option.id,
