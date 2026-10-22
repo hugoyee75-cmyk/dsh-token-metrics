@@ -633,6 +633,26 @@ function emptyStore(buildId) {
   }
 }
 
+/**
+ * 把损坏/版本不符的数据文件另存一份，再重建。
+ *
+ * 为什么必须备份：早先直接 `return emptyStore()`，下一次落盘就**覆盖掉**
+ * 原文件 —— 用户的全部历史在这一刻永久消失，且没有任何痕迹可查。
+ * 现在先改名留档（带时间戳），用户至少能从备份里捞回数据。
+ */
+function backupBrokenStore(path, logger) {
+  try {
+    if (!existsSync(path)) return
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const target = `${path}.broken-${stamp}`
+    renameSync(path, target)
+    logger?.warn?.(`token-metrics: 原数据文件已备份到 ${target}`)
+  } catch (error) {
+    // 备份失败也不能阻止启动；但要说清楚，别静默
+    logger?.warn?.(`token-metrics: 备份损坏数据失败（${error?.message ?? error}）`)
+  }
+}
+
 /** 从磁盘读取存储；损坏或版本不符时重建，绝不因此让插件启动失败。 */
 function loadStore(logger, home) {
   const path = storePath(home)
@@ -640,6 +660,8 @@ function loadStore(logger, home) {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
     if (parsed === null || typeof parsed !== 'object' || parsed.version !== STORE_VERSION) {
       logger?.warn?.(`token-metrics: 数据文件版本不符，重新初始化（${path}）`)
+      // 先留档再重建，避免下一次落盘把原文件覆盖掉
+      backupBrokenStore(path, logger)
       return emptyStore()
     }
     const base = emptyStore()
@@ -728,6 +750,9 @@ function loadStore(logger, home) {
   } catch (error) {
     if (error?.code !== 'ENOENT') {
       logger?.warn?.(`token-metrics: 读取数据文件失败，重新初始化：${error?.message ?? error}`)
+      // 解析失败通常意味着文件损坏 —— 先留档，别让下一次落盘覆盖掉可挽救的内容。
+      // ENOENT 是首次安装，没有旧数据可备份，跳过。
+      backupBrokenStore(path, logger)
     }
     return emptyStore()
   }
@@ -2507,7 +2532,10 @@ export function apply(ctx, rawConfig) {
    */
   const currentSpend = () => {
     try {
-      const snapshot = aggregateSnapshot()
+      // 用 tracker.snapshot()。早先写的是 aggregateSnapshot()，这个函数
+      // 根本不存在，调用即抛 TypeError，又被下面的 catch 吞掉 ——
+      // 结果是预算告警永远拿不到花费、永远不触发。
+      const snapshot = tracker.snapshot()
       const cost = snapshot?.cost
       if (cost === undefined || cost === null) return undefined
       const byDay = cost.byDay ?? {}
@@ -2640,6 +2668,29 @@ export function apply(ctx, rawConfig) {
     return { fresh, recovered }
   }
 
+  /**
+   * 周期性求值告警。
+   *
+   * **这是通知链路的关键**：早先只在「手动查询余额」时调用一次
+   * publishAlerts()，所以峰谷切换提醒、预算将尽这类**不依赖用户操作**的
+   * 告警永远不会主动推送 —— 用户不点那一排按钮就一条都收不到。
+   *
+   * 30 秒一轮：足够及时（峰谷提前量是 10 分钟），又不会频繁算。
+   * snapshot() 内部有 cache，代价可忽略。unref 让定时器不阻止进程退出。
+   */
+  const ALERT_TICK_MS = 30_000
+  ctx.effect(() => {
+    const timer = setInterval(() => {
+      try {
+        publishAlerts()
+      } catch (error) {
+        logger?.warn?.(`token-metrics: 周期告警求值失败（${error?.message ?? error}）`)
+      }
+    }, ALERT_TICK_MS)
+    timer?.unref?.()
+    return () => clearInterval(timer)
+  }, 'token-metrics: 周期告警')
+
   ctx.inject(['webServer'], (webCtx) => {
     const server = webCtx.webServer
     // 同一个 (kind, path) 只能注册一次，重复注册会抛错。第二个模块实例
@@ -2650,6 +2701,12 @@ export function apply(ctx, rawConfig) {
           kind: 'prefix',
           path: '/api/dsh-token-metrics',
           handler: async (req, res) => {
+            // 门卫：所有路由共用。DSH 不校验插件路由的来源，这里自己拦。
+            // 拒绝时给 403 且不回显原因细节，避免变成探测工具。
+            if (!isTrustedRequest(req)) {
+              sendJson(res, 403, { error: 'forbidden' })
+              return
+            }
             const url = new URL(req.url ?? '/', 'http://localhost')
             const isGet = req.method === 'GET'
             // 每个路由自己校验方法：重载/更新是 POST，不能在这里一刀切成 GET。
@@ -3231,6 +3288,49 @@ async function resolveSiteKey(ctx, site) {
  * 带大小上限：补价请求体只有几十字节，给 64KB 足够，同时避免恶意/异常
  * 请求把内存吃满。上限内也要求 content-type 是 JSON，减少意外的表单提交。
  */
+/**
+ * 判断请求是否来自 DSH 自己的页面（同源）。
+ *
+ * **为什么必须自己查**：插件通过 `webServer.register({kind:'prefix'})` 挂路由，
+ * 这条路径**不经过** DSH 对自家 API 的来源校验。实测（带恶意 Origin 的请求）：
+ * DSH 自己的接口返回 401/403，插件接口返回 200 —— 也就是说，用户浏览器里
+ * 随便打开一个恶意网页，就能跨站调用本插件：
+ *
+ *   · `/supplier/models` 接受任意 baseUrl + 已存站点 id，会把用户的 API Key
+ *     发给攻击者指定的地址（等于偷密钥）
+ *   · 可以改模型配置，把流量转到别人的服务器
+ *   · 可以触发更新或重算
+ *
+ * 所以这里补一道独立门卫，只认三种「确定来自本机页面」的请求：
+ *   1. 没有 Origin、没有 Sec-Fetch-Site —— 非浏览器发起的同机请求
+ *      （curl 也属于这类，但它拿不到用户的浏览器上下文，风险远低于跨站网页）
+ *   2. Sec-Fetch-Site 为 same-origin / same-site / none
+ *   3. Origin 的 hostname 是回环地址（127.0.0.1 / localhost / ::1）
+ *
+ * 明确拒绝 `Sec-Fetch-Site: cross-site`，以及 Origin 指向外部域名的请求。
+ */
+export function isTrustedRequest(req) {
+  const headers = req?.headers ?? {}
+  const fetchSite = String(headers['sec-fetch-site'] ?? '').toLowerCase()
+  // 浏览器明确标注跨站：直接拒，不看别的
+  if (fetchSite === 'cross-site') return false
+
+  const origin = headers.origin
+  if (origin === undefined || origin === '') {
+    // 非浏览器请求（同机 CLI / 测试）。浏览器发起的请求一定会带 Origin。
+    return true
+  }
+  // 有 Origin 就必须是同源形态
+  try {
+    const url = new URL(String(origin))
+    const host = url.hostname.toLowerCase()
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1'
+      || host === '[::1]'
+  } catch {
+    return false
+  }
+}
+
 async function readJsonBody(req, limitBytes = 64 * 1024) {
   const chunks = []
   let total = 0
