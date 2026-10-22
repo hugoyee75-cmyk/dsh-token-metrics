@@ -182,6 +182,18 @@ window.__ModuleLoader__.load({
       'heat.more': '多',
       'heat.click': '点击某天可筛选当天数据',
       'heat.today': '今天',
+      'month.short.1': '1月',
+      'month.short.2': '2月',
+      'month.short.3': '3月',
+      'month.short.4': '4月',
+      'month.short.5': '5月',
+      'month.short.6': '6月',
+      'month.short.7': '7月',
+      'month.short.8': '8月',
+      'month.short.9': '9月',
+      'month.short.10': '10月',
+      'month.short.11': '11月',
+      'month.short.12': '12月',
       'heat.days': '活跃天数',
       'heat.average': '日均',
       'heat.peak': '单日峰值',
@@ -602,6 +614,18 @@ window.__ModuleLoader__.load({
       'heat.more': 'more',
       'heat.click': 'Click a day to filter to it',
       'heat.today': 'today',
+      'month.short.1': 'Jan',
+      'month.short.2': 'Feb',
+      'month.short.3': 'Mar',
+      'month.short.4': 'Apr',
+      'month.short.5': 'May',
+      'month.short.6': 'Jun',
+      'month.short.7': 'Jul',
+      'month.short.8': 'Aug',
+      'month.short.9': 'Sep',
+      'month.short.10': 'Oct',
+      'month.short.11': 'Nov',
+      'month.short.12': 'Dec',
       'heat.days': 'Active days',
       'heat.average': 'Daily avg',
       'heat.peak': 'Peak day',
@@ -4195,7 +4219,21 @@ function formatMoneyText(value) {
       const GAP = 3
 
       /** 月份标签：只在对齐月份第一周时显示，避免堆满。 */
-      const monthLabel = (date) => `${date.getMonth() + 1}月`
+      /**
+       * 月份标签。
+       *
+       * 早先硬编码 `${n}月`，英文界面会显示成「10月」。现在按语言取格式：
+       * 中文用 `{n}月`，其它语言用 locale 的短月份名。
+       */
+      const monthLabel = (date) => {
+        const index = date.getMonth()
+        if (typeof t === 'function') {
+          const label = t(`month.short.${index + 1}`)
+          // t() 对未知 key 会原样返回 key 本身，此时退回英文短名
+          if (typeof label === 'string' && label !== `month.short.${index + 1}`) return label
+        }
+        return new Date(2000, index, 1).toLocaleString('en-US', { month: 'short' })
+      }
 
       const head = h('div', { className: 'tu-heat-head' },
         h('span', { className: 'tu-heat-title' }, t('heat.title')),
@@ -4968,12 +5006,19 @@ function formatMoneyText(value) {
         // 选中的模型：把它们的每日**完整计数器**逐项相加。
         // Host 的 byModelDay 带全部字段，因此输入/输出/缓存/推理都能算出来
         // （早先只存 totalTokens，筛选后指标会全变 0）。
-        const days = Object.keys(data.byDay ?? {}).sort()
-        const from = range === 'today'
-          ? [data.today]
-          : range === 'week'
-            ? days.slice(-7)
-            : days
+        const allDays = Object.keys(data.byDay ?? {}).sort()
+        // 选了年份就优先按年份过滤 —— 早先这里只判 range，导致
+        // 「年份 + 模型」同时选时指标卡算的是全部年份（和时间范围不一致）。
+        const days = selectedYear === null
+          ? allDays
+          : allDays.filter((day) => day.startsWith(selectedYear))
+        const from = selectedYear !== null
+          ? days
+          : range === 'today'
+            ? [data.today]
+            : range === 'week'
+              ? days.slice(-7)
+              : days
         const sum = {
           calls: 0, inputTokens: 0, outputTokens: 0,
           cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
@@ -6242,7 +6287,12 @@ function formatMoneyText(value) {
       const heatmap = empty
         ? null
         : h(ActivityHeatmap, {
-          byDay: data?.byDay,
+          // 选了年份就只画该年：否则热力图始终显示全部年份，
+          // 与顶部范围/趋势图不一致（评审指出的遗漏）。
+          byDay: selectedYear === null
+            ? data?.byDay
+            : Object.fromEntries(Object.entries(data?.byDay ?? {})
+              .filter(([day]) => day.startsWith(selectedYear))),
           t,
           summary: heatSummary,
           activeDay: dayFrom,

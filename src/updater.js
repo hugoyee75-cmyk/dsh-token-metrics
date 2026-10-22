@@ -281,6 +281,15 @@ export async function installStaged(stageDir, pkgDir, files) {
     // 同目录临时名 + rename：最后一步是同卷改名，运行中的模块图不受影响。
     const temp = `${target}.new`
     cpSync(source, temp)
+    // 复制后核对哈希：确认落盘内容与源一致（防截断、防磁盘异常）。
+    // 早先写了 sha256File 却**没有任何调用点**，README 里「下载 → 校验」
+    // 的「校验」实际不存在。
+    const expected = sha256File(source)
+    const actual = sha256File(temp)
+    if (expected !== actual) {
+      rmSync(temp, { force: true })
+      throw new Error(`文件校验失败：${relativePath}（期望 ${expected.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…）`)
+    }
     await renameWithRetry(temp, target)
     installed.push(relativePath)
   }
@@ -477,7 +486,15 @@ export class PluginUpdater {
 
     this.applying = true
     const fetchImpl = this.deps.fetchImpl
-    let backupMade = false
+    /**
+     * 回滚状态跨两个方法共享。
+     *
+     * 为什么不用局部布尔：备份发生在 `#extractAndInstall` 内部，而回滚判断
+     * 在外层 `apply` 的 catch 里。早先用局部变量 `backupMade`，子方法里的
+     * 赋值改的是它自己的作用域，外层永远读到 false —— 于是「复制到一半
+     * 失败」时回滚分支成了死代码，用户会拿到装了一半的目录。
+     */
+    const rollback = { backupMade: false }
     try {
       // 1) 下载 tarball
       const url = `https://codeload.github.com/${repo.owner}/${repo.repo}/tar.gz/refs/tags/v${target}`
@@ -492,12 +509,12 @@ export class PluginUpdater {
           signal,
         })
         if (!alt.ok) throw new Error(`下载失败：HTTP ${response.status}`)
-        return await this.#extractAndInstall(await alt.arrayBuffer(), target, activate, repo, fromVersion)
+        return await this.#extractAndInstall(await alt.arrayBuffer(), target, activate, repo, fromVersion, rollback)
       }
-      return await this.#extractAndInstall(await response.arrayBuffer(), target, activate, repo, fromVersion)
+      return await this.#extractAndInstall(await response.arrayBuffer(), target, activate, repo, fromVersion, rollback)
     } catch (error) {
       let message = error?.message ?? String(error)
-      if (backupMade) {
+      if (rollback.backupMade) {
         try {
           restoreBackup(this.backupDir, this.deps.pkgDir)
           this.deps.log?.(`token-metrics: 更新失败，已从备份回滚磁盘`)
@@ -521,7 +538,7 @@ export class PluginUpdater {
   }
 
   /** 解压 tarball、安装、触发重载。 */
-  async #extractAndInstall(buffer, target, activate, repo, fromVersion) {
+  async #extractAndInstall(buffer, target, activate, repo, fromVersion, rollback) {
     const files = await extractTarGz(buffer, this.stageDir, `${repo.repo}-${target}`)
     const manifestPath = join(this.stageDir, 'package.json')
     if (!existsSync(manifestPath)) throw new Error('下载的包里没有 package.json')
@@ -540,8 +557,12 @@ export class PluginUpdater {
       throw error
     }
 
-    // 备份当前版本，然后安装新文件
+    // 备份当前版本，然后安装新文件。
+    // 备份成功后必须置位 backupMade —— 外层 catch 靠它决定要不要回滚。
+    // 早先这一行漏了，backupMade 恒为 false，于是「复制到一半失败」时
+    // 回滚分支永远不执行，用户会得到一份装了一半的目录。
     backupPackage(this.deps.pkgDir, this.backupDir)
+    if (rollback !== undefined) rollback.backupMade = true
     // 只排除测试目录。src/ 是**运行必需**的（reload.js / updater.js 都在里面），
     // 早先把它一起排除会让更新后装出一个缺件的包。
     const installedFiles = files.filter((file) => !file.startsWith('test/'))
