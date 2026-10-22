@@ -59,11 +59,19 @@ plugin manager:
 plugin_manager install_bundle dsh-token-metrics
 ```
 
-> This installs the published npm version. DSH may default to a China mirror; if
-> you get an older version, switch the install source to the official registry
-> briefly, or wait for the mirror to sync and retry.
+> This installs the published npm version, available from **both the international
+> npm registry and the npmmirror China mirror**. DSH probes both registries in
+> parallel and picks whichever answers faster, so you don't choose: users abroad
+> hit the official registry, users in China hit the mirror — both are covered.
+>
+> Publishing only needs to push to the official npm registry; npmmirror mirrors
+> it automatically (usually within minutes). If a fresh release hasn't mirrored
+> yet, switch the install source to the official registry in "Add plugin", or
+> search this package on npmmirror and click "Sync".
 
 ### From GitHub
+
+When you want to skip the npm registry, or need a version not yet published:
 
 ```
 plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics

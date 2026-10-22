@@ -49,10 +49,17 @@ Token 用量统计页，顺带管好成本与供应商余额。
 plugin_manager install_bundle dsh-token-metrics
 ```
 
-> 装的是 npm 上的发布版。DSH 默认可能是国内镜像源，若装到的是旧版本，把
-> 安装源临时切到官方源，或等镜像同步后重试。
+> 走已发布到 npm 的版本，**国际（npm 官方源）与国内（npmmirror 镜像源）都能装**。
+> DSH 会并行探测两个源、自动选响应更快的一个，无需手动挑：海外用户走官方源，
+> 国内用户走镜像源，都覆盖到。
+>
+> 发布只需推到 npm 官方源，npmmirror 会自动镜像同步（通常几分钟内）。刚发新版
+> 若镜像还没跟上，在「添加插件」里把安装源临时切到官方源，或到 npmmirror 搜
+> 本包点「同步」。
 
 ### 从 GitHub 安装
+
+不依赖任何 npm 源、或想用尚未发布的最新版时，直接从仓库装：
 
 ```
 plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics
