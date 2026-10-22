@@ -5638,20 +5638,6 @@ function formatMoneyText(value) {
           })
         }
 
-        // 选中模型时按模型过滤（仅按天/月/年有效，小时维度没有分模型数据）
-        const sumForRange = (predicate) => {
-          const merged = {
-            calls: 0, inputTokens: 0, outputTokens: 0,
-            cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
-          }
-          const byDay = data.byDay ?? {}
-          for (const [day, counters] of Object.entries(byDay)) {
-            if (!predicate(day)) continue
-            for (const key of Object.keys(merged)) merged[key] += counters[key] ?? 0
-          }
-          return merged
-        }
-
         // —— ② 近 7 天 / ③ 全部（月、年）：从 byDay 聚合 ——
         /**
          * 按给定分组键聚合。`bucketOf(day)` 返回该天所属的桶键。
