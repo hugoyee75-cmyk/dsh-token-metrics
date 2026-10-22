@@ -153,6 +153,7 @@ window.__ModuleLoader__.load({
       'budget.left': '剩',
       'budget.over': '已超',
       'budget.set': '设置预算',
+      'budget.current': '当前用量',
       'budget.title': '预算管理',
       'budget.subtitle': '给花销一个参照系：今天用了多少、还剩多少，心里有数才好规划',
       'budget.global': '全局预算',
@@ -184,6 +185,8 @@ window.__ModuleLoader__.load({
       'heat.days': '活跃天数',
       'heat.average': '日均',
       'heat.peak': '单日峰值',
+      'filter.year': '年份',
+      'filter.yearAll': '全部年份',
       'heat.ttft': '首字延迟',
       'heat.tps': '输出速度',
       'balance.title': '供应商余额',
@@ -570,6 +573,7 @@ window.__ModuleLoader__.load({
       'budget.left': 'left',
       'budget.over': 'over',
       'budget.set': 'Set budget',
+      'budget.current': 'Current usage',
       'budget.title': 'Budget',
       'budget.subtitle': 'Give your spending a reference point: how much today, how much left.',
       'budget.global': 'Global budget',
@@ -601,6 +605,8 @@ window.__ModuleLoader__.load({
       'heat.days': 'Active days',
       'heat.average': 'Daily avg',
       'heat.peak': 'Peak day',
+      'filter.year': 'Year',
+      'filter.yearAll': 'All years',
       'heat.ttft': 'First token',
       'heat.tps': 'Output speed',
       'balance.title': 'Provider balance',
@@ -3313,6 +3319,31 @@ body[data-ds-dark-theme] .tu-toasts,
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
 }
+/* 刻度标签：DOM 叠加在 canvas 内（svg 被横向拉伸，里面的文字会变形）。
+   字号小于轴标签，避免喧宾夺主。 */
+.tu-tick {
+  position: absolute;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.tu-tick-y {
+  left: 6px;
+  transform: translateY(-50%);
+  opacity: 0.85;
+}
+.tu-tick-x {
+  bottom: 6px;
+  transform: translateX(-50%);
+}
+.tu-year-select {
+  margin-left: 10px;
+  font-size: 12px;
+  padding: 5px 8px;
+}
 .tu-chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -3621,7 +3652,48 @@ function formatMoneyText(value) {
     // 且颜色全部走主题 token，亮/暗色自动跟随。
 
     /** 图表通用尺寸。 */
-    const CHART = { width: 720, height: 180, padTop: 12, padBottom: 22, padLeft: 8, padRight: 8 }
+    const CHART = { width: 720, height: 180, padTop: 12, padBottom: 26, padLeft: 46, padRight: 10 }
+
+    /**
+     * X 轴刻度下标：不超过 maxTicks 个、均匀分布、保证含首尾。
+     *
+     * 之前轴上只有首尾两个标签，「按小时」视图里等于没有时间参考。
+     */
+    function xAxisTicks(count, maxTicks = 6) {
+      if (count <= 1) return [0]
+      const step = Math.ceil(count / maxTicks)
+      const out = []
+      for (let i = 0; i < count; i += step) out.push(i)
+      if (out[out.length - 1] !== count - 1) out.push(count - 1)
+      return out
+    }
+
+    /**
+     * 图表刻度叠加层（DOM，不是 SVG 文本）。
+     *
+     * svg 用 preserveAspectRatio=none 横向拉满，SVG 里的 <text> 会跟着
+     * 拉伸变形，所以轴标签一律用绝对定位的 DOM 叠在 canvas 上。
+     * 坐标按 viewBox 比例换算：x% = x/720、y% = y/180。
+     */
+    function ChartTicks({ count, labelOf, max, formatValue }) {
+      const innerW = CHART.width - CHART.padLeft - CHART.padRight
+      const innerH = CHART.height - CHART.padTop - CHART.padBottom
+      const xPct = (index) => (CHART.padLeft
+        + (count > 1 ? (index / (count - 1)) * innerW : 0)) / CHART.width * 100
+      const yPct = (ratio) => (CHART.padTop + innerH * (1 - ratio)) / CHART.height * 100
+      return [
+        // 纵轴：顶/中/底三个数值，贴左
+        ...[1, 0.5, 0].map((ratio) => h('span', {
+          key: `y${ratio}`, className: 'tu-tick tu-tick-y',
+          style: { top: `${yPct(ratio)}%` },
+        }, formatValue(max * ratio))),
+        // 横轴：按粒度取若干刻度，贴画布底部
+        ...xAxisTicks(count).map((index) => h('span', {
+          key: `x${index}`, className: 'tu-tick tu-tick-x',
+          style: { left: `${xPct(index)}%` },
+        }, labelOf(index))),
+      ]
+    }
 
     /** 把数据点映射成折线路径（尖角，用于需要精确对齐的场合）。 */
     function linePath(points) {
@@ -3782,6 +3854,12 @@ function formatMoneyText(value) {
             )),
             )
             : null,
+          ...ChartTicks({
+            count: days.length,
+            labelOf: (index) => days[index]?.slice(5) ?? '',
+            max,
+            formatValue: formatCompact,
+          }),
         ),
         h('div', { className: 'tu-chart-legend' },
           series.map((item, seriesIndex) => h('span', { key: item.key },
@@ -3919,6 +3997,12 @@ function formatMoneyText(value) {
                 `${t('chart.legend.output')} ${formatCompact(hoverPoint.output)}`),
               )
               : null,
+            ...ChartTicks({
+              count: points.length,
+              labelOf: (index) => points[index]?.label ?? '',
+              max,
+              formatValue: formatCompact,
+            }),
           ),
           h('div', { className: 'tu-chart-legend' },
             h('span', null, h('i', { className: 'tu-dot tu-dot-input' }), t('chart.legend.input')),
@@ -4042,6 +4126,12 @@ function formatMoneyText(value) {
               : null,
             )
             : null,
+          ...ChartTicks({
+            count: points.length,
+            labelOf: (index) => points[index]?.label ?? '',
+            max,
+            formatValue,
+          }),
         ),
         h('div', { className: 'tu-chart-axis' },
           h('span', null, points[0].label),
@@ -4536,6 +4626,12 @@ function formatMoneyText(value) {
        * 用户改的是副本，点「保存预算」才写回 Host —— 中途取消不会影响已存配置。
        */
       const [budgetForm, setBudgetForm] = useState(null)
+      /**
+       * 跨年时的年份筛选（null = 不限年份）。
+       *
+       * 只在数据真的跨年时才显示选择器 —— 单一年份里放个「按年」下拉是噪音。
+       */
+      const [selectedYear, setSelectedYear] = useState(null)
       const [budgetBusy, setBudgetBusy] = useState(false)
       const [budgetNotice, setBudgetNotice] = useState('')
       // 查看某个供应商的模型清单：{ siteId, label, models } 或 null
@@ -4859,6 +4955,20 @@ function formatMoneyText(value) {
        */
       const totals = useMemo(() => {
         if (data === undefined) return undefined
+        // 选了年份：Host 预置的 all/today/week 快照都不对应这个窗口，
+        // 必须按该年的天重新聚合。这里就地取 byDay，不引用 rangeDays
+        // ——它在下面才声明，而 useMemo 回调渲染到这一行就执行了。
+        if (selectedYear !== null && selectedModels.length === 0) {
+          const yearSum = {
+            calls: 0, inputTokens: 0, outputTokens: 0,
+            cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0,
+          }
+          for (const [day, counters] of Object.entries(data.byDay ?? {})) {
+            if (!day.startsWith(selectedYear)) continue
+            for (const key of Object.keys(yearSum)) yearSum[key] += counters[key] ?? 0
+          }
+          return { ...yearSum, cacheHitRate: hitRateOf(yearSum) }
+        }
         if (selectedModels.length === 0) return data.totals?.[range]
         // 选中的模型：把它们的每日**完整计数器**逐项相加。
         // Host 的 byModelDay 带全部字段，因此输入/输出/缓存/推理都能算出来
@@ -4884,7 +4994,7 @@ function formatMoneyText(value) {
           }
         }
         return { ...sum, cacheHitRate: hitRateOf(sum) }
-      }, [data, range, selectedModels])
+      }, [data, range, selectedModels, selectedYear])
 
       const rangeTabs = [
         { id: 'today', label: t('range.today') },
@@ -4968,11 +5078,18 @@ function formatMoneyText(value) {
        */
       const rangeDays = useMemo(() => {
         if (data === undefined) return []
-        if (range === 'all') return []
         const days = Object.keys(data.byDay ?? {}).sort()
+        // 选了具体年份就以该年的全部天为准，盖过范围
+        if (selectedYear !== null) return days.filter((day) => day.startsWith(selectedYear))
+        if (range === 'all') return []
         if (range === 'today') return data.today === undefined ? days.slice(-1) : [data.today]
         return days.slice(-7)
-      }, [data, range])
+      }, [data, range, selectedYear])
+
+      /** 数据里出现过的年份（升序）。多于一个才值得显示年份选择器。 */
+      const availableYears = useMemo(() => [...new Set(
+        Object.keys(data?.byDay ?? {}).map((day) => day.slice(0, 4)),
+      )].sort(), [data])
 
       /** 空计数器工厂（与 Host 的 emptyCounters 字段一致）。 */
       const zeroCounters = () => ({
@@ -5483,13 +5600,13 @@ function formatMoneyText(value) {
        * 数据来源相应变化：小时用 byHour、天用 trend、月/年从 byDay 聚合。
        */
       const trendGranularity = (() => {
+        // 选了具体年份就按月看：一年 12 个点，比把两年几百天挤一起可读
+        if (selectedYear !== null) return 'month'
         if (range === 'today') return 'hour'
         if (range === 'week') return 'day'
         // 全部：跨年就按年，否则按月
-        const days = Object.keys(data?.byDay ?? {})
-        const years = new Set(days.map((day) => day.slice(0, 4)))
+        const years = new Set(Object.keys(data?.byDay ?? {}).map((day) => day.slice(0, 4)))
         if (years.size > 1) return 'year'
-        // 单年内：按月；若数据不足 3 个月，按月也没几个点，仍按月
         return 'month'
       })()
 
@@ -5593,7 +5710,10 @@ function formatMoneyText(value) {
 
         if (trendGranularity === 'month') {
           return bucketize(
-            (day) => day.slice(0, 7),
+            // 选了年份就只保留该年的天：bucketKeyOf 返回 undefined 即跳过
+            (day) => (selectedYear !== null && !day.startsWith(selectedYear)
+              ? undefined
+              : day.slice(0, 7)),
             (month) => `${Number(month.slice(5))}月`,
           )
         }
@@ -5603,7 +5723,7 @@ function formatMoneyText(value) {
           (day) => day.slice(0, 4),
           (year) => year,
         )
-      }, [data, selectedModels, rangeDays, range, trendGranularity])
+      }, [data, selectedModels, rangeDays, range, trendGranularity, selectedYear])
 
       // 右上角工具区：Star / 检查更新 / 重载，与刷新按钮并排。
       const starsUrl = props?.repositoryUrl ?? data?.repositoryUrl
@@ -5736,9 +5856,29 @@ function formatMoneyText(value) {
               key: tab.id,
               type: 'button',
               className: 'tu-tab',
-              'data-active': range === tab.id ? 'true' : 'false',
-              onClick: () => setRange(tab.id),
+              // 选了年份时「全部」不再处于激活态——此时看的是某一年
+              'data-active': range === tab.id && selectedYear === null ? 'true' : 'false',
+              onClick: () => {
+                setRange(tab.id)
+                // 切范围就退出年份视角，两个筛选同时生效会说不清在看什么
+                setSelectedYear(null)
+              },
             }, tab.label)),
+          // 跨年时才给年份入口：单一年份里放「按年」下拉是噪音。
+          range === 'all' && availableYears.length > 1
+            ? h('select', {
+              className: 'tu-input tu-select tu-year-select',
+              'aria-label': t('filter.year'),
+              value: selectedYear ?? '__all__',
+              onChange: (event) => {
+                const value = event.target.value
+                setSelectedYear(value === '__all__' ? null : value)
+              },
+            },
+            h('option', { value: '__all__' }, t('filter.yearAll')),
+            ...availableYears.map((year) => h('option', { key: year, value: year }, `${year}`)),
+            )
+            : null,
         ),
         // 模型筛选：下拉面板 + 复选行。芯片平铺会占满整行（模型多时尤其
         // 拥挤），收进下拉里更整齐，同时也支持多选与逐个取消。
@@ -7208,6 +7348,16 @@ function formatMoneyText(value) {
             ? null
             : h('p', { className: 'tu-hint', style: { color: 'var(--dsw-alias-state-success-primary)' } }, budgetNotice),
 
+          // —— 当前用量总览 ——
+          // 从统计页挪过来：那一排进度条属于「结果」，和这里的「配置」放在一起
+          // 正好对照着看；留在统计页则像一块和主视图无关的挂件。
+          budgetGroupBars === null
+            ? null
+            : h('section', { className: 'tu-budget-section' },
+              h('h3', { className: 'tu-budget-h3' }, t('budget.current')),
+              budgetGroupBars,
+            ),
+
           // —— 全局预算 ——
           h('section', { className: 'tu-budget-section' },
             h('h3', { className: 'tu-budget-h3' }, t('budget.global')),
@@ -7773,7 +7923,7 @@ function formatMoneyText(value) {
       }
 
       return h('div', { className: 'tu-root' },
-        head, scanBar, toolbar, tabs, accountBar, cards, budgetGroupBars, charts, heatmap, sections,
+        head, scanBar, toolbar, tabs, accountBar, cards, charts, heatmap, sections,
         warn, note, versionModal, priceModal, aliasModal)
     }
 
