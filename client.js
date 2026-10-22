@@ -3311,7 +3311,7 @@ body[data-ds-dark-theme] .tu-toasts,
 }
 .tu-chart-axis {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   gap: 8px;
   font-size: 11.5px;
@@ -3867,10 +3867,9 @@ function formatMoneyText(value) {
             item.label === 'rest' ? t('chart.groupRest') : item.label,
           )),
         ),
+        // 首/尾时间标签已在画布内的 x 刻度里，这里只居中给个峰值摘要
         h('div', { className: 'tu-chart-axis' },
-          h('span', null, days[0].slice(5)),
           h('span', null, `${formatCompact(max)} ↑`),
-          h('span', null, days[days.length - 1].slice(5)),
         ),
       )
     }
@@ -4010,9 +4009,7 @@ function formatMoneyText(value) {
             h('span', null, h('i', { className: 'tu-dot tu-dot-output' }), t('chart.legend.output')),
           ),
           h('div', { className: 'tu-chart-axis' },
-            h('span', null, points[0].label),
             h('span', null, `${formatCompact(Math.max(...totals, 0))} ↑`),
-            h('span', null, points[points.length - 1].label),
           ),
         )
       }
@@ -4134,9 +4131,7 @@ function formatMoneyText(value) {
           }),
         ),
         h('div', { className: 'tu-chart-axis' },
-          h('span', null, points[0].label),
           h('span', null, `${formatValue(max)} ↑`),
-          h('span', null, points[points.length - 1].label),
         ),
       )
     }
