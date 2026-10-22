@@ -4255,13 +4255,35 @@ function formatMoneyText(value) {
       // 否则行不对应固定星期（第 1 行有时是周三、有时是周六），
       // 热力图就失去了「每周节奏」这个最重要的读法。
       //
-      // 做法：先算出窗口起点，再回退到它所在周的周日。
-      const last = days[days.length - 1]
-      const lastDate = new Date(`${last}T00:00:00`)
-      const start = new Date(lastDate)
-      start.setDate(start.getDate() - (WEEKS * WEEK - 1))
-      // getDay(): 0=周日。回退到本周周日
-      start.setDate(start.getDate() - start.getDay())
+      // 窗口锚点用**今天**，而不是「最后一条有数据的日期」。
+      //
+      // 为什么：早先 anchor 取 days 末尾，等于「有调用才滚动」。用户若停用
+      // 一段时间（例如已经是 2027 年、但最后一次调用在 2026-10），热力图会
+      // 一直停在 2026-10，看起来像坏掉了。以今天为锚点，月份标签（8月…10月）
+      // 才会随时间自然前移。
+      //
+      // 兜底：如果今天早于所有数据（时钟异常/导入旧数据），退回用最后有
+      // 数据的日期，免得窗口滑到未来、一格数据都看不到。
+      const todayStr = data?.today
+      const lastWithData = days[days.length - 1]
+      const anchor = (typeof todayStr === 'string' && todayStr > lastWithData)
+        ? todayStr
+        : lastWithData
+      const anchorDate = new Date(`${anchor}T00:00:00`)
+      /**
+       * 起点 = 锚点所在周的**周日**，再往回铺 WEEKS 周。
+       *
+       * 顺序很重要：先把锚点对齐到它那周的周日，再整体回退 (WEEKS-1) 周。
+       * 早先是「先回退 371 天、再对齐周日」，两者叠加会让窗口末尾落到
+       * 今天之前好几天 —— 本周的格子被挤出窗口，今天的用量根本画不出来。
+       *
+       * 这样算出来的最后一列恰好覆盖锚点那一整周（周日到周六），
+       * 今天一定在窗口内。
+       */
+      const weekStart = new Date(anchorDate)
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay()) // 0=周日
+      const start = new Date(weekStart)
+      start.setDate(start.getDate() - (WEEKS - 1) * WEEK)
 
       const cells = []
       const cursor = new Date(start)

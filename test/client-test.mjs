@@ -550,6 +550,36 @@ function renderWithTab(tabLabel) {
   check('单年数据不显示按年粒度', !allView.flat.includes('按年'))
 }
 
+// —— 热力图窗口以「今天」为锚点，且今天必须落在窗口内 ——
+// 回归点：
+//  ① anchor 曾取「最后一条有数据的日期」，停用一段时间后窗口不滚动
+//     （2027 年还显示 25-26 的数据）
+//  ② 起点「先回退 371 天再对齐周日」叠加错位，窗口末尾落在今天之前
+//     好几天，本周格子被挤出窗口，今天的用量画不出来
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  check('热力图锚点用 today', src.includes('const todayStr = data?.today'), true)
+  // 顺序：先对齐周日，再回退 (WEEKS-1) 周
+  const alignIdx = src.indexOf('weekStart.setDate(weekStart.getDate() - weekStart.getDay())')
+  const backIdx = src.indexOf('start.setDate(start.getDate() - (WEEKS - 1) * WEEK)')
+  check('先对齐周日再回退整周', alignIdx > 0 && backIdx > alignIdx, true)
+
+  // 行为验证：用同一套算法确认今天在窗口内
+  const WEEK = 7
+  const WEEKS = 53
+  const win = (anchor) => {
+    const a = new Date(`${anchor}T00:00:00`)
+    const ws = new Date(a); ws.setDate(ws.getDate() - ws.getDay())
+    const start = new Date(ws); start.setDate(start.getDate() - (WEEKS - 1) * WEEK)
+    const end = new Date(start); end.setDate(end.getDate() + WEEKS * WEEK - 1)
+    return { start, end, inside: a >= start && a <= end }
+  }
+  check('今天落在窗口内', win('2026-10-22').inside, true)
+  // 停用后锚点前移，窗口跟着滚动（不再停在旧月份）
+  const later = win('2027-03-15')
+  check('停用后窗口滚动到当前年', later.end.getFullYear() === 2027, true)
+}
+
 // —— 深色主题标记：必须是 body[data-ds-dark-theme] ——
 // 回归点：早先写 [data-theme='dark']，而 DSH 实际把深色打在 body 的
 // data-ds-dark-theme 上，整块深色分类色/热力色阶从未生效（热力图变白块）。
