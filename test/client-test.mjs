@@ -550,6 +550,26 @@ function renderWithTab(tabLabel) {
   check('单年数据不显示按年粒度', !allView.flat.includes('按年'))
 }
 
+// —— 热力图必须能真的渲染出来（不是只要有数据就抛错）——
+// 盲区说明：此前热力图完全没有渲染测试。上一版在组件里写了 `data?.today`，
+// 而 ActivityHeatmap 的 props 里没有 data —— 直接 ReferenceError，
+// 整个面板白屏、插件打不开，但 12 套测试全绿。这里补上真实渲染。
+{
+  resetHooks()
+  let renderError
+  let flat
+  try {
+    const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    flat = textsOf(tree)
+  } catch (error) {
+    renderError = error
+  }
+  check('热力图渲染不抛错', renderError === undefined, renderError?.message)
+  check('热力图标题已渲染', flat.includes('活动热力图'), true)
+  // 热力图必须画出格子（有数据的 fixtures 至少一天）
+  check('热力图渲染出格子', flat.includes('tu-heat-cell'), true)
+}
+
 // —— 热力图窗口以「今天」为锚点，且今天必须落在窗口内 ——
 // 回归点：
 //  ① anchor 曾取「最后一条有数据的日期」，停用一段时间后窗口不滚动
@@ -558,7 +578,9 @@ function renderWithTab(tabLabel) {
 //     好几天，本周格子被挤出窗口，今天的用量画不出来
 {
   const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
-  check('热力图锚点用 today', src.includes('const todayStr = data?.today'), true)
+  // 锚点来自 today prop（不是裸的 data —— 那个变量在组件作用域里不存在）
+  check('热力图锚点用 today prop', src.includes('const todayStr = today'), true)
+  check('热力图 props 含 today', src.includes('function ActivityHeatmap({ byDay, t, onPickDay, activeDay, summary, today })'), true)
   // 顺序：先对齐周日，再回退 (WEEKS-1) 周
   const alignIdx = src.indexOf('weekStart.setDate(weekStart.getDate() - weekStart.getDay())')
   const backIdx = src.indexOf('start.setDate(start.getDate() - (WEEKS - 1) * WEEK)')

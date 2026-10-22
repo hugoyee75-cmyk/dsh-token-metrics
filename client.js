@@ -4213,7 +4213,7 @@ function formatMoneyText(value) {
      * @param {object} props.byDay day -> counters
      * @param {object} props.summary 当期汇总（活跃天数、日均、峰值）
      */
-    function ActivityHeatmap({ byDay, t, onPickDay, activeDay, summary }) {
+    function ActivityHeatmap({ byDay, t, onPickDay, activeDay, summary, today }) {
       const WEEK = 7
       const days = Object.keys(byDay ?? {}).sort()
       // 固定 53 周（一年）。参考 GitHub 日历风：格子边长由容器宽度反算，
@@ -4264,7 +4264,10 @@ function formatMoneyText(value) {
       //
       // 兜底：如果今天早于所有数据（时钟异常/导入旧数据），退回用最后有
       // 数据的日期，免得窗口滑到未来、一格数据都看不到。
-      const todayStr = data?.today
+      // 用 prop 传入的 today。早先写成 data?.today —— 那个 `data` 在本组件
+      // 作用域里不存在（props 只有 byDay/t/onPickDay/activeDay/summary），
+      // 直接抛 ReferenceError，整个面板渲染失败（插件打不开）。
+      const todayStr = today
       const lastWithData = days[days.length - 1]
       const anchor = (typeof todayStr === 'string' && todayStr > lastWithData)
         ? todayStr
@@ -6377,6 +6380,7 @@ function formatMoneyText(value) {
           // 范围/年份筛选。它的用途是看长期使用节奏，跟着筛选变反而会
           // 失去「一年里什么时候用得多」这个唯一的参照。
           byDay: data?.byDay,
+          today: data?.today,
           t,
           summary: heatSummary,
           activeDay: dayFrom,
