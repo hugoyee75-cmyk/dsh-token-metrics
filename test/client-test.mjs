@@ -201,7 +201,16 @@ globalThis.fetch = async () => ({
           { key: 'qoder/qfmodel', label: 'qfmodel', values: { '2026-10-17': 100, '2026-10-18': 200, '2026-10-19': 150 } },
         ],
       },
-      config: { showSessions: true, snapshotCacheMs: 3000, retentionDays: 400, trackAccount: true, maxTrendSeries: 6 },
+      config: {
+        showSessions: true, snapshotCacheMs: 3000, retentionDays: 400,
+        trackAccount: true, maxTrendSeries: 6,
+        // 带一个分组预算：让挪到预算页顶部的「当前用量」总览真的渲染，
+        // 顺带覆盖 budgetGroupBars 的按范围聚合逻辑。
+        budget: {
+          dailyUsd: 10, monthlyUsd: 200, warnPercent: 80,
+          groups: [{ id: 'g1', label: '日常编码', models: ['deepseek-v4.1-flash'], dailyUsd: 3, monthlyUsd: 60 }],
+        },
+      },
       byProject: {
         '/home/dev/projects/dsh-token-metrics': { calls: 8, inputTokens: 2000, outputTokens: 500, cacheReadTokens: 800, totalTokens: 3300, cacheHitRate: 0.28 },
         '/home/dev/projects/multi-agent': { calls: 4, inputTokens: 1400, outputTokens: 400, cacheReadTokens: 400, totalTokens: 2200, cacheHitRate: 0.22 },
@@ -529,9 +538,28 @@ function renderWithTab(tabLabel) {
   const weekView = renderWithTab('近 7 天')
   check('近7天按天', weekView.flat.includes('按天'), true)
   const allView = renderWithTab('全部')
-  // 测试数据同一年 -> 按月；若将来改数据跨年则会变按年，两者都算对
-  check('全部按月或按年',
-    allView.flat.includes('按月') || allView.flat.includes('按年'), true)
+  // 测试数据全在同一年 -> 确定按月，且不应出现「按年」
+  check('单年全部按月', allView.flat.includes('按月'), true)
+  check('单年数据不显示按年粒度', !allView.flat.includes('按年'))
+}
+
+// —— 深色主题标记：必须是 body[data-ds-dark-theme] ——
+// 回归点：早先写 [data-theme='dark']，而 DSH 实际把深色打在 body 的
+// data-ds-dark-theme 上，整块深色分类色/热力色阶从未生效（热力图变白块）。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  check('深色选择器含 body[data-ds-dark-theme]', src.includes('body[data-ds-dark-theme]'))
+  check('深色块同时保留 data-theme 兜底', src.includes("[data-theme='dark'] .tu-root"))
+}
+
+// —— 预算页可达且是配置页（分组预算条已从统计页挪来） ——
+{
+  const budgetView = renderWithTab('预算')
+  check('能切到预算页', budgetView.clicked)
+  check('预算页有全局预算配置', budgetView.flat.includes('全局预算'))
+  check('预算页有每日预算输入标签', budgetView.flat.includes('每日预算'))
+  // 切回统计页：后续既有断言都在统计视图上找元素，停在预算页会误伤
+  renderWithTab('统计')
 }
 
 const modelView = renderWithTab('模型')
