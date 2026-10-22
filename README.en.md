@@ -17,6 +17,8 @@ provider-balance management.
 - Usage ranking by model and by provider
 - Cache hit rate — whether you are paying to re-read the same input
 - Token spend by project and by subagent
+- Time to first token and output speed — how fast, not just how much
+- An activity heatmap: which days you used the most across a year
 
 **Cost**
 
@@ -26,11 +28,13 @@ provider-balance management.
 - One-click USD / RMB toggle with a live exchange rate
 - Models with no matching price are listed as "unpriced" with an entry point to
   set a price — never silently counted as zero
+- **Budget**: set a daily / monthly budget globally or per model group (a group
+  can cover several models), with a live used-percentage bar
 
 **Model access**
 
-- 32 service presets, China-first, filling in URL and protocol on selection
-- Provider balances and quotas: Sub2API / new-api / one-api gateways plus eight
+- 34 service presets, China-first, filling in URL and protocol on selection
+- Provider balances and quotas: Sub2API / new-api / one-api gateways plus ten
   official platforms
 - Capabilities auto-detected from pi-ai's model catalog (1241 models): context
   window, output limit, thinking levels, attachments
@@ -38,8 +42,9 @@ provider-balance management.
 
 **Alerts**
 
-- Seven alert types pushed to the bottom-right: low balance, low quota, quota
-  resetting soon, query failed, plugin update and more
+- Eight alert types pushed to the bottom-right: low balance, low quota, quota
+  resetting soon, query failed, plugin update, a **peak/off-peak switch warning**
+  and **budget running low**
 
 The data comes from DSH's own session logs. The plugin sends no extra requests and uploads nothing.
 
@@ -68,7 +73,7 @@ The first time you open the panel, the plugin backfills your existing session lo
 
 ### Stats page (dark theme)
 
-Time range and model filters on top, eight summary metrics below them, then the
+Time range and model filters on top, nine summary metrics below them, then the
 trend chart and model-share donut, and finally a detail table you can switch
 between model / origin / project / provider / account / date views. Switching
 between today / last 7 days / all time updates the cards, charts, tables and
@@ -99,9 +104,10 @@ so they do not pop up repeatedly.
 
 ## What the panel shows
 
-- **Totals**: input / output / cacheRead / cacheWrite / reasoning / total / call count / cache hit rate
+- **Totals**: input / output / cacheRead / reasoning / total / call count / cache hit rate / average time to first token
 - **Time ranges**: today, last 7 days, all time
-- **Charts**: one switchable main trend chart (total / hit rate / input breakdown / **by model** — smooth curves, hover for exact values) plus a donut chart of model share
+- **Charts**: one switchable main trend chart (total / hit rate / input breakdown / **by model** / **cost** — smooth curves, axis ticks, hover for exact values) plus a donut chart of model share
+- **Adaptive trend granularity**: by hour for today, by day for last 7 days, by month for all; a year picker appears once data spans multiple years
 - **Model filter**: a multi-select dropdown — pick one model, several, or clear the selection; metric cards and the trend chart refresh together
 - **Model merging**: the donut and trend merge by **model name** across providers, while the detail table still splits by provider
 - **Chart colors**: category colors ship light and dark values and follow the theme
@@ -372,12 +378,12 @@ balances, available models, and one-click sync into the DSH model config.
 Pick a **service** first — the URL and protocol fill in automatically, which avoids
 the classic mistake of pairing an Anthropic URL with the OpenAI protocol.
 
-**32 presets**, ordered China → international → custom:
+**34 presets**, ordered China → international → custom:
 
 | Group | Includes |
 | --- | --- |
-| China models | DeepSeek, Kimi, Zhipu GLM, MiniMax, Alibaba Bailian, Volcano Ark, Baidu Qianfan, Tencent Hunyuan, Baichuan, StepFun, SiliconFlow |
-| China coding plans | Zhipu, Kimi, MiniMax, Alibaba, Volcano |
+| China models | DeepSeek, Kimi, Zhipu GLM, MiniMax, Alibaba Bailian, Volcano Ark, Baidu Qianfan, Tencent Hunyuan, Baichuan, StepFun, SiliconFlow, Xiaomi MiMo |
+| China coding plans | Zhipu, Kimi, MiniMax, Alibaba, Volcano, Xiaomi MiMo |
 | International | OpenAI, Anthropic, Gemini, xAI, Groq, Mistral, Together, Fireworks, DeepInfra, Cerebras, OpenRouter, Novita |
 | Custom relays | Sub2API, new-api, one-api, no balance query |
 
@@ -415,15 +421,20 @@ Detected by `baseURL` hostname, each hitting its own endpoint:
 | SiliconFlow | `/v1/user/info` | balance |
 | Novita | `/v3/user/balance` | balance |
 | StepFun | `/v1/accounts` | balance |
-| Kimi | `/coding/v1/usages` | quota |
+| Volcano Ark | `/api/v3/billing/balance` | balance |
+| Kimi | `/coding/v1/usages` (falls back to `/v1/users/me/balance` with no plan) | quota + balance |
 | Zhipu GLM | `/api/monitor/usage/quota/limit` | quota |
 | MiniMax | `/v1/usage` | quota |
+| OpenAI | `/v1/organization/costs` (needs an `sk-admin-` org key) | 30-day usage |
 
 **Platforms that cannot be queried say so explicitly** instead of failing vaguely:
 
 - **ChatGPT / Codex**: subscription quota is bound to the account sign-in; API key
   requests return 403 (verified)
 - **Gemini**: Google offers no public quota endpoint
+- **Alibaba Bailian / Xiaomi MiMo**: the hostname is recognised but there is no
+  public balance endpoint (every MiMo candidate returns 404 in testing), so the
+  plugin points to the console instead of firing pointless requests
 
 ### Model capability auto-detection
 
