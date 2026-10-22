@@ -168,9 +168,14 @@ check('未知渠道给低分', channelTrust('some-random/xxx'), 20)
   check('倍率为负数时退回 1', Number(costOf(counters, price, -3).toFixed(6)), 2.3)
   check('无价格时成本为 0', costOf(counters, undefined), 0)
 
-  // 推理 token 按输出价计
-  const withReasoning = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 1_000_000 }
-  check('推理 token 按输出价', Number(costOf(withReasoning, price).toFixed(6)), 2)
+  // 推理 token **不单独计价**：outputTokens 已含思考部分，再加一次等于重复收费。
+  // 回归点：旧断言把「reasoning 按输出价再算一遍」当正确答案（2.0），
+  // 实测 10 个有 reasoning 的模型 reasoning 恒 <= output，确认是子集关系。
+  const reasoningOnly = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 1_000_000 }
+  check('推理 token 不重复计费', costOf(reasoningOnly, price), 0)
+  // 含在 output 里时按 output 计一次，不额外加
+  const outputWithReasoning = { inputTokens: 0, outputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 1_000_000 }
+  check('output 含推理时只算一次', Number(costOf(outputWithReasoning, price).toFixed(6)), 2)
 }
 
 //#endregion
