@@ -41,13 +41,32 @@ Token 用量统计页，顺带管好成本与供应商余额。
 
 ## 安装
 
-在 DSH 里执行：
+### 按包名安装（推荐，走 npm）
+
+在 DSH 的「添加插件」搜索框输入 `dsh-token-metrics`，或在插件管理里执行：
 
 ```
-plugin_manager install_bundle /path/to/dsh-token-metrics
+plugin_manager install_bundle dsh-token-metrics
 ```
 
-或手动加到 profile 的 `package.json`：
+> 装的是 npm 上的发布版。DSH 默认可能是国内镜像源，若装到的是旧版本，把
+> 安装源临时切到官方源，或等镜像同步后重试。
+
+### 从 GitHub 安装
+
+```
+plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics
+```
+
+锁定某个版本加 `#v0.3.1`：
+
+```
+plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics#v0.3.1
+```
+
+### 本地开发（link）
+
+改代码即时生效时用本地目录，把 `dsh-token-metrics` 指到你的仓库：
 
 ```json
 {
@@ -56,7 +75,7 @@ plugin_manager install_bundle /path/to/dsh-token-metrics
 }
 ```
 
-重启 DSH，侧边栏就会出现「Token 用量统计」图标。装完第一次打开页面，插件会自动回扫历史会话日志，把以前的用量补上。
+装完重启 DSH（或热重载），侧边栏就会出现「Token 用量统计」图标。第一次打开页面，插件会自动回扫历史会话日志，把以前的用量补上。
 
 ## 界面
 

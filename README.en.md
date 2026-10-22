@@ -50,13 +50,34 @@ The data comes from DSH's own session logs. The plugin sends no extra requests a
 
 ## Install
 
-From inside DSH:
+### By package name (recommended, via npm)
+
+Type `dsh-token-metrics` in DSH's "Add plugin" search box, or run it from the
+plugin manager:
 
 ```
-plugin_manager install_bundle /path/to/dsh-token-metrics
+plugin_manager install_bundle dsh-token-metrics
 ```
 
-Or add it to your profile's `package.json` by hand:
+> This installs the published npm version. DSH may default to a China mirror; if
+> you get an older version, switch the install source to the official registry
+> briefly, or wait for the mirror to sync and retry.
+
+### From GitHub
+
+```
+plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics
+```
+
+Pin a version with `#v0.3.1`:
+
+```
+plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics#v0.3.1
+```
+
+### Local development (link)
+
+To edit code and see it live, point the package at your working copy:
 
 ```json
 {
@@ -65,9 +86,9 @@ Or add it to your profile's `package.json` by hand:
 }
 ```
 
-Restart DSH and a "Token Usage Stats" icon appears in the sidebar.
-
-The first time you open the panel, the plugin backfills your existing session logs so your earlier usage shows up too.
+After restarting DSH (or hot-reloading) a "Token Usage Stats" icon appears in
+the sidebar. The first time you open the panel it backfills your existing
+session logs, so earlier usage shows up too.
 
 ## Screenshots
 
