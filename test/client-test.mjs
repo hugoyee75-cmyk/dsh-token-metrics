@@ -130,12 +130,22 @@ globalThis.fetch = async () => ({
         week: { calls: 10, inputTokens: 3000, outputTokens: 700, cacheReadTokens: 900, cacheWriteTokens: 0, reasoningTokens: 250, totalTokens: 4600 },
       },
       byDay: {
-        // 跨月数据：趋势图「全部」范围按月聚合，只有 1 个月就画不出线
-        '2026-08-15': { calls: 1, inputTokens: 200, outputTokens: 50, totalTokens: 250 },
-        '2026-09-10': { calls: 2, inputTokens: 400, outputTokens: 80, totalTokens: 480 },
-        '2026-10-17': { calls: 2, inputTokens: 500, outputTokens: 100, totalTokens: 600 },
-        '2026-10-18': { calls: 3, inputTokens: 700, outputTokens: 150, totalTokens: 850 },
-        '2026-10-19': { calls: 3, inputTokens: 800, outputTokens: 200, totalTokens: 1100 },
+        // 跨月数据：趋势图「全部」范围按月聚合，只有 1 个月就画不出线。
+        // cacheReadTokens 必须有：否则命中率恒为 0，「图表全 0 而顶部 70%」
+        // 这个矛盾在测试里永远测不出来（原来的夹具就缺这个字段）。
+        '2026-08-15': { calls: 1, inputTokens: 200, outputTokens: 50, cacheReadTokens: 600, totalTokens: 250 },
+        '2026-09-10': { calls: 2, inputTokens: 400, outputTokens: 80, cacheReadTokens: 800, totalTokens: 480 },
+        '2026-10-17': { calls: 2, inputTokens: 500, outputTokens: 100, cacheReadTokens: 1500, totalTokens: 600 },
+        '2026-10-18': { calls: 3, inputTokens: 700, outputTokens: 150, cacheReadTokens: 2100, totalTokens: 850 },
+        '2026-10-19': { calls: 3, inputTokens: 800, outputTokens: 200, cacheReadTokens: 2400, totalTokens: 1100 },
+      },
+      // 小时 × 模型：今日「按模型」按小时画曲线需要它
+      byHourModel: {
+        '2026-10-19': {
+          '09': { 'deepseek-v4.1-flash': { calls: 1, totalTokens: 12_000_000, cacheReadTokens: 6_000_000 } },
+          '10': { 'deepseek-v4.1-flash': { calls: 1, totalTokens: 18_000_000, cacheReadTokens: 9_000_000 } },
+          '14': { 'deepseek-v4.1-flash': { calls: 1, totalTokens: 20_000_000, cacheReadTokens: 10_000_000 } },
+        },
       },
       // 小时桶：供「今日」范围按小时画曲线
       byHour: {
@@ -550,6 +560,82 @@ function renderWithTab(tabLabel) {
   check('单年数据不显示按年粒度', !allView.flat.includes('按年'))
 }
 
+// —— 刷新统一：页内不再有重复的刷新按钮 ——
+// 回归点：供应商页原有一个「刷新全部余额」按钮，但它调用 loadBalance()
+// 只重读已存状态、并不去查询余额，属于无效按钮；顶栏刷新也只刷统计。
+// 现在顶栏刷新是全局的，各页面注册自己的动作。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  // 只检查「按钮内」的那个调用：切标签页 / 首屏加载时的 loadBalance 是对的。
+  // 注意本文件的 check 是真值断言，否定条件要取反后再传。
+  check('供应商页不再有刷新全部余额按钮',
+    !src.includes('onClick: () => { void loadBalance() }'))
+  check('存在全局刷新处理器槽位', src.includes('MODULE_REFRESH_HANDLERS'), true)
+  check('刷新会执行页面处理器', src.includes('for (const handler of refreshHandlersRef.current)'), true)
+  check('供应商页注册了刷新动作', /MODULE_REFRESH_HANDLERS\.current = \[async/.test(src), true)
+}
+
+// —— 趋势图命中率不能恒为 0 ——
+// 回归点：toTrendPoint 里写成 counters.input / counters.cacheRead（两个字段
+// 都不存在），undefined+undefined=NaN，NaN>0 为 false，恒走 :0 分支。
+// 顶部卡片 70%、图表全是 0.0%，用户一眼看出矛盾。
+// 断言必须走**真实渲染**：切到命中率模式，读数轴与提示里的百分比。
+{
+  resetHooks()
+  const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  walkTree(tree, (node) => {
+    if (node?.type !== 'button' || !Array.isArray(node.children)) return
+    const text = node.children.filter((c) => typeof c === 'string').join('')
+    if (text === '命中率') node.props?.onClick?.()
+  })
+  resetHooks()
+  const cacheFlat = textsOf(panel.component({ t: panelInject.t, locale: panelInject.locale }))
+  // 夹具里每天都有 cacheReadTokens，命中率绝不可能整条线是 0.0%
+  const percents = [...cacheFlat.matchAll(/(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]))
+  const positive = percents.filter((p) => p > 0)
+  console.log('    [dbg] 命中率模式百分比:', percents.slice(0, 12).join(','))
+  console.log('    [dbg] 是否切到命中率:', cacheFlat.includes('命中率') ? '文本含命中率' : '无')
+  // 只取图表 y 轴刻度：命中率模式下 max 若为 1.0%，说明 rate 全 0
+  // （代码里 `Math.max(...rawValues, 1)` 会把全零兜成 1）
+  const tickPercents = [...cacheFlat.matchAll(/tu-tick-y (\d+(?:\.\d+)?)%/g)]
+    .map((m) => Number(m[1]))
+  const maxTick = tickPercents.length > 0 ? Math.max(...tickPercents) : 0
+  check('命中率 y 轴刻度不是全零兜底',
+    maxTick > 1, `实际最大值 ${maxTick}%（1.0% 说明 rate 恒为 0 被兜底）`)
+
+  // 静态兜底：字段名必须是 inputTokens，不能是不存在的 input
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  check('命中率不再用不存在的 counters.input',
+    /counters\.input\b(?!Tokens)/.test(src), false)
+}
+
+// —— Y 轴自适应，不固化；X 轴点数有上限 ——
+// 回归点：长期累积后总量到万亿级，若 Y 轴写死上限会可视化失效。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+
+  // formatCompact 必须支持 T 档（5 万亿显示 5T 而不是 5000B）
+  const fcFn = src.match(/function formatCompact\(value\) \{[\s\S]*?\n    \}/)[0]
+  const formatCompact = new Function('formatNumber', `${fcFn}; return formatCompact`)((n) => String(n))
+  check('万亿显示为 T 档', formatCompact(9.9e12), '9.9T')
+  check('百亿显示为 B 档', formatCompact(1.2e10), '12B')
+  check('不出现尾零', formatCompact(5.3e11), '530B')
+
+  // niceMax 随数据自增长、带留白、无固定上限
+  const niceFn = src.match(/function niceMax\(rawMax\) \{[\s\S]*?\n    \}/)[0]
+  const niceMax = new Function(`${niceFn}; return niceMax`)()
+  check('Y 轴上限不小于数据', niceMax(9.9e12) >= 9.9e12, `实际 ${niceMax(9.9e12)}`)
+  check('Y 轴留有留白余量', niceMax(1e6) > 1e6, `实际 ${niceMax(1e6)}`)
+  // 万亿级也正常工作，不因固定常量卡住
+  const huge = niceMax(4.5e13)
+  check('万亿级 Y 轴仍有效', huge >= 4.5e13 && Number.isFinite(huge), `实际 ${huge}`)
+
+  // X 轴标签有上限（不会因数据点多而堆叠）
+  const xFn = src.match(/function xAxisTicks\(count, maxTicks \= 6\) \{[\s\S]*?\n    \}/)[0]
+  const xAxisTicks = new Function(`${xFn}; return xAxisTicks`)()
+  check('X 轴标签有数量上限', xAxisTicks(400).length <= 7, `实际 ${xAxisTicks(400).length}`)
+}
+
 // —— 热力图必须能真的渲染出来（不是只要有数据就抛错）——
 // 盲区说明：此前热力图完全没有渲染测试。上一版在组件里写了 `data?.today`，
 // 而 ActivityHeatmap 的 props 里没有 data —— 直接 ReferenceError，
@@ -644,6 +730,37 @@ function renderWithTab(tabLabel) {
     return chartNode === undefined ? '' : textsOf(chartNode)
   })()
   // 这个文件的 check 是「真值断言」：传 false 会被判失败，所以这里传取反后的正条件
+  // 今日「按模型」必须按**小时**呈现（标题写「按小时」就得真的是小时）。
+  // 回归点：此前后端只有 byHour 合计、没有分模型数据，前端只能用按天数据，
+  // 于是标题写「按小时」图上却只有当天一个点（用户截图指出）。
+  const todayModelHours = (() => {
+    resetHooks()
+    const tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    walkTree(tree, (node) => {
+      if (node?.type !== 'button' || !Array.isArray(node.children)) return
+      const text = node.children.filter((c) => typeof c === 'string').join('')
+      if (text === '今日' || text === '按模型') node.props?.onClick?.()
+    })
+    resetHooks()
+    const rendered = panel.component({ t: panelInject.t, locale: panelInject.locale })
+    let chart
+    walkTree(rendered, (node) => { if (node?.props?.className === 'tu-chart') chart = node })
+    return chart === undefined ? '' : textsOf(chart)
+  })()
+  check('今日按模型出现小时轴标签',
+    /\d{2}:00/.test(todayModelHours), `实际: ${todayModelHours.slice(0, 160)}`)
+  // y 轴不能是 1（Math.max 兜底），说明数据真的进来了
+  check('今日按模型 y 轴有真实量级',
+    /tu-tick-y \d{2,}/.test(todayModelHours), `实际: ${todayModelHours.slice(0, 200)}`)
+
+  // 今日按模型：单点必须画出可见圆点，不能只有空坐标轴。
+  // 回归点：stepX 为 0 时 linePath 只产出 "M x,y"（无线段），路径不可见，
+  // 屏幕上只剩坐标轴和图例（用户截图就是这个现象）。
+  // 断言方式：直接检查单点分支确实存在，且该分支渲染 circle。
+  const heatSrc = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  check('单点时画圆点的分支存在', heatSrc.includes('days.length <= 1'), true)
+  check('单点分支渲染 circle', /days\.length <= 1[\s\S]{0,400}?h\('circle'/.test(heatSrc), true)
+
   check('今日+按模型不显示历史日期',
     !(todayModelChart.includes('10-17') || todayModelChart.includes('10-18')))
   // 这两个模式切换会改变全局状态：重置回默认（全部 / 总量）再继续

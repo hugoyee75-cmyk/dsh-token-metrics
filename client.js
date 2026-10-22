@@ -34,6 +34,13 @@ window.__ModuleLoader__.load({
     const REFRESH_STORAGE_KEY = 'dsh-token-metrics:refresh-ms'
 
     /** 与 Host 侧路由、locale 命名空间保持一致。 */
+    /**
+     * 全局刷新用的页面处理器槽位（跨组件共享）。
+     * `refresh()` 位于 useSummary 内，而各页面在 TokenUsagePanel 内注册，
+     * 只有提到这一层才能同时被两边看到。
+     */
+    const MODULE_REFRESH_HANDLERS = { current: [] }
+
     const NS = 'settings.tokenUsage'
     const PANEL_ID = 'token-metrics'
     const SUMMARY_ROUTE = '/api/dsh-token-metrics/summary'
@@ -3449,12 +3456,24 @@ body[data-ds-dark-theme] .tu-toasts,
     }
 
     /** 大数用 1.2M / 34.5K 之类的紧凑写法。 */
+    /**
+     * 紧凑数值：K / M / B / T 四档。
+     *
+     * 为什么要 T：长期累积后总量会到万亿级，早先只到 B，5 万亿会显示成
+     * `5000.0B` —— 位数多、读起来费劲，还可能把 Y 轴刻度挤在一起。
+     *
+     * 小数位按量级自适应并去掉无意义的尾零（530.0B -> 530B），
+     * 保证刻度短、不浪费宽度。
+     */
     function formatCompact(value) {
       if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return '0'
       const abs = Math.abs(value)
-      if (abs >= 1e9) return `${(value / 1e9).toFixed(1)}B`
-      if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`
-      if (abs >= 1e4) return `${(value / 1e3).toFixed(1)}K`
+      const trim = (text) => (text.includes('.') ? text.replace(/\.0+$/, '') : text)
+      const scaled = (unit, suffix) => trim((value / unit).toFixed(abs / unit >= 100 ? 0 : 1)) + suffix
+      if (abs >= 1e12) return scaled(1e12, 'T')
+      if (abs >= 1e9) return scaled(1e9, 'B')
+      if (abs >= 1e6) return scaled(1e6, 'M')
+      if (abs >= 1e4) return scaled(1e3, 'K')
       return formatNumber(value)
     }
 
@@ -3624,6 +3643,26 @@ function formatMoneyText(value) {
         }
       }, [load, intervalMs])
 
+      /**
+       * 全局刷新：按当前所在页面执行对应动作。
+       *
+       * 为什么统一：早先顶栏「刷新」只刷新统计，而供应商页另有一个
+       * 「刷新全部余额」按钮 —— 但它实际调用 loadBalance()，只重读已存
+       * 状态、并**不**去查询余额，属于无效按钮。现在刷新与自动刷新一样
+       * 全局生效，在不同页面行使各自的功能：
+       *   · 统计页：先落盘，再重读用量
+       *   · 模型接入页：逐个站点查询最新余额
+       *   · 预算页：重读预算配置与已用金额
+       */
+      /**
+       * 页面级刷新处理器。
+       *
+       * 顶栏刷新是**全局**的：无论在哪个页面点它，都既刷新统计、又执行
+       * 当前页面特有的动作（查询余额 / 重读预算）。各页面在渲染时把自己的
+       * 处理器写进这个模块级槽位，从而不跨作用域引用、也没有暂时性死区。
+       */
+      const refreshHandlersRef = MODULE_REFRESH_HANDLERS
+
       const refresh = useCallback(async () => {
         // 先让 Host 落盘，再读，避免刚结束的调用还没写进去。
         try {
@@ -3636,8 +3675,18 @@ function formatMoneyText(value) {
         } catch {
           // 落盘失败不影响读取：内存里的数据已经是完整的。
         }
+        // 统一走全局刷新：统计数据总是重新读取；页面特有的动作
+        // （查询余额 / 重读预算）由各页面自己在挂载时注册到 refreshHandlers。
         await load('manual')
+        for (const handler of refreshHandlersRef.current) {
+          try {
+            await handler()
+          } catch { /* 单个页面处理器失败不影响统计刷新 */ }
+        }
       }, [load])
+
+
+
 
       return { ...state, refreshing, refresh }
     }
@@ -3683,6 +3732,26 @@ function formatMoneyText(value) {
      *
      * 之前轴上只有首尾两个标签，「按小时」视图里等于没有时间参考。
      */
+    /**
+     * 把数据最大值抬成「好看」的刻度上限。
+     *
+     * 两个目的：
+     *  ① 留白：直接拿 max 当轴顶，峰值会贴在最上沿，视觉上像被截断；
+     *  ② 取整：把上限抬到 1/2/5 × 10^n 这类刻度，Y 轴数字好读
+     *    （237.4M -> 250M）。
+     *
+     * 随数据自增长：没有任何固定常量，长期累积到百亿/万亿也一样工作，
+     * 不会因为写死上限导致可视化失效。
+     */
+    function niceMax(rawMax) {
+      if (!Number.isFinite(rawMax) || rawMax <= 0) return 1
+      const padded = rawMax * 1.05
+      const magnitude = 10 ** Math.floor(Math.log10(padded))
+      const normalized = padded / magnitude
+      const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+      return step * magnitude
+    }
+
     function xAxisTicks(count, maxTicks = 6) {
       if (count <= 1) return [0]
       const step = Math.ceil(count / maxTicks)
@@ -3786,10 +3855,10 @@ function formatMoneyText(value) {
       const toX = (index) => CHART.padLeft + index * stepX
 
       // 单一缩放基准：所有序列共用一个 max，曲线高低才可比较。
-      const max = Math.max(
+      const max = niceMax(Math.max(
         ...series.flatMap((item) => days.map((day) => item.values[day] ?? 0)),
-        1,
-      )
+        0,
+      ))
       const toY = (value) => CHART.padTop + innerHeight - (value / max) * innerHeight
 
       const onMove = (event) => {
@@ -3845,6 +3914,23 @@ function formatMoneyText(value) {
               opacity: 0.95,
             })
           }),
+          /**
+           * 单点时额外画圆点。
+           *
+           * 今日按模型只有一个时间点，`stepX` 为 0 —— 所有点挤在同一条竖线上，
+           * 路径退化成一个零宽的形状，屏幕上什么都看不到（只剩坐标轴和图例，
+           * 用户实测截图就是这个现象）。这里为每个序列补一个可见圆点，
+           * 让「当天各模型各用了多少」真的能看见。
+           */
+          days.length <= 1
+            ? series.map((item, seriesIndex) => h('circle', {
+              key: `single-${item.key}`,
+              cx: toX(0),
+              cy: toY(item.values[days[0]] ?? 0),
+              r: 3.5,
+              fill: seriesColor(seriesIndex),
+            }))
+            : null,
           hoverIndex >= 0
             ? h('line', {
               x1: toX(hoverIndex), x2: toX(hoverIndex),
@@ -3884,7 +3970,13 @@ function formatMoneyText(value) {
             : null,
           ...ChartTicks({
             count: days.length,
-            labelOf: (index) => days[index]?.slice(5) ?? '',
+            // 标签形态随粒度变化：日期（2026-10-19）取 MM-DD；
+            // 小时（09:00）已经是可读标签，直接用，不能再 slice(5) ——
+            // 那会把它截成空字符串，x 轴一片空白。
+            labelOf: (index) => {
+              const raw = days[index] ?? ''
+              return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.slice(5) : raw
+            },
             max,
             formatValue: formatCompact,
           }),
@@ -4051,7 +4143,9 @@ function formatMoneyText(value) {
           : mode === 'cost' ? (point.costUsd ?? 0) * 1000
             : point.total
       ))
-      const max = Math.max(...rawValues, 1)
+      // 用 niceMax 而不是裸的 Math.max：留白 + 取整，且完全跟随数据自增长，
+      // 不存在会让长期累积数据「撑爆」的固定上限。
+      const max = niceMax(Math.max(...rawValues, 0))
       const formatValue = mode === 'cache'
         ? (value) => `${value.toFixed(1)}%`
         // 成本内部按「毫美元」放大画图（否则 0.03 这种值在图上贴底），
@@ -4811,6 +4905,11 @@ function formatMoneyText(value) {
         } catch { /* 结果已记录在站点上，下次刷新可见 */ }
         finally { setBalanceProbing('') }
       }, [])
+
+
+
+
+
 
       /** 保存站点配置。 */
       const saveSite = useCallback(async (input) => {
@@ -5669,8 +5768,75 @@ function formatMoneyText(value) {
        *
        * @returns {{days: string[], series: Array<{key,label,values}>}}
        */
+      /**
+       * 时间粒度：随范围自动切换。
+       * **必须定义在 scopedModelTrend 之前** —— 后者依赖它判断今日是否按小时。
+       * 顺序写反会触发暂时性死区（ReferenceError: Cannot access before
+       * initialization），整个面板白屏。这个坑之前踩过一次。
+       */
+      const trendGranularity = (() => {
+        // 选了具体年份就按月看：一年 12 个点，比把两年几百天挤一起可读
+        if (selectedYear !== null) return 'month'
+        if (range === 'today') return 'hour'
+        if (range === 'week') return 'day'
+        // 全部：跨年就按年，否则按月
+        const years = new Set(Object.keys(data?.byDay ?? {}).map((day) => day.slice(0, 4)))
+        if (years.size > 1) return 'year'
+        return 'month'
+      })()
+
       const scopedModelTrend = useMemo(() => {
         if (data === undefined) return { days: [], series: [] }
+
+        /**
+         * 今日（按小时）：用 byHourModel 画小时级分模型曲线。
+         *
+         * 之前这里只有 byDayModelName，今日只能拿到 1 个日期点，画出来是空的
+         * —— 标题却写「按小时」（用户实测截图指出）。现在数据与粒度都对上了。
+         */
+        if (trendGranularity === 'hour') {
+          const hoursMap = data.byHourModel?.[data.today] ?? {}
+          const hourKeys = Object.keys(hoursMap).sort()
+          if (hourKeys.length === 0) return { days: [], series: [] }
+          // 排名用当天各模型的合计，保证曲线颜色顺序与图例稳定
+          const totals = new Map()
+          for (const h of hourKeys) {
+            for (const [name, c] of Object.entries(hoursMap[h] ?? {})) {
+              totals.set(name, (totals.get(name) ?? 0) + (c.totalTokens ?? 0))
+            }
+          }
+          const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1])
+          const limit = data.config?.maxTrendSeries ?? 6
+          const top = ranked.slice(0, limit).map(([k]) => k)
+          const topSet = new Set(top)
+          const hasRest = ranked.length > top.length
+          // 键必须与 days 完全一致（都用 HH:00）。早先 values 用 '09'、
+          // days 用 '09:00'，取值全是 undefined，y 轴被 Math.max(...,1) 兜底成 1，
+          // 曲线贴地不可见。
+          const labelOfHour = (h) => `${h}:00`
+          const series = top.map((name) => ({
+            key: name,
+            label: name,
+            values: Object.fromEntries(hourKeys.map((h) => [
+              labelOfHour(h), hoursMap[h]?.[name]?.totalTokens ?? 0,
+            ])),
+          }))
+          if (hasRest) {
+            series.push({
+              key: '__rest__',
+              label: 'rest',
+              values: Object.fromEntries(hourKeys.map((h) => {
+                let sum = 0
+                for (const [name, c] of Object.entries(hoursMap[h] ?? {})) {
+                  if (!topSet.has(name)) sum += c.totalTokens ?? 0
+                }
+                return [labelOfHour(h), sum]
+              })),
+            })
+          }
+          return { days: hourKeys.map(labelOfHour), series }
+        }
+
         const byDayModelName = data.byDayModelName ?? {}
         // 范围天：全部 = 所有天；否则取 rangeDays（今日/近7天/年份已算好）
         const allDays = Object.keys(byDayModelName).sort()
@@ -5709,7 +5875,7 @@ function formatMoneyText(value) {
           })
         }
         return { days, series }
-      }, [data, rangeDays])
+      }, [data, rangeDays, trendGranularity])
 
       /**
        * 时间粒度：随范围自动切换。
@@ -5720,16 +5886,6 @@ function formatMoneyText(value) {
        *
        * 数据来源相应变化：小时用 byHour、天用 trend、月/年从 byDay 聚合。
        */
-      const trendGranularity = (() => {
-        // 选了具体年份就按月看：一年 12 个点，比把两年几百天挤一起可读
-        if (selectedYear !== null) return 'month'
-        if (range === 'today') return 'hour'
-        if (range === 'week') return 'day'
-        // 全部：跨年就按年，否则按月
-        const years = new Set(Object.keys(data?.byDay ?? {}).map((day) => day.slice(0, 4)))
-        if (years.size > 1) return 'year'
-        return 'month'
-      })()
 
       /** 把一组 counters 折成趋势点。 */
       const toTrendPoint = (label, counters, extra = {}) => ({
@@ -5739,9 +5895,20 @@ function formatMoneyText(value) {
         input: counters.inputTokens ?? 0,
         cacheRead: counters.cacheReadTokens ?? 0,
         output: counters.outputTokens ?? 0,
-        rate: counters.cacheHitRate ?? (counters.input + counters.cacheRead > 0
-          ? counters.cacheRead / (counters.input + counters.cacheRead)
-          : 0),
+        /**
+         * 命中率：cacheRead / (input + cacheRead)。
+         *
+         * 注意字段名必须是 `inputTokens` / `cacheReadTokens` —— 早先这里写成
+         * `counters.input` / `counters.cacheRead`，两个字段都不存在，
+         * `undefined + undefined` 得 NaN，而 `NaN > 0` 为 false，于是走 :0
+         * 分支，命中率恒定 0.0%。顶部卡片显示的 70% 与图表全 0 的矛盾
+         * 就是这么来的。
+         */
+        rate: counters.cacheHitRate ?? (() => {
+          const read = counters.cacheReadTokens ?? 0
+          const input = counters.inputTokens ?? 0
+          return read + input > 0 ? read / (read + input) : 0
+        })(),
         ...extra,
       })
 
@@ -5829,7 +5996,16 @@ function formatMoneyText(value) {
             (day) => (selectedYear !== null && !day.startsWith(selectedYear)
               ? undefined
               : day.slice(0, 7)),
-            (month) => `${Number(month.slice(5))}月`,
+            // 月份标签走 i18n：早先硬编码 `${n}月`，英文界面会显示「10月」。
+            // 与热力图共用同一套 month.short.N 键。
+            (month) => {
+              const index = Number(month.slice(5))
+              const key = `month.short.${index}`
+              const label = typeof t === 'function' ? t(key) : key
+              return typeof label === 'string' && label !== key
+                ? label
+                : new Date(2000, index - 1, 1).toLocaleString('en-US', { month: 'short' })
+            },
           )
         }
 
@@ -7383,6 +7559,23 @@ function formatMoneyText(value) {
        * 保存走 POST /budget，Host 写到 `$DSH_HOME/token-metrics/budget.json`，
        * 不改用户的 cordis.patch.yml。
        */
+      /**
+       * 「预算」页挂载时注册刷新动作：重读预算配置与已用金额。
+       * 与供应商页互斥（同一时刻只渲染一个页面），所以直接覆盖。
+       */
+      MODULE_REFRESH_HANDLERS.current = [async () => {
+        try {
+          const response = await fetch(BUDGET_ROUTE, {
+            headers: { accept: 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+          })
+          if (!response.ok) return
+          const payload = await response.json().catch(() => ({}))
+          if (payload?.budget !== undefined) setBudgetForm(payload.budget)
+        } catch { /* 读失败保留当前表单，不覆盖用户正在编辑的内容 */ }
+      }]
+
       const budgetPage = (() => {
         // 未初始化时用当前配置填一份
         const saved = data?.config?.budget ?? {}
@@ -7576,6 +7769,20 @@ function formatMoneyText(value) {
         )
       })()
 
+      /**
+       * 在「模型接入」页挂载时，把这个页面特有的刷新动作注册给顶栏刷新。
+       * 串行查询所有站点余额（余额接口有速率限制，并发容易一起失败）。
+       */
+      MODULE_REFRESH_HANDLERS.current = [async () => {
+        const sites = balanceState?.sites ?? []
+        for (const site of sites) {
+          if (site?.id === undefined) continue
+          try {
+            await probeSite(site.id)
+          } catch { /* 单个站点失败不影响其余 */ }
+        }
+      }]
+
       const supplierPage = (() => {
         const sites = balanceState.sites ?? []
         const discovered = (balanceState.discovered ?? [])
@@ -7768,10 +7975,8 @@ function formatMoneyText(value) {
               h('p', { className: 'tu-page-sub' }, t('supplier.subtitle')),
             ),
             h('div', { className: 'tu-page-actions' },
-              h('button', {
-                type: 'button', className: 'tu-btn',
-                onClick: () => { void loadBalance() },
-              }, t('supplier.probeAll')),
+              // 页内「刷新全部余额」已移除：顶栏刷新是全局的，在这个页面
+              // 会自动执行「逐个查询余额」，同一个按钮各页各司其职。
               h('button', {
                 type: 'button', className: 'tu-btn tu-btn-primary',
                 onClick: () => setSupplierForm({

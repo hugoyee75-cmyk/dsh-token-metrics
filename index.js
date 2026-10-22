@@ -57,7 +57,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.3.2'
+export const version = '0.3.3'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -534,6 +534,10 @@ function emptyStore(buildId) {
      * 小时分布没有意义。裁剪在 record 里顺带做。
      */
     byHour: {},
+    // 小时级的分模型用量：今日「按模型」视图要按小时画曲线，
+    // 只有 byHour 合计是画不出来的（用户实测：标题写「按小时」，图上却只有
+    // 当天一个点）。结构同 byDayModelName，但只留最近两天。
+    byHourModel: {},
     /** provider -> counters。 */
     byProvider: {},
     /** `${provider}/${model}` -> counters。明细表按供应商拆分时用它。 */
@@ -671,6 +675,7 @@ function loadStore(logger, home) {
       total: { ...base.total, ...(parsed.total ?? {}) },
       byDay: parsed.byDay ?? {},
       byHour: parsed.byHour ?? {},
+      byHourModel: parsed.byHourModel ?? {},
       byProvider: parsed.byProvider ?? {},
       byModel: parsed.byModel ?? {},
       byModelName: parsed.byModelName ?? {},
@@ -957,6 +962,7 @@ class TokenUsageTracker {
     if (hourDays.length > 2) {
       for (const stale of hourDays.slice(0, hourDays.length - 2)) {
         delete this.store.byHour[stale]
+        delete this.store.byHourModel?.[stale]
       }
     }
 
@@ -1006,6 +1012,14 @@ class TokenUsageTracker {
     this.store.byDayModelName[day] ??= {}
     this.store.byDayModelName[day][modelName] ??= emptyCounters()
     addUsage(this.store.byDayModelName[day][modelName], usage)
+
+    // 小时 × 模型名：今日「按模型」视图按小时画曲线需要它。
+    // 只有 byHour 合计是画不出来的（标题写「按小时」，图上却只有一个点）。
+    this.store.byHourModel ??= {}
+    this.store.byHourModel[day] ??= {}
+    this.store.byHourModel[day][hour] ??= {}
+    this.store.byHourModel[day][hour][modelName] ??= emptyCounters()
+    addUsage(this.store.byHourModel[day][hour][modelName], usage)
 
     // —— 按模型名分组的全维度明细（供前端按模型筛选）——
     const facets = this.store.byModelFacets[modelName] ??= {
@@ -1328,6 +1342,22 @@ class TokenUsageTracker {
         Object.entries(this.store.byHour ?? {}).map(([day, hours]) => [
           day,
           Object.fromEntries(Object.entries(hours).map(([h, v]) => [h, withRate(v)])),
+        ]),
+      ),
+      /**
+       * 小时 × 模型名。
+       *
+       * 今日「按模型」视图要按小时画曲线就必须有它 —— 只有 byHour 合计
+       * 画不出分模型曲线，标题写「按小时」却只有一个点，是用户实际看到的
+       * 错误。结构与 byDayModelName 相同，只是时间粒度为小时。
+       */
+      byHourModel: Object.fromEntries(
+        Object.entries(this.store.byHourModel ?? {}).map(([day, hours]) => [
+          day,
+          Object.fromEntries(Object.entries(hours).map(([h, models]) => [
+            h,
+            Object.fromEntries(Object.entries(models).map(([name, v]) => [name, withRate(v)])),
+          ])),
         ]),
       ),
       /**
@@ -2701,13 +2731,33 @@ export function apply(ctx, rawConfig) {
           kind: 'prefix',
           path: '/api/dsh-token-metrics',
           handler: async (req, res) => {
-            // 门卫：所有路由共用。DSH 不校验插件路由的来源，这里自己拦。
+            const url = new URL(req.url ?? '/', 'http://localhost')
+            /**
+             * 自救路由：**不受门卫保护**。
+             *
+             * 血的教训：曾把门卫套在所有路由上，一旦门卫逻辑本身出错，
+             * 连 /reload 也被 403 拒绝 —— 插件把自己锁死，只能重启 DSH
+             * 才能恢复。这类「恢复通路」必须豁免，否则任何门卫 bug 都会
+             * 让插件失去远程自救能力。
+             *
+             * 豁免的是只读的版本查询与重载/修复，不含任何密钥或配置读取：
+             *   GET  /version          —— 版本信息，无敏感内容
+             *   POST /reload           —— 重新加载本插件
+             *   POST /rebuild          —— 重算统计（只重建派生数据）
+             *   GET  /alerts           —— 通知列表（无密钥）
+             */
+            const SELF_RESCUE_PATHS = new Set([
+              '/api/dsh-token-metrics/version',
+              '/api/dsh-token-metrics/reload',
+              '/api/dsh-token-metrics/rebuild',
+              '/api/dsh-token-metrics/alerts',
+            ])
+            // 门卫：其余路由统一校验来源。DSH 不校验插件路由，这里自己拦。
             // 拒绝时给 403 且不回显原因细节，避免变成探测工具。
-            if (!isTrustedRequest(req)) {
+            if (!SELF_RESCUE_PATHS.has(url.pathname) && !isTrustedRequest(req)) {
               sendJson(res, 403, { error: 'forbidden' })
               return
             }
-            const url = new URL(req.url ?? '/', 'http://localhost')
             const isGet = req.method === 'GET'
             // 每个路由自己校验方法：重载/更新是 POST，不能在这里一刀切成 GET。
             if (url.pathname === '/api/dsh-token-metrics/summary') {
@@ -2858,6 +2908,12 @@ export function apply(ctx, rawConfig) {
                 if (baseUrl === '') {
                   sendJson(res, 400, { error: '缺少 baseUrl' })
                   return
+                // 只接受 http(s)：baseUrl 会被拼成请求地址发出去，
+                // 允许其它协议（file: / data: / ftp:）没有正当用途。
+                if (!/^https?:\/\//i.test(baseUrl)) {
+                  sendJson(res, 400, { error: 'baseUrl 必须是 http(s) 地址' })
+                  return
+                }
                 }
                 let apiKey = String(body.apiKey ?? '')
                 if (apiKey === '' && body.id !== undefined) {
