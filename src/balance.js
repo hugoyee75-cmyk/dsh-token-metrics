@@ -294,7 +294,7 @@ export async function discoverModels({ baseUrl, apiKey, fetchImpl, signal, timeo
   try {
     // 有些网关的模型列表带 /v1 前缀，有些不带；两种都试一次。
     //
-    // 失败原因要分类返回（借鉴 PiDesktop 的做法）：笼统的一句「获取失败」
+    // 失败原因要分类返回：笼统的一句「获取失败」
     // 让用户不知道该改地址、换密钥还是稍后重试。这里区分四类：
     //   not-found       两个端点都 404       → 地址不对
     //   unauthorized    401/403             → 密钥不对或没有权限
@@ -596,7 +596,7 @@ function sanitizeSite(input) {
           // 附件能力：false 表示只接受文本
           if (model.image === false) entry.image = false
 
-          // —— 字段来源标记（借鉴 PiDesktop）——
+          // —— 字段来源标记 ——
           // 用户在界面上分不清「这个上下文窗口是我手填的还是自动识别来的」。
           // 'auto' = 从模型目录/端点推断，'manual' = 用户手动填写。
           // 同步到 DSH 时保留，便于排查「为什么这个模型能力不对」。
@@ -607,7 +607,7 @@ function sanitizeSite(input) {
             entry.maxOutputSource = model.maxOutputSource
           }
 
-          // —— 能力三角（借鉴 PiDesktop）——
+          // —— 能力三角 ——
           // 早先只有一个 image 布尔，无法表达「能读文档但不能读图」这类情况。
           // 三个字段彼此独立；undefined 表示未知（不假设为 false）。
           if (model.supportsImages === true) entry.supportsImages = true

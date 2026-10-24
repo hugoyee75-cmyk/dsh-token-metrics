@@ -1747,7 +1747,7 @@ body[data-ds-dark-theme] .tu-toasts,
   font-family: var(--dsw-alias-font-mono, monospace);
   font-size: 12px;
 }
-/* 模型别名：ID 之后的次要文字（PiDesktop 同款布局） */
+/* 模型别名：ID 之后的次要文字 */
 .tu-mlist-alias {
   flex: 0 1 auto;
   min-width: 0;
@@ -5254,7 +5254,7 @@ function formatMoneyText(value) {
               : { ...current, available: body.models }))
           } else {
             /**
-             * 按失败类型给可操作的提示（借鉴 PiDesktop）：
+             * 按失败类型给可操作的提示：
              * 笼统的「获取失败」让用户不知道该改地址、换密钥还是稍后重试。
              */
             const kindKey = {
@@ -6956,7 +6956,7 @@ function formatMoneyText(value) {
         }))
 
         /**
-         * 调整已选模型的顺序（借鉴 PiDesktop 的拖动排序，这里用上/下移）。
+         * 调整已选模型的顺序。
          *
          * 为什么需要：同步到 DSH 时按此顺序生成 models 数组，用户希望
          * 常用模型排在前面以便在选择器里快速找到。用上下移动而不是 HTML5
@@ -7215,7 +7215,7 @@ function formatMoneyText(value) {
                           onClick: (event) => event.stopPropagation?.(),
                           onChange: () => toggleModel(model),
                         }),
-                        // 主标题：模型 ID（PiDesktop 同款布局，ID 与别名并排）
+                        // 主标题：模型 ID，与别名并排
                         h('span', { className: 'tu-mlist-id', title: model.id }, model.id),
                         typeof model.name === 'string' && model.name !== ''
                           ? h('span', { className: 'tu-mlist-alias' }, model.name)
