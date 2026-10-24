@@ -3,6 +3,29 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.7] - 2026-10-24
+
+彻底修复 `/v1` 在三条链路中的处理。
+
+### 修复
+
+- **从 DSH 读回 provider 地址时会剥掉 `/v1`**：`discoverProviderEndpoints`
+  调用了 `normalizeBaseUrl`，把 DSH 里写的 `/v1` 抹掉，导致界面上显示的地址
+  与 `cordis.patch.yml` 里的实际配置不一致
+
+### 说明
+
+`/v1` 现在有明确的分工，四条链路各自正确：
+
+| 链路 | 行为 |
+| --- | --- |
+| 保存站点 | 原样保存（0.3.5 修复）|
+| 写入 DSH | 原样透传 |
+| 从 DSH 读回 | 原样显示（本版修复）|
+| 发请求 | 归一化剥掉 `/v1` —— 余额接口不在 `/v1` 下，这是正确行为 |
+
+[0.3.7]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.7
+
 ## [0.3.6] - 2026-10-24
 
 模型选择交互对齐 PiDesktop。
