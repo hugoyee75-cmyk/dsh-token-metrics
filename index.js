@@ -44,6 +44,7 @@ import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
 import { probeOfficial, detectProvider, loadModelCatalog } from './src/providers.js'
 import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts } from './src/push.js'
 import { createMemoryGate } from './src/memory.js'
+import { runSelfCheck } from './src/selfcheck.js'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
@@ -654,6 +655,64 @@ function backupBrokenStore(path, logger) {
   } catch (error) {
     // 备份失败也不能阻止启动；但要说清楚，别静默
     logger?.warn?.(`token-metrics: 备份损坏数据失败（${error?.message ?? error}）`)
+  }
+}
+
+/**
+ * 更新后健康探测。
+ *
+ * 目标：确认「新版本真能用」，而不只是「模块起来了」。
+ *
+ * 判据（全部是纯函数调用，不依赖 HTTP 路由是否注册成功 —— 路由坏了
+ * 恰恰是最需要发现的情况，不能让它成为探测手段的依赖）：
+ *   1. 入口模块导出的 version 是字符串且非空
+ *   2. 快照函数能产出结构完整的对象（totals / byDay 等关键字段在）
+ *   3. 自检本身不抛错
+ *
+ * @param {object} ctx 宿主 Context（用于取当前 tracker）
+ * @param {object} logger
+ * @returns {Promise<{ok: boolean, detail: string}>}
+ */
+async function probeAfterUpdate(ctx, logger) {
+  try {
+    // 版本号来自**当前正在运行**的模块导出（DRSH 会把它挂在 fiber 上）。
+    // 注意不能用 globalThis 上不存在的符号 —— 之前就想当然写了
+    // `dsh-token-metrics:exports`，那个键根本没人设置。
+    const runningVersion = ctx?.fiber?.runtime?.callback?.version
+    if (typeof runningVersion !== 'string' || runningVersion === '') {
+      return { ok: false, detail: '当前运行实例没有有效的 version 导出' }
+    }
+
+    // 快照能否正常产出（白屏类问题往往在这里就暴露）。
+    // 用字面量而不是 TRACKER_KEY 常量：那个 const 声明在文件后部，
+    // 这里直接引用会形成暂时性死区（函数调用时虽已初始化，但读代码的人
+    // 不该被迫去推这一点）。符号字符串与 TRACKER_KEY 保持一致。
+    const tracker = globalThis[Symbol.for('dsh-token-metrics:tracker')]
+    if (tracker !== undefined && typeof tracker.snapshot === 'function') {
+      const snap = tracker.snapshot()
+      if (snap === null || typeof snap !== 'object'
+        || snap.totals === undefined || snap.byDay === undefined) {
+        return { ok: false, detail: '快照结构不完整（缺少 totals / byDay）' }
+      }
+    }
+
+    // 接口自检
+    const checked = runSelfCheck({
+      env: {
+        hasSessionPersistence: true,
+        persistenceSource: 'update-probe',
+        startedAt: Date.now() - 3_600_000,
+        store: tracker?.store,
+      },
+    })
+    if (checked.failed > 0) {
+      const ids = checked.items.filter((i) => i.level === 'fail').map((i) => i.id).join(',')
+      return { ok: false, detail: `自检失败项：${ids}` }
+    }
+    return { ok: true, detail: '' }
+  } catch (error) {
+    logger?.warn?.(`token-metrics: 更新后自检异常（${error?.message ?? error}）`)
+    return { ok: false, detail: `自检抛出异常：${error?.message ?? error}` }
   }
 }
 
@@ -2301,6 +2360,24 @@ export function apply(ctx, rawConfig) {
   // 只有第一个 tracker 实例负责回扫；后续实例复用同一份状态，不重复扫描。
   // 用 ctx.inject 等 sessionPersistence 就绪：插件加载顺序不保证，直接
   // ctx.get 可能拿到 undefined，回扫就永远不会跑。
+  /** 最近一次接口自检结果（供 /version 暴露给页面）。 */
+  let selfCheck
+  /**
+   * sessionPersistence 的可用性，供自检使用。
+   *
+   * 必须存在**进程级**（而不是本模块作用域）：热重载时 `fresh` 为 false，
+   * 不会再走回扫编排，那条路径上的赋值就不会执行 —— 自检于是永远读到
+   * 初始的 false，误报「历史会话服务不可用」。实测踩到过这个假警报。
+   */
+  const PERSISTENCE_STATE_KEY = Symbol.for('dsh-token-metrics:persistence-state')
+  const persistenceState = (() => {
+    const existing = globalThis[PERSISTENCE_STATE_KEY]
+    if (existing !== undefined) return existing
+    const created = { available: false, source: '' }
+    globalThis[PERSISTENCE_STATE_KEY] = created
+    return created
+  })()
+
   if (fresh) {
     // 回扫编排：三条路并用，谁先成功算谁的，保证历史数据一定被重建。
     //   1. ctx.inject(['sessionPersistence']) —— cordis 的服务就绪回调
@@ -2310,6 +2387,8 @@ export function apply(ctx, rawConfig) {
     const begin = (persistence, source) => {
       if (started || persistence === undefined) return
       started = true
+      persistenceState.available = true
+      persistenceState.source = source
       logger?.info?.(`token-metrics: 通过 ${source} 取得 sessionPersistence，开始回扫`)
       queueMicrotask(() => {
         backfillFromLogs(ctx, tracker, logger, persistence)
@@ -2351,6 +2430,8 @@ export function apply(ctx, rawConfig) {
       }
       if (started) return
       started = true
+      // 记录「服务不可用、走了磁盘兜底」，自检据此区分 warn 与 ok
+      persistenceState.source = 'disk-fallback'
       logger?.info?.('token-metrics: sessionPersistence 不可用，改用磁盘直读回扫')
       try {
         await backfillFromDisk(tracker, logger)
@@ -2362,6 +2443,68 @@ export function apply(ctx, rawConfig) {
     queueMicrotask(() => { poll() })
     queueMicrotask(() => { diskFallback() })
   }
+
+    /**
+     * 接口自检：延迟执行，等回扫与首批事件落定后再判。
+     *
+     * 时机选择：启动 60 秒后跑第一次。太早会因「还没有任何调用」而误报，
+     * 太晚则用户已经看到异常数据了。之后每小时复跑一次，用来发现「运行中
+     * 才暴露」的问题（例如 DSH 升级后某个接口静默失效）。
+     *
+     * 结果挂在 /version 上，由页面按需展示；不打扰正常使用。
+     */
+    const SELF_CHECK_DELAY_MS = 60_000
+    const SELF_CHECK_INTERVAL_MS = 3_600_000
+    const doSelfCheck = () => {
+      try {
+        // 主动探测当前服务是否可用：不能只信历史赋值 —— 热重载后那段
+        // 编排不会执行，状态会停留在初始值，导致误报。这里现查一次。
+        let liveAvailable = persistenceState.available
+        let liveSource = persistenceState.source
+        try {
+          const live = ctx.get('sessionPersistence')
+          if (live !== undefined && live !== null) {
+            liveAvailable = true
+            liveSource = liveSource === '' ? 'live-probe' : liveSource
+          } else if (liveSource === '') {
+            // 取不到，但历史上也没记录过来源 —— 大概率走了磁盘兜底
+            liveSource = 'disk-fallback'
+          }
+        } catch { /* 探测失败就沿用历史值 */ }
+
+        selfCheck = runSelfCheck({
+          env: {
+            hasSessionPersistence: liveAvailable,
+            persistenceSource: liveSource,
+            startedAt: tracker.startedAt ?? Date.now(),
+            store: tracker.store,
+          },
+        })
+        if (selfCheck.failed > 0 || selfCheck.warned > 0) {
+          logger?.warn?.(`token-metrics: 接口自检 ${selfCheck.failed} 项失败 / ${selfCheck.warned} 项警告`
+            + `（${selfCheck.items.filter((i) => i.level !== 'ok').map((i) => i.id).join(',')}）`)
+        } else {
+          logger?.info?.('token-metrics: 接口自检全部通过')
+        }
+      } catch (error) {
+        logger?.warn?.(`token-metrics: 自检执行失败（${error?.message ?? error}）`)
+      }
+    }
+
+
+
+    // 自检定时器：首次延迟 60 秒（等回扫与首批事件落定），之后每小时复跑。
+    // unref 让定时器不阻止进程退出——插件不该拖住宿主生命周期。
+    ctx.effect(() => {
+      const kickoff = setTimeout(() => { doSelfCheck() }, SELF_CHECK_DELAY_MS)
+      kickoff?.unref?.()
+      const timer = setInterval(() => { doSelfCheck() }, SELF_CHECK_INTERVAL_MS)
+      timer?.unref?.()
+      return () => {
+        clearTimeout(kickoff)
+        clearInterval(timer)
+      }
+    }, 'token-metrics: 接口自检')
 
   // —— 账号快照：用于展示「当前登录账号」与官方用量入口 ——
   // 只读身份与余额，不碰任何凭据；失败静默降级（未登录 / 离线都正常）。
@@ -2789,6 +2932,9 @@ export function apply(ctx, rawConfig) {
                 // 开源页地址：面板的「点个 Star」按钮直达这里。
                 repositoryUrl: repositoryUrlOf(),
                 updater: updater === undefined ? null : updater.status(),
+                // 接口自检结果：页面据此提示「某功能可能失效」。
+                // 尚未跑过时为 null，页面不显示任何异常。
+                selfCheck: selfCheck ?? null,
               })
               return
             }
@@ -2820,12 +2966,35 @@ export function apply(ctx, rawConfig) {
               sendJson(res, 202, { ok: true, accepted: true })
               setTimeout(() => {
                 updater.apply({
-                  activate: async (installed) => selfReload(ctx, {
-                    logger,
-                    packageUrl: PACKAGE_URL,
-                    entryUrl: ENTRY_URL,
-                    expectedVersion: installed.version,
-                  }),
+                  /**
+                   * 激活回调：先热重载，再**自检**。
+                   *
+                   * 为什么需要自检这一步：热重载只能确认「新代码起来了」
+                   * （模块能 import、apply 能调用），但无法发现「起来了却
+                   * 不可用」——例如面板白屏、路由全 403。这类问题此前只能
+                   * 靠用户反馈发现，坏版本一旦发布就得让所有人手动重启。
+                   *
+                   * 现在：重载后跑一遍接口自检，不健康就立刻回滚磁盘并恢复
+                   * 上一版运行时，更新以失败告终，用户留在可用版本上。
+                   */
+                  activate: async (installed) => {
+                    const reloaded = await selfReload(ctx, {
+                      logger,
+                      packageUrl: PACKAGE_URL,
+                      entryUrl: ENTRY_URL,
+                      expectedVersion: installed.version,
+                    })
+                    if (reloaded?.ok !== true) return reloaded
+                    // 重载成功后再自检。此时新代码已在运行，probe 会更真实。
+                    const health = await probeAfterUpdate(ctx, logger)
+                    if (health.ok === true) return reloaded
+                    return {
+                      ok: false,
+                      error: `新版本激活后自检未通过：${health.detail}`,
+                      restored: reloaded.restored === true,
+                      health,
+                    }
+                  },
                 })
                   .then((result) => {
                     logger?.info?.(`token-metrics: 更新完成 ${String(result?.version ?? '')}`)
