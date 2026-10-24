@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   probeBalance, normalizeBaseUrl, parseNewApiBalance, parseOneApiSubscription,
-  parseOneApiUsage, parseSub2ApiUsage, BalanceBook,
+  parseOneApiUsage, parseSub2ApiUsage, BalanceBook, discoverModels,
 } from '../src/balance.js'
 
 const failures = []
@@ -183,7 +183,28 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   check('新增返回含 models 字段', Array.isArray(created?.models), true)
   book.upsertSite({ id: 'relay-b', label: '中转 B', baseUrl: 'https://b.test' })
   check('站点数量', book.sites.length, 2)
-  check('baseUrl 已归一化', book.sites[0].baseUrl, 'https://a.test')
+  // 保存时**保留**用户填的 /v1：早先这里会剥掉，导致地址里的 v1 凭空消失，
+  // 之后拉 /v1/models、同步 DSH 都会用错地址。归一化只在发请求时做。
+  check('baseUrl 保留用户填写的 /v1', book.sites[0].baseUrl, 'https://a.test/v1')
+
+  // 但发请求时必须归一化（余额接口不在 /v1 下）
+  check('探测时仍会归一化', normalizeBaseUrl('https://a.test/v1'), 'https://a.test')
+
+  // —— 获取模型失败要分类（借鉴 PiDesktop）——
+  // 笼统的「获取失败」让用户不知道该改地址、换密钥还是重试。
+  const failKinds = []
+  for (const [status, expect] of [[404,'not-found'],[401,'unauthorized'],[403,'unauthorized'],[500,'bad-status']]) {
+    const r = await discoverModels({
+      baseUrl: 'https://x.test',
+      apiKey: 'k',
+      fetchImpl: async () => ({ ok: false, status, json: async () => ({}) }),
+    })
+    failKinds.push([status, r.kind, expect, r.kind === expect])
+  }
+  check('404 归类为 not-found', failKinds[0][1], 'not-found')
+  check('401 归类为 unauthorized', failKinds[1][1], 'unauthorized')
+  check('403 归类为 unauthorized', failKinds[2][1], 'unauthorized')
+  check('500 归类为 bad-status', failKinds[3][1], 'bad-status')
 
   book.recordResult('relay-a', { ok: true, usd: 12.5, useUsd: 0, usedUsd: 1.5, limitUsd: 14, kind: 'new-api', username: 'u' })
   check('记录余额', book.sites[0].lastBalance.usd, 12.5)
@@ -266,6 +287,28 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   // 状态视图不含 keyRef 之外的可疑字段
   const status = reloaded.status()
   check('状态含站点', status.sites.length, 2)
+
+  // —— 模型字段扩展（借鉴 PiDesktop）——
+  book.upsertSite({
+    id: 'relay-c', label: '中转 C', baseUrl: 'https://c.test',
+    models: [{
+      id: 'm1', name: '模型一',
+      contextWindow: 128000, contextWindowSource: 'manual',
+      maxOutput: 8192, maxOutputSource: 'auto',
+      supportsImages: true, supportsDocuments: false,
+      nativeWebSearch: true, availableForSubagents: true,
+      reasoningEffortParameter: 'reasoning_effort',
+    }],
+  })
+  const cSite = book.sites.find((x) => x.id === 'relay-c')
+  const m1 = cSite?.models?.[0] ?? {}
+  check('保留 contextWindowSource', m1.contextWindowSource, 'manual')
+  check('保留 maxOutputSource', m1.maxOutputSource, 'auto')
+  check('保留 supportsImages', m1.supportsImages, true)
+  check('保留 supportsDocuments=false', m1.supportsDocuments, false)
+  check('保留 nativeWebSearch', m1.nativeWebSearch, true)
+  check('保留 availableForSubagents', m1.availableForSubagents, true)
+  check('保留 reasoningEffortParameter', m1.reasoningEffortParameter, 'reasoning_effort')
   check('状态不含 keyRef 值以外的密钥', JSON.stringify(status).includes('sk-'), false)
 
   rmSync(dir, { recursive: true, force: true })

@@ -208,6 +208,32 @@ export function findCatalogDir({ home } = {}) {
   return null
 }
 
+/**
+ * 模型能力目录的可用性说明。
+ *
+ * 背景：插件原本从 `@earendil-works/pi-ai` 的 `dist/providers/data/*.json`
+ * 读取 1241 个模型的能力（上下文窗口、输出上限、思考档位、附件支持）。
+ * 实测 DSH 0.21 起该包**不再安装到 profile 的 node_modules**，目录已不可得。
+ *
+ * 这不是崩溃性问题：`loadModelCatalog` 找不到目录时返回空表，用户手动填写
+ * 能力仍然可用。但「勾选模型自动填好能力」这项便利功能会失效，所以要能
+ * 明确告诉用户原因，而不是让他以为是插件坏了。
+ *
+ * @param {object} [options]
+ * @param {string} [options.home] DSH_HOME
+ * @returns {{available: boolean, dir: string|null, reason: string}}
+ */
+export function catalogStatus({ home } = {}) {
+  const dir = findCatalogDir({ home })
+  if (dir !== null) return { available: true, dir, reason: '' }
+  return {
+    available: false,
+    dir: null,
+    reason: '模型能力目录不可用（@earendil-works/pi-ai 未安装到 profile）；'
+      + '可手动填写上下文窗口与输出上限，功能不受影响',
+  }
+}
+
 //#region 工具
 
 function num(value) {

@@ -229,6 +229,10 @@ window.__ModuleLoader__.load({
       'models.empty': '该供应商还没有配置模型。点「编辑」添加。',
       'models.inDsh': '已写入 DSH',
       'models.context': '上下文',
+      'models.manualMark': '(手填)',
+      'models.images': '读图',
+      'models.documents': '读文档',
+      'models.webSearch': '联网',
       'models.maxOutput': '输出上限',
       'models.thinking': '思考档位',
       'models.copy': '复制 ID',
@@ -661,6 +665,10 @@ window.__ModuleLoader__.load({
       'models.empty': 'No models configured for this supplier yet. Click "Edit" to add some.',
       'models.inDsh': 'in DSH',
       'models.context': 'Context',
+      'models.manualMark': '(manual)',
+      'models.images': 'images',
+      'models.documents': 'documents',
+      'models.webSearch': 'web search',
       'models.maxOutput': 'Max output',
       'models.thinking': 'Thinking',
       'models.copy': 'Copy ID',
@@ -5202,7 +5210,18 @@ function formatMoneyText(value) {
               ? null
               : { ...current, available: body.models }))
           } else {
-            setSupplierNotice({ kind: 'error', text: `${t('supplier.fetchFail')}：${body.error ?? ''}` })
+            /**
+             * 按失败类型给可操作的提示（借鉴 PiDesktop）：
+             * 笼统的「获取失败」让用户不知道该改地址、换密钥还是稍后重试。
+             */
+            const kindKey = {
+              'not-found': 'supplier.fetchNotFound',
+              unauthorized: 'supplier.fetchUnauthorized',
+              'bad-status': 'supplier.fetchBadStatus',
+              'invalid-response': 'supplier.fetchInvalidResponse',
+            }[body.kind]
+            const hint = kindKey === undefined ? t('supplier.fetchFail') : t(kindKey)
+            setSupplierNotice({ kind: 'error', text: `${hint}：${body.error ?? ''}` })
           }
         } catch (error) {
           setSupplierNotice({ kind: 'error', text: `${t('supplier.fetchFail')}：${error?.message ?? error}` })
@@ -6799,10 +6818,19 @@ function formatMoneyText(value) {
               h('div', { className: 'tu-model-item-meta' },
                 model.contextWindow === undefined
                   ? null
-                  : h('span', null, `${t('models.context')} ${model.contextWindow}`),
+                  : h('span', null,
+                    `${t('models.context')} ${model.contextWindow}`
+                    // 标出来源：用户分不清这个值是自动识别的还是自己填的
+                    + (model.contextWindowSource === 'manual' ? ` ${t('models.manualMark')}` : '')),
                 model.maxOutput === undefined
                   ? null
-                  : h('span', null, `${t('models.maxOutput')} ${model.maxOutput}`),
+                  : h('span', null,
+                    `${t('models.maxOutput')} ${model.maxOutput}`
+                    + (model.maxOutputSource === 'manual' ? ` ${t('models.manualMark')}` : '')),
+                // 能力三角：分开表达，而不是一个 image 布尔
+                model.supportsImages === true ? h('span', { className: 'tu-model-cap' }, t('models.images')) : null,
+                model.supportsDocuments === true ? h('span', { className: 'tu-model-cap' }, t('models.documents')) : null,
+                model.nativeWebSearch === true ? h('span', { className: 'tu-model-cap' }, t('models.webSearch')) : null,
                 Array.isArray(model.thinkingLevels) && model.thinkingLevels.length > 0
                   // 档位条目可能是 `{level, wire}` 对象，直接 join 会得到
                   // [object Object]，这里取档位名；自定义拼写单独标注。

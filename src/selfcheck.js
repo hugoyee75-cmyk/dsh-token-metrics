@@ -108,6 +108,15 @@ export function runSelfCheck(input) {
     }
   }
 
+  // —— 5. 模型能力目录：只影响「自动填能力」这项便利功能 ——
+  // 目录不存在不算故障（用户可手填），但要如实说明，免得以为插件坏了。
+  if (env.catalogAvailable === false) {
+    add('model-catalog', LEVEL.ok, '模型能力目录不可用',
+      env.catalogReason ?? '无法读取模型能力目录，可手动填写上下文与输出上限')
+  } else if (env.catalogAvailable === true) {
+    add('model-catalog', LEVEL.ok, '模型能力目录可用', '勾选模型时可自动填好上下文与输出上限')
+  }
+
   const failed = items.filter((item) => item.level === LEVEL.fail).length
   const warned = items.filter((item) => item.level === LEVEL.warn).length
   return { ok: failed === 0, checkedAt: now, items, failed, warned }

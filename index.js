@@ -41,7 +41,7 @@ import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
-import { probeOfficial, detectProvider, loadModelCatalog } from './src/providers.js'
+import { probeOfficial, detectProvider, loadModelCatalog, catalogStatus } from './src/providers.js'
 import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts } from './src/push.js'
 import { createMemoryGate } from './src/memory.js'
 import { runSelfCheck } from './src/selfcheck.js'
@@ -2476,6 +2476,21 @@ export function apply(ctx, rawConfig) {
           env: {
             hasSessionPersistence: liveAvailable,
             persistenceSource: liveSource,
+            // 模型能力目录可用性（DSH 0.21 起 pi-ai 不再安装到 profile）
+            catalogAvailable: (() => {
+              try {
+                return catalogStatus({ home: tracker.home }).available
+              } catch {
+                return false
+              }
+            })(),
+            catalogReason: (() => {
+              try {
+                return catalogStatus({ home: tracker.home }).reason
+              } catch {
+                return undefined
+              }
+            })(),
             startedAt: tracker.startedAt ?? Date.now(),
             store: tracker.store,
           },

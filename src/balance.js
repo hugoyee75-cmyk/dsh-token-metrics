@@ -293,23 +293,52 @@ export async function discoverModels({ baseUrl, apiKey, fetchImpl, signal, timeo
   const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), timeoutMs)
   try {
     // 有些网关的模型列表带 /v1 前缀，有些不带；两种都试一次。
+    //
+    // 失败原因要分类返回（借鉴 PiDesktop 的做法）：笼统的一句「获取失败」
+    // 让用户不知道该改地址、换密钥还是稍后重试。这里区分四类：
+    //   not-found       两个端点都 404       → 地址不对
+    //   unauthorized    401/403             → 密钥不对或没有权限
+    //   bad-status      其它 HTTP 状态码     → 上游故障
+    //   invalid-response 响应不是预期的 JSON 结构 → 不是标准 OpenAI 兼容接口
     const candidates = [`${base}/v1/models`, `${base}/models`]
-    let lastError = ''
+    let lastKind = ''
+    let lastDetail = ''
     for (const url of candidates) {
       try {
         const response = await doFetch(url, {
           headers, signal: signal ?? controller?.signal, redirect: 'error',
         })
-        if (!response.ok) { lastError = `HTTP ${response.status}`; continue }
+        if (!response.ok) {
+          if (response.status === 404) {
+            lastKind = 'not-found'
+            lastDetail = `HTTP 404（${url}）`
+          } else if (response.status === 401 || response.status === 403) {
+            lastKind = 'unauthorized'
+            lastDetail = `HTTP ${response.status}`
+          } else {
+            lastKind = 'bad-status'
+            lastDetail = `HTTP ${response.status}`
+          }
+          continue
+        }
         const body = await response.json().catch(() => undefined)
         const models = normalizeModelList(body)
-        if (models.length === 0) { lastError = '返回里没有模型'; continue }
+        if (models.length === 0) {
+          lastKind = 'invalid-response'
+          lastDetail = '返回里没有可识别的模型列表'
+          continue
+        }
         return { ok: true, models }
       } catch (error) {
-        lastError = error?.message ?? String(error)
+        lastKind = lastKind === '' ? 'bad-status' : lastKind
+        lastDetail = error?.message ?? String(error)
       }
     }
-    return { ok: false, error: lastError === '' ? '没有可用的模型列表端点' : lastError }
+    return {
+      ok: false,
+      kind: lastKind === '' ? 'not-found' : lastKind,
+      error: lastDetail === '' ? '没有可用的模型列表端点' : lastDetail,
+    }
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
@@ -414,7 +443,13 @@ export class BalanceBook {
     const site = sanitizeSite({
       id,
       label: input.label ?? id,
-      baseUrl: normalizeBaseUrl(input.baseUrl ?? ''),
+      // 保存原始地址，**不要**在这里剥掉 /v1。
+      // 早先这里调用了 normalizeBaseUrl，导致用户填写的
+      // `https://api.xxx.com/v1` 被存成 `https://api.xxx.com` —— 地址里的
+      // v1 凭空消失，之后拉 `/v1/models`、同步 DSH 配置都会用到错误地址。
+      // 归一化只在「真正发请求」时做（probeBalance / discoverModels 内部
+      // 各自处理），存储层保持用户输入原样。
+      baseUrl: String(input.baseUrl ?? '').trim(),
       keyRef: input.keyRef ?? `dsh-token-metrics/${id}`,
       // keyEnv 与 models 必须带过来：前者是同步到 DSH 时的凭据引用名，
       // 后者是路由必须声明的模型清单。漏掉任何一个都会让同步失败。
@@ -560,6 +595,34 @@ function sanitizeSite(input) {
           }
           // 附件能力：false 表示只接受文本
           if (model.image === false) entry.image = false
+
+          // —— 字段来源标记（借鉴 PiDesktop）——
+          // 用户在界面上分不清「这个上下文窗口是我手填的还是自动识别来的」。
+          // 'auto' = 从模型目录/端点推断，'manual' = 用户手动填写。
+          // 同步到 DSH 时保留，便于排查「为什么这个模型能力不对」。
+          if (model.contextWindowSource === 'manual' || model.contextWindowSource === 'auto') {
+            entry.contextWindowSource = model.contextWindowSource
+          }
+          if (model.maxOutputSource === 'manual' || model.maxOutputSource === 'auto') {
+            entry.maxOutputSource = model.maxOutputSource
+          }
+
+          // —— 能力三角（借鉴 PiDesktop）——
+          // 早先只有一个 image 布尔，无法表达「能读文档但不能读图」这类情况。
+          // 三个字段彼此独立；undefined 表示未知（不假设为 false）。
+          if (model.supportsImages === true) entry.supportsImages = true
+          else if (model.supportsImages === false) entry.supportsImages = false
+          if (model.supportsDocuments === true) entry.supportsDocuments = true
+          else if (model.supportsDocuments === false) entry.supportsDocuments = false
+          if (model.nativeWebSearch === true) entry.nativeWebSearch = true
+          else if (model.nativeWebSearch === false) entry.nativeWebSearch = false
+          // 是否允许子代理自动选用
+          if (model.availableForSubagents === true) entry.availableForSubagents = true
+          else if (model.availableForSubagents === false) entry.availableForSubagents = false
+          // 推理强度参数名（各单位拼写不同，如 reasoning_effort / effort）
+          if (typeof model.reasoningEffortParameter === 'string' && model.reasoningEffortParameter !== '') {
+            entry.reasoningEffortParameter = model.reasoningEffortParameter
+          }
           return entry
         })
       : [],
