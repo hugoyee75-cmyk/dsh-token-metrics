@@ -560,6 +560,19 @@ function renderWithTab(tabLabel) {
   check('单年数据不显示按年粒度', !allView.flat.includes('按年'))
 }
 
+// —— 模型选择交互（借鉴 PiDesktop）——
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  // 列表行显示「上下文 · 输出上限」，用户能一眼看出能力是否被识别
+  check('模型行显示容量数值', src.includes('tu-mlist-cap'), true)
+  check('有容量格式化函数', src.includes('function formatTokens'), true)
+  // 别名与 ID 并排显示
+  check('模型行显示别名', src.includes('tu-mlist-alias'), true)
+  // 已选模型可上下移动
+  check('有移动函数', src.includes('const moveModel = (id, delta)'), true)
+  check('详情区有排序按钮', src.includes('tu-detail-order'), true)
+}
+
 // —— 刷新统一：页内不再有重复的刷新按钮 ——
 // 回归点：供应商页原有一个「刷新全部余额」按钮，但它调用 loadBalance()
 // 只重读已存状态、并不去查询余额，属于无效按钮；顶栏刷新也只刷统计。

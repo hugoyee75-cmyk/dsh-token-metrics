@@ -272,6 +272,8 @@ window.__ModuleLoader__.load({
       'supplier.saveAndSync': '保存并同步',
       'supplier.cancel': '取消',
       'supplier.remove': '移除',
+      'supplier.moveUp': '上移',
+      'supplier.moveDown': '下移',
       'supplier.keyHint': '密钥只保存在 DSH 凭据里，不会写入配置文件，也不会显示在此页面。',
       'supplier.syncOk': '已同步到 DSH 模型配置',
       'supplier.syncFail': '同步失败',
@@ -708,6 +710,8 @@ window.__ModuleLoader__.load({
       'supplier.saveAndSync': 'Save and sync',
       'supplier.cancel': 'Cancel',
       'supplier.remove': 'Remove',
+      'supplier.moveUp': 'Move up',
+      'supplier.moveDown': 'Move down',
       'supplier.keyHint': 'Keys are stored only in DSH credentials, never in config files, and never shown on this page.',
       'supplier.syncOk': 'Synced to DSH model config',
       'supplier.syncFail': 'Sync failed',
@@ -1742,6 +1746,30 @@ body[data-ds-dark-theme] .tu-toasts,
   white-space: nowrap;
   font-family: var(--dsw-alias-font-mono, monospace);
   font-size: 12px;
+}
+/* 模型别名：ID 之后的次要文字（PiDesktop 同款布局） */
+.tu-mlist-alias {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 右侧容量数值：上下文 · 输出上限。等宽字体对齐，一眼可比 */
+.tu-mlist-cap {
+  flex: none;
+  font-family: var(--dsw-alias-font-mono, monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  letter-spacing: 0.01em;
+}
+.tu-detail-order {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: 4px;
 }
 .tu-mlist-tag {
   flex: none;
@@ -3473,6 +3501,21 @@ body[data-ds-dark-theme] .tu-toasts,
      * 小数位按量级自适应并去掉无意义的尾零（530.0B -> 530B），
      * 保证刻度短、不浪费宽度。
      */
+    /**
+     * token 容量（上下文 / 输出上限）的紧凑写法：1.05M、393.2K。
+     *
+     * 与 formatCompact 分开：那个用于「用量」这类会到 B/T 的量级并且要丢
+     * 尾零；这里表达的是「模型能力参数」，习惯上保留两位小数更精确
+     * （131.1K 与 131K 对用户是不同信息）。缺失时显示「—」。
+     */
+    function formatTokens(value) {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n <= 0) return '—'
+      if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2).replace(/\.?0+$/, '')}M`
+      if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+      return String(n)
+    }
+
     function formatCompact(value) {
       if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return '0'
       const abs = Math.abs(value)
@@ -6912,6 +6955,28 @@ function formatMoneyText(value) {
             entry.id === id ? { ...entry, ...patch } : entry)),
         }))
 
+        /**
+         * 调整已选模型的顺序（借鉴 PiDesktop 的拖动排序，这里用上/下移）。
+         *
+         * 为什么需要：同步到 DSH 时按此顺序生成 models 数组，用户希望
+         * 常用模型排在前面以便在选择器里快速找到。用上下移动而不是 HTML5
+         * 拖拽：零依赖、可键盘操作、在移动端也能用。
+         *
+         * @param {string} id 要移动的模型
+         * @param {-1|1} delta 负值上移，正值下移
+         */
+        const moveModel = (id, delta) => setSupplierForm((current) => {
+          if (current === null) return null
+          const models = [...(current.models ?? [])]
+          const from = models.findIndex((entry) => entry.id === id)
+          if (from === -1) return current
+          const to = from + delta
+          if (to < 0 || to >= models.length) return current
+          const [moved] = models.splice(from, 1)
+          models.splice(to, 0, moved)
+          return { ...current, models }
+        })
+
         /** 字段标题；required 为 true 时带红色星号。 */
         /**
          * 查模型目录里该模型的能力。
@@ -7150,7 +7215,15 @@ function formatMoneyText(value) {
                           onClick: (event) => event.stopPropagation?.(),
                           onChange: () => toggleModel(model),
                         }),
+                        // 主标题：模型 ID（PiDesktop 同款布局，ID 与别名并排）
                         h('span', { className: 'tu-mlist-id', title: model.id }, model.id),
+                        typeof model.name === 'string' && model.name !== ''
+                          ? h('span', { className: 'tu-mlist-alias' }, model.name)
+                          : null,
+                        // 右侧数值：上下文 · 输出上限。缺一个就画「—」，
+                        // 让用户一眼看出这个模型的能力是否已被识别到。
+                        h('span', { className: 'tu-mlist-cap' },
+                          `${formatTokens(model.contextWindow)} · ${formatTokens(model.maxOutput)}`),
                         // 状态灯：勾选并配过参数的显示绿点，只勾选的显示空心点，
                         // 未勾选的不显示——一眼看出哪些已经配好了。
                         //
@@ -7252,6 +7325,24 @@ function formatMoneyText(value) {
                     return h('div', { className: 'tu-detail' },
                       h('div', { className: 'tu-detail-head' },
                         h('span', { className: 'tu-detail-id' }, active.id),
+                        // 排序：同步到 DSH 时按此顺序生成 models 数组，
+                        // 常用模型排在前面，选择器里更快找到。
+                        picked
+                          ? h('div', { className: 'tu-detail-order' },
+                            h('button', {
+                              type: 'button', className: 'tu-icon-btn',
+                              title: t('supplier.moveUp'),
+                              disabled: selected.findIndex((e) => e.id === active.id) === 0,
+                              onClick: () => moveModel(active.id, -1),
+                            }, '↑'),
+                            h('button', {
+                              type: 'button', className: 'tu-icon-btn',
+                              title: t('supplier.moveDown'),
+                              disabled: selected.findIndex((e) => e.id === active.id) === selected.length - 1,
+                              onClick: () => moveModel(active.id, 1),
+                            }, '↓'),
+                          )
+                          : null,
                         picked
                           ? h('button', {
                             type: 'button', className: 'tu-icon-btn',
