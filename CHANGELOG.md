@@ -3,6 +3,39 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.5] - 2026-10-24
+
+借鉴 PiDesktop 0.21 的模型接入设计，并修复 baseURL 处理缺陷。
+
+### 修复
+
+- **站点地址里的 `/v1` 被剥掉**：保存时误用了 `normalizeBaseUrl`，它会无条件
+  去掉末尾的 `/v1`，导致 `https://api.xxx.com/v1` 被存成
+  `https://api.xxx.com` —— 之后拉 `/v1/models`、同步 DSH 配置都用错地址。
+  归一化现在只在发请求时做，存储层保留用户输入原样
+
+### 新增
+
+- **字段来源标记**：`contextWindowSource` / `maxOutputSource` 区分「手动填写」
+  与「自动识别」，界面标注 `(手填)`。此前用户分不清数值是哪来的
+- **模型能力三角**：`supportsImages` / `supportsDocuments` / `nativeWebSearch` /
+  `availableForSubagents` / `reasoningEffortParameter` 分开表达。早先只有一个
+  `image` 布尔，无法表示「能读文档但不能读图」
+- **获取模型失败分类**：`not-found` / `unauthorized` / `bad-status` /
+  `invalid-response` 四类，分别给出可操作提示（改地址 / 换密钥 / 稍后重试 /
+  该地址可能不是 OpenAI 兼容接口）
+
+### 说明
+
+- **DSH 0.21 起模型能力目录不可用**：实测 `@earendil-works/pi-ai` 已不再安装到
+  profile 的 node_modules，也不在 app 内。因此「勾选模型自动填好上下文与输出
+  上限」失效（不会崩溃，静默降级）。新增 `catalogStatus()` 明确报告原因并接入
+  接口自检，可手动填写能力
+- PiDesktop 的 OAuth 登录与多账号同厂商未采纳：本插件用户集中在国内平台，
+  这些多数没有 OAuth 流程，投入大而收益低
+
+[0.3.5]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.5
+
 ## [0.3.4] - 2026-10-24
 
 新增接口自检与更新后自动回退，应对 DSH 升级带来的静默失效。
