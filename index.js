@@ -3445,7 +3445,11 @@ function discoverProviderEndpoints(ctx) {
             out.push({
               id: name,
               label: String(entry?.displayName ?? entry?.display_name ?? name),
-              baseUrl: normalizeBaseUrl(base),
+              // **不要**归一化：这里是从 DSH 已有配置**读回**给用户看，
+              // 必须如实反映存的是什么。早先调了 normalizeBaseUrl，
+              // DSH 里写的 `https://x/v1` 会被显示成 `https://x`，
+              // 用户看到的和实际配置不一致。
+              baseUrl: String(base).trim(),
               configRow: id,
             })
           }
@@ -3457,7 +3461,8 @@ function discoverProviderEndpoints(ctx) {
           out.push({
             id,
             label: String(layer.displayName ?? id),
-            baseUrl: normalizeBaseUrl(direct),
+            // 同上：读回时保留原样，不剥 /v1
+            baseUrl: String(direct).trim(),
             configRow: id,
           })
         }

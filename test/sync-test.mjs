@@ -247,6 +247,23 @@ check('大写与特殊字符', defaultKeyEnvName('a/b c'), 'DSH_TOKEN_METRICS_A_
 
 //#endregion
 
+//#region baseURL 的 /v1 必须原样保留
+
+// 回归点：用户实测「地址配置了带 v1，同步到 DSH 之后就没了」。
+// 排查发现保存站点、写入 DSH 两条链路都是对的，问题在**读回显示**那一步
+// 调了 normalizeBaseUrl（它会无条件剥末尾 /v1）。读回必须如实反映存的是什么。
+check('写入 DSH 时保留 /v1',
+  buildProviderConfig({ id: 'r', label: 'R', baseUrl: 'https://api.x.com/v1' }).baseURL,
+  'https://api.x.com/v1')
+check('写入时保留路径前缀 + /v1',
+  buildProviderConfig({ id: 'r', label: 'R', baseUrl: 'https://x.com/gw/v1' }).baseURL,
+  'https://x.com/gw/v1')
+check('无 /v1 时不变',
+  buildProviderConfig({ id: 'r', label: 'R', baseUrl: 'https://x.com' }).baseURL,
+  'https://x.com')
+
+//#endregion
+
 if (failures.length > 0) {
   console.log('失败：')
   for (const line of failures) console.log(`  ✗ ${line}`)
