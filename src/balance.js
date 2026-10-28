@@ -381,6 +381,60 @@ export function normalizeModelList(body) {
       if (Number.isFinite(context) && context > 0) model.contextWindow = context
       const maxOut = Number(entry.max_output_tokens ?? entry.maxTokens ?? entry.max_tokens)
       if (Number.isFinite(maxOut) && maxOut > 0) model.maxOutput = maxOut
+
+      /**
+       * 推理能力：从端点响应里尽力解析。
+       *
+       * 为什么需要：模型能力目录（pi-ai 的 providers/data）在 DSH 0.21 起
+       * 不再随 profile 安装，目录读取失效，于是「勾选模型自动填好思考档位」
+       * 也跟着没了。而多数网关其实在 /v1/models 里就带了推理信息，
+       * 只是此前被丢掉。
+       *
+       * 兼容几种常见写法：
+       *   · reasoning: true / { efforts: [...] }
+       *   · capabilities.reasoning / supported_reasoning_efforts
+       *   · thinking_levels / thinkingLevels 数组
+       * 解析不出来就保持 undefined —— 让用户手动勾选，不瞎猜。
+       */
+      const reasoningFlag = entry.reasoning
+      let efforts
+      if (Array.isArray(reasoningFlag)) {
+        efforts = reasoningFlag
+      } else if (reasoningFlag !== null && typeof reasoningFlag === 'object'
+        && Array.isArray(reasoningFlag.efforts)) {
+        efforts = reasoningFlag.efforts
+      } else if (Array.isArray(entry.thinking_levels)) {
+        efforts = entry.thinking_levels
+      } else if (Array.isArray(entry.thinkingLevels)) {
+        efforts = entry.thinkingLevels
+      } else if (Array.isArray(entry.supported_reasoning_efforts)) {
+        efforts = entry.supported_reasoning_efforts
+      } else if (entry.reasoning === true || entry.capabilities?.reasoning === true) {
+        // 只声明「支持推理」但没给档位：按常见全集给出推荐档位
+        efforts = ['low', 'medium', 'high']
+      }
+      if (Array.isArray(efforts)) {
+        const levels = efforts
+          .map((item) => {
+            if (typeof item === 'string' && item !== '') return item
+            if (item !== null && typeof item === 'object') {
+              const level = item.level ?? item.effort ?? item.name
+              if (typeof level === 'string' && level !== '') {
+                const wire = item.wire ?? item.parameter_value
+                return typeof wire === 'string' && wire !== '' && wire !== level
+                  ? { level, wire }
+                  : level
+              }
+            }
+            return undefined
+          })
+          .filter((item) => item !== undefined)
+        if (levels.length > 0) model.thinkingLevels = levels
+      }
+      if (entry.supports_reasoning === true || entry.capabilities?.reasoning === true
+        || entry.reasoning === true || Array.isArray(efforts)) {
+        model.reasoning = true
+      }
     }
     out.push(model)
   }

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   probeBalance, normalizeBaseUrl, parseNewApiBalance, parseOneApiSubscription,
-  parseOneApiUsage, parseSub2ApiUsage, BalanceBook, discoverModels,
+  parseOneApiUsage, parseSub2ApiUsage, BalanceBook, discoverModels, normalizeModelList,
 } from '../src/balance.js'
 
 const failures = []
@@ -312,6 +312,36 @@ check('非字符串安全', normalizeBaseUrl(null), '')
   check('状态不含 keyRef 值以外的密钥', JSON.stringify(status).includes('sk-'), false)
 
   rmSync(dir, { recursive: true, force: true })
+}
+
+//#endregion
+
+//#region 端点推理能力解析
+
+{
+  // 多种网关写法都要能识别（模型能力目录在 DSH 0.21 起已不可用，
+  // 端点响应成了唯一的自动填充来源）
+  const r1 = normalizeModelList([{ id: 'a', reasoning: true }])[0]
+  check('reasoning:true 识别为推理模型', r1.reasoning, true)
+  check('reasoning:true 给出默认档位', (r1.thinkingLevels ?? []).length > 0, true)
+
+  const r2 = normalizeModelList([{ id: 'b', reasoning: { efforts: ['low', 'high'] } }])[0]
+  check('reasoning.efforts 被采用', (r2.thinkingLevels ?? []).join(','), 'low,high')
+
+  const r3 = normalizeModelList([{ id: 'c', thinking_levels: ['off', 'max'] }])[0]
+  check('thinking_levels 被采用', (r3.thinkingLevels ?? []).join(','), 'off,max')
+
+  const r4 = normalizeModelList([{ id: 'd', supported_reasoning_efforts: ['low'] }])[0]
+  check('supported_reasoning_efforts 被采用', (r4.thinkingLevels ?? []).join(','), 'low')
+
+  // 带协议拼写的档位要保留成 {level, wire}
+  const r5 = normalizeModelList([{ id: 'e', thinking_levels: [{ level: 'max', wire: 'ultra' }] }])[0]
+  check('档位协议拼写保留', JSON.stringify(r5.thinkingLevels[0]), '{"level":"max","wire":"ultra"}')
+
+  // 非推理模型不能瞎猜
+  const r6 = normalizeModelList([{ id: 'f' }])[0]
+  check('无推理信息时不臆造', r6.reasoning, undefined)
+  check('无推理信息时档位为空', r6.thinkingLevels, undefined)
 }
 
 //#endregion

@@ -6934,16 +6934,28 @@ function formatMoneyText(value) {
             models: exists
               ? models.filter((entry) => entry.id !== model.id)
               : [...models, (() => {
-                // 优先级：端点返回 > 模型目录 > 留空让用户填。
-                // 目录是权威数据，能省掉「这个模型到底支持哪几档」的猜测。
+                /**
+                 * 自动填充优先级：**端点返回的 > 模型目录的 > 留空**。
+                 *
+                 * 注意端点数据要排第一：DSH 0.21 起 pi-ai 的模型能力目录不再
+                 * 随 profile 安装，`catalogEntry` 实际上恒为 undefined，只靠它
+                 * 就永远填不上思考档位。而端点（/v1/models）通常就带推理信息，
+                 * 已在 normalizeModelList 里解析到 model.thinkingLevels。
+                 *
+                 * 填充只是**初值**：填好之后用户仍可在右侧逐档增删（走
+                 * patchModel），自动填充不会覆盖用户的选择 —— 消勾再勾会重新
+                 * 取端点值，这是显式的重新开始。
+                 */
                 const cap = catalogEntry(model.id)
+                const endpointLevels = Array.isArray(model.thinkingLevels) ? model.thinkingLevels : undefined
                 return {
                   id: model.id,
                   name: model.name ?? '',
                   contextWindow: model.contextWindow ?? cap?.contextWindow,
                   maxOutput: model.maxOutput ?? cap?.maxTokens,
-                  // 目录给了档位就直接填好；不是推理模型则明确留空
-                  thinkingLevels: cap?.thinkingLevels ?? [],
+                  thinkingLevels: endpointLevels ?? cap?.thinkingLevels ?? [],
+                  // 端点显式给了推理标记时以它为准
+                  reasoning: model.reasoning === true || cap?.reasoning === true,
                   image: cap?.input === undefined ? true : cap.input.includes('image'),
                 }
               })()],
