@@ -5,7 +5,7 @@
  */
 
 import {
-  findProviderEntry, buildProviderConfig, mergeProvider,
+  findProviderEntry, buildProviderConfig, mergeProvider, diffProviders, removeProvider,
   syncProviderToDsh, defaultKeyEnvName, DEFAULT_API,
 } from '../src/sync.js'
 
@@ -73,9 +73,14 @@ function checkTrue(label, condition, detail = '') {
   const noKey = buildProviderConfig({ id: 'x', baseUrl: 'https://x' })
   check('无 keyEnv 时不写该字段', noKey.apiKeyEnv, undefined)
 
-  // 没有模型时不写 models（否则会清空目录）
+  // 没传 models 时不写该键（调用方没打算动模型）
   const noModels = buildProviderConfig({ id: 'x', baseUrl: 'https://x' })
-  check('无模型时不写 models', noModels.models, undefined)
+  check('未传 models 时不写该键', noModels.models, undefined)
+  // 传了 models 就必须完整覆盖（含空数组，由 mergeProvider 决定删 route）
+  const emptyModels = buildProviderConfig({ id: 'x', baseUrl: 'https://x', models: [] })
+  check('传空数组时写空 models', emptyModels.models, [])
+  const oneModel = buildProviderConfig({ id: 'x', baseUrl: 'https://x', models: [{ id: 'm1' }] })
+  check('传模型时写完整数组', oneModel.models.length, 1)
 
   // 思考档位：只写用户勾选的，且转成 pi-ai 的 reasoningEfforts
   const withLevels = buildProviderConfig({
@@ -244,6 +249,81 @@ function checkTrue(label, condition, detail = '') {
 
 check('生成合法变量名', defaultKeyEnvName('my-relay.1'), 'DSH_TOKEN_METRICS_MY_RELAY_1_KEY')
 check('大写与特殊字符', defaultKeyEnvName('a/b c'), 'DSH_TOKEN_METRICS_A_B_C_KEY')
+
+//#endregion
+
+//#region 移除模型 / 移除供应商要同步 DSH
+
+{
+  // 移除部分模型：剩余模型必须完整覆盖旧数组
+  const before = {
+    relay: {
+      displayName: '旧', baseURL: 'https://x',
+      models: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    },
+  }
+  const after = mergeProvider(before, {
+    id: 'relay', label: '旧', baseUrl: 'https://x/v1',
+    models: [{ id: 'a' }, { id: 'c' }],
+  })
+  check('移除部分模型后只剩两个', after.relay.models.length, 2)
+  check('被移除的 b 不在了', after.relay.models.some((m) => m.id === 'b'), false)
+  check('保留的模型还在', after.relay.models.map((m) => m.id).join(','), 'a,c')
+
+  // 移除**全部**模型：整条 route 删掉（pi-ai 要求至少一个模型）
+  const emptied = mergeProvider(before, {
+    id: 'relay', label: '旧', baseUrl: 'https://x', models: [],
+  })
+  check('模型全删后 route 被移除', emptied.relay, undefined)
+  check('其它 provider 不受影响',
+    mergeProvider({ keep: { displayName: 'k' }, relay: { displayName: 'r' } },
+      { id: 'relay', label: 'r', baseUrl: 'u', models: [] }).keep?.displayName, 'k')
+
+  // 没传 models：不动原有模型（只改名字/地址的场景）
+  const renamed = mergeProvider(before, { id: 'relay', label: '新名' })
+  check('未传 models 时保留原模型', renamed.relay.models.length, 3)
+  check('未传 models 时名字已更新', renamed.relay.displayName, '新名')
+}
+
+//#endregion
+
+//#region 双向同步：比对 DSH 与插件站点
+
+{
+  const sites = [
+    { id: 'a', models: [{ id: 'm1' }, { id: 'm2' }], keyEnv: 'K_A' },
+    { id: 'b', models: [{ id: 'm3' }], keyEnv: 'K_B' },
+    { id: 'local-only', models: [] },   // 没 keyEnv，从未同步过
+  ]
+  // DSH 里有 a、b、c；插件有 a、b、local-only
+  const diff = diffProviders({ dshRoutes: ['a', 'b', 'c'], sites })
+  check('DSH 有插件没有的列出', diff.onlyInDsh.join(','), 'c')
+  check('插件有 DSH 没有的列出', diff.onlyInPlugin.join(','), 'local-only')
+
+  // 模型差异
+  const withDshModels = [
+    { id: 'a', models: [{ id: 'm1' }, { id: 'm2' }], __dshModels: ['m1', 'm9'] },
+  ]
+  const d2 = diffProviders({ dshRoutes: ['a'], sites: withDshModels })
+  check('找出 DSH 缺失的模型', d2.modelDiff[0]?.missingInDsh?.join(','), 'm2')
+  check('找出 DSH 多出的模型', d2.modelDiff[0]?.extraInDsh?.join(','), 'm9')
+
+  // 完全一致时无差异
+  const same = diffProviders({ dshRoutes: ['a'], sites: [{ id: 'a', models: [{ id: 'm1' }], __dshModels: ['m1'] }] })
+  check('一致时无模型差异', same.modelDiff.length, 0)
+
+  // 边界：空输入不抛错
+  let threw = false
+  try { diffProviders({}) } catch { threw = true }
+  check('空输入不抛错', threw, false)
+
+  // **关键安全边界**：DSH 读到空列表时，不能据此认为「插件所有站点都是孤儿」。
+  // 调用方必须自己拦截（index.js 里有 dsh.length === 0 的闸门）。
+  // 这里固化这个语义：空 dshRoutes 会让所有站点落进 onlyInPlugin。
+  const dangerous = diffProviders({ dshRoutes: [], sites: [{ id: 'a', keyEnv: 'K' }] })
+  check('空 DSH 列表会把所有站点标为孤儿（调用方须拦截）',
+    dangerous.onlyInPlugin.join(','), 'a')
+}
 
 //#endregion
 

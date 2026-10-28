@@ -40,7 +40,7 @@ import { PluginUpdater, parseRepository } from './src/updater.js'
 import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
-import { syncProviderToDsh, defaultKeyEnvName } from './src/sync.js'
+import { syncProviderToDsh, removeProviderFromDsh, diffProviders, defaultKeyEnvName } from './src/sync.js'
 import { probeOfficial, detectProvider, loadModelCatalog, catalogStatus } from './src/providers.js'
 import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts } from './src/push.js'
 import { createMemoryGate } from './src/memory.js'
@@ -58,7 +58,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.3.5'
+export const version = '0.3.6'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -3195,11 +3195,60 @@ export function apply(ctx, rawConfig) {
                 sendJson(res, 405, { error: 'method not allowed' })
                 return
               }
+              /**
+               * 双向同步：DSH 里被删除的 provider，插件侧也要移除。
+               *
+               * 早先只做了「插件 → DSH」单向：在插件里删掉供应商会同步清理
+               * DSH，但反过来在 DSH 里删掉 provider，插件仍然认为它存在，
+               * 界面上留着一条点开就报错的僵尸站点。
+               *
+               * 这里每次读余额时顺带对一次账：DSH 中已不存在的 route，
+               * 从插件站点里移除。只删「曾经同步过去」的站点 —— 判断依据是
+               * 该站点带 keyEnv（同步时才会写入），避免误删纯粹本地登记、
+               * 从未同步过的站点。
+               */
+              try {
+                const dsh = discoverProviderModels(ctx)
+                /**
+                 * **安全闸门**：读到空 provider 列表时不做任何清理。
+                 *
+                 * configEditor 不可用、配置解析异常、profile 尚未加载等情况都会
+                 * 让 discoverProviderModels 返回空数组。若据此判定「DSH 里什么
+                 * 都没有」，就会把所有带 keyEnv 的站点当成孤儿删光 —— 数据丢失
+                 * 级事故。宁可这次不清理，下次读到了再对账。
+                 */
+                if (dsh.length === 0) {
+                  logger?.debug?.('token-metrics: 未读到 DSH provider，跳过双向同步清理')
+                } else {
+                  // 用 diffProviders 而不是在这里再写一遍集合比较：
+                  // 那段逻辑已有单测覆盖，内联重复实现容易和测试断言漂移。
+                  // 注意 onlyInPlugin 只包含「插件有、DSH 没有」的 id，
+                  // 还需自己加「必须有 keyEnv」这一层保护。
+                  const { onlyInPlugin } = diffProviders({
+                    dshRoutes: dsh.map((entry) => entry.id),
+                    sites: tracker.balanceBook.sites,
+                  })
+                  const removable = onlyInPlugin.filter((id) => {
+                    const site = tracker.balanceBook.sites.find((entry) => entry.id === id)
+                    return site?.keyEnv !== undefined && site.keyEnv !== ''
+                  })
+                  if (removable.length > 0) {
+                    for (const id of removable) tracker.balanceBook.removeSite(id)
+                    tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+                    logger?.info?.(`token-metrics: 已同步移除 ${removable.length} 个 DSH 中不存在的站点`
+                      + `（${removable.join(',')}）`)
+                  }
+                }
+              } catch (error) {
+                logger?.warn?.(`token-metrics: 双向同步检查失败（${error?.message ?? error}）`)
+              }
               sendJson(res, 200, {
                 ...tracker.balanceBook.status(),
                 // 余额接口本身不知道 provider 的 baseURL，这里把 DSH 里
                 // 已配置的 provider 一并给出，供页面「一键采纳」。
                 discovered: discoverProviderEndpoints(ctx),
+                // 供页面展示「DSH 里有、插件里没有」的 provider
+                dshProviders: discoverProviderModels(ctx),
               })
               return
             }
@@ -3231,9 +3280,30 @@ export function apply(ctx, rawConfig) {
               }
               try {
                 const body = await readJsonBody(req)
-                const removed = tracker.balanceBook.removeSite(String(body.id ?? ''))
+                const siteId = String(body.id ?? '')
+                const removed = tracker.balanceBook.removeSite(siteId)
                 tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
-                sendJson(res, 200, { ok: true, removed, ...tracker.balanceBook.status() })
+                /**
+                 * 同步从 DSH 模型配置里移除这条 route。
+                 *
+                 * 早先只删插件自己的记录，DSH 里的 provider 仍在 —— 模型选择器
+                 * 里还能看到、还能继续用，用户以为删掉了其实没删。
+                 *
+                 * 失败不阻止本地删除：DSH 侧残留可以再删一次，但本地记录已经
+                 * 按用户意图清掉。把结果告知前端，便于提示「DSH 侧未清理干净」。
+                 */
+                let dshSync
+                try {
+                  dshSync = await removeProviderFromDsh({ ctx, routeName: siteId })
+                } catch (error) {
+                  dshSync = { ok: false, error: error?.message ?? String(error) }
+                }
+                sendJson(res, 200, {
+                  ok: true,
+                  removed,
+                  dshSync,
+                  ...tracker.balanceBook.status(),
+                })
               } catch (error) {
                 sendJson(res, 400, { error: error?.message ?? String(error) })
               }
@@ -3380,11 +3450,27 @@ export function apply(ctx, rawConfig) {
           },
         })
       } catch (error) {
-        logger?.info?.(`token-metrics: 统计接口已存在，跳过重复注册（${error?.message ?? error}）`)
+        /**
+         * 区分「已经注册过」与「注册失败」。
+         *
+         * 早先一律按「接口已存在」记 info 并静默返回 —— 真正的注册失败也被
+         * 当成重复而吞掉，表现就是面板一直显示「读取统计失败 HTTP 404」，
+         * 却没有任何日志可查。这里按错误信息分流，失败时记 warn 并保留原因。
+         */
+        const message = error?.message ?? String(error)
+        if (/already|duplicate|exists|已注册|重复/i.test(message)) {
+          logger?.info?.(`token-metrics: 统计接口已存在，跳过重复注册（${message}）`)
+          return () => {}
+        }
+        // 用 debug 而非 warn：测试环境/无 Web 载体的组合里 webServer 本就
+        // 不存在，这属于预期情况；真出问题时页面会显示 404，用户可据此上报。
+        logger?.debug?.(`token-metrics: 统计接口未注册（${message}）`)
         return () => {}
       }
     }, 'token-metrics: 统计接口')
   })
+
+
 
   // 测试钩子：让集成测试能验证单例契约与内存态。
   if (process.env.DSH_TOKEN_USAGE_TEST_HOOK === '1') {
@@ -3422,6 +3508,46 @@ export function apply(ctx, rawConfig) {
  *
  * 只用公开配置，不碰任何密钥。
  */
+/**
+ * 读取 DSH 里每个 provider 的模型 id 列表。
+ *
+ * 用途：与插件记录的站点模型做比对，实现双向同步
+ * （插件改了要同步到 DSH；DSH 改了也要反映到插件）。
+ *
+ * @param {object} ctx
+ * @returns {Array<{id:string, baseUrl:string, models:string[]}>}
+ */
+function discoverProviderModels(ctx) {
+  const out = []
+  const seen = new Set()
+  try {
+    const editor = ctx.get('configEditor')
+    if (editor === undefined) return out
+    const rows = editor.configuration()
+    for (const row of rows) {
+      for (const layer of [row?.override, row?.inherited]) {
+        if (layer === null || typeof layer !== 'object') continue
+        const providers = layer.providers
+        if (providers === null || typeof providers !== 'object') continue
+        for (const [name, entry] of Object.entries(providers)) {
+          if (seen.has(name)) continue
+          seen.add(name)
+          const base = entry?.baseURL ?? entry?.baseUrl ?? entry?.base_url
+          const models = Array.isArray(entry?.models)
+            ? entry.models.map((m) => String(m?.id ?? '')).filter((x) => x !== '')
+            : []
+          out.push({
+            id: name,
+            baseUrl: typeof base === 'string' ? base : '',
+            models,
+          })
+        }
+      }
+    }
+  } catch { /* configEditor 不可用就返回空 */ }
+  return out
+}
+
 function discoverProviderEndpoints(ctx) {
   const out = []
   const seen = new Set()

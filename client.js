@@ -7598,7 +7598,31 @@ function formatMoneyText(value) {
                   const problem = validate()
                   if (problem !== '') { setSupplierNotice({ kind: 'error', text: problem }); return }
                   setSupplierNotice({ kind: '', text: '' })
-                  void saveSupplier(collect(), form.apiKey, false)
+                  /**
+                   * 「保存」原本只写本地、不同步 DSH —— 于是用户在弹窗里
+                   * 移除了模型，点保存后 DSH 里仍然保留，看起来像「移除没同步」。
+                   *
+                   * 现在：只要模型集合与已保存的版本不同，就自动带上同步。
+                   * 其它字段（名称/地址）仍遵循「保存只存本地」的原语义，
+                   * 避免用户只想改个显示名却意外动了 DSH 配置。
+                   */
+                  const next = collect()
+                  const prevSite = (balanceState?.sites ?? []).find((x) => x.id === next.id)
+                  const prevModels = (prevSite?.models ?? []).map((m) => m.id).sort().join(',')
+                  const nextModels = (next.models ?? []).map((m) => m.id).sort().join(',')
+                  /**
+                   * 触发同步的两种情况：
+                   *   · 编辑已有站点且模型集合变了（增/删模型都要同步）
+                   *   · **新增站点**（prevSite 不存在）且带了模型 —— 插件里配好的
+                   *     模型本就该出现在 DSH 里，否则用户还得再点一次「保存并同步」，
+                   *     容易漏。
+                   *
+                   * 只改名称/地址不会触发，避免误动 DSH 配置。
+                   */
+                  const isNewSite = prevSite === undefined
+                  const modelsChanged = (isNewSite && nextModels !== '')
+                    || (prevSite !== undefined && prevModels !== nextModels)
+                  void saveSupplier(next, form.apiKey, modelsChanged)
                 },
               }, t('supplier.save')),
               h('button', {
