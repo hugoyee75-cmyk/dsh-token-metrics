@@ -2017,6 +2017,48 @@ const discoveredEntry = () => ({
     src.includes("'opencode-go'"), true)
 }
 
+// —— CNY 余额：适配器只给 raw + currency ——
+// 回归点：页面按 USD 格式化就会在渲染阶段抛 TypeError（面板变黑）；
+// 反过来只看 usd 会把它当成「没有余额」，只剩「手动设置余额」按钮。
+{
+  const site = usdSite()
+  site.lastBalance = {
+    kind: 'balance', currency: 'CNY', provider: 'deepseek',
+    label: 'DeepSeek', isAvailable: true,
+    // 适配器对 CNY 只给 raw，不给 usd
+    raw: 71.46,
+  }
+  const tree = await renderSupplierPage({ sites: [site], discovered: [] })
+  const componentErrorsBefore = componentErrors.length
+  let renderError
+  try {
+    walkTree(tree, () => {})
+  } catch (error) {
+    renderError = error
+  }
+  check('CNY 余额渲染不抛错', renderError === undefined, renderError?.message)
+  check('CNY 余额下的子组件不抛错',
+    componentErrors.length === componentErrorsBefore,
+    componentErrors.slice(componentErrorsBefore).join(' | '))
+  const flat = textsOf(tree)
+  check('CNY 余额走金额卡片', flat.includes('tu-supcard-money'), true)
+  check('CNY 余额不显示「设置余额」按钮', !flat.includes('tu-balance-set'))
+
+  // 旧数据：升级前存的 lastBalance 没有 raw，只应退化成「设置余额」，不能崩
+  site.lastBalance = {
+    kind: 'balance', currency: 'CNY', provider: 'deepseek', label: 'DeepSeek', isAvailable: true,
+  }
+  const legacyTree = await renderSupplierPage({ sites: [site], discovered: [] })
+  let legacyError
+  try {
+    walkTree(legacyTree, () => {})
+  } catch (error) {
+    legacyError = error
+  }
+  check('缺 raw 的旧数据也不崩', legacyError === undefined, legacyError?.message)
+  check('缺 raw 时退回「设置余额」', textsOf(legacyTree).includes('tu-balance-set'), true)
+}
+
 if (failures.length > 0) {
   if (componentErrors.length > 0) {
     console.error('组件抛错：')

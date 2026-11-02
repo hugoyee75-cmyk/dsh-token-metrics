@@ -2789,7 +2789,9 @@ export function apply(ctx, rawConfig) {
   const currentAlerts = () => {
     const alerts = evaluateAlerts({
       sites: tracker.balanceBook?.sites ?? [],
-      thresholds: tracker.config?.alertThresholds ?? {},
+      // usdCny 供「只有人民币余额」的站点换算阈值：没有汇率时 push 侧
+      // 宁可不下判断，也不把 ¥20 当成 $20 误报。
+      thresholds: { ...(tracker.config?.alertThresholds ?? {}), usdCny: tracker.priceBook?.usdCny },
     })
 
     // 预算告警：今日/本月花销对比预算。成本数据来自最近一次快照，

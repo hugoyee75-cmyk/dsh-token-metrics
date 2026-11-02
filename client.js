@@ -7977,6 +7977,27 @@ function formatMoneyText(value) {
            * 分类判据与卡片上的标签一致：有配额窗口、平台本身是订阅制、
            * 或明确回报「无订阅」都算限额型。
            */
+          /**
+           * 取站点的**原生币种**余额。
+           *
+           * 适配器对非美元余额只给 raw + currency（不做汇率换算），
+           * 所以不能只看 usd —— 否则 CNY 余额的 DeepSeek 账号会被判成
+           * 「没有余额」，卡片只剩一个「手动设置余额」按钮。
+           */
+          const nativeBalanceOf = (balance) => {
+            if (balance === null || typeof balance !== 'object') return undefined
+            if (typeof balance.usd === 'number' && Number.isFinite(balance.usd)) {
+              return { amount: balance.usd, currency: balance.currency ?? 'USD' }
+            }
+            // 只有明确标了币种才算数：没有币种的 raw 无法判断该用 ¥ 还是 $，
+            // 猜一个只会把金额标错。
+            if (typeof balance.raw === 'number' && Number.isFinite(balance.raw)
+              && typeof balance.currency === 'string' && balance.currency.trim() !== '') {
+              return { amount: balance.raw, currency: balance.currency.trim().toUpperCase() }
+            }
+            return undefined
+          }
+
           const classifySite = (site) => {
             const balance = site.lastBalance
             const quotas = Array.isArray(balance?.quotas) ? balance.quotas : []
@@ -7986,7 +8007,7 @@ function formatMoneyText(value) {
               || (provider !== undefined && QUOTA_PLATFORMS.has(provider))
             // 有数值余额才算余额型；报错的站点两边都不进，避免把「查不到」
             // 当成「没有」
-            const hasBalance = typeof balance?.usd === 'number'
+            const hasBalance = nativeBalanceOf(balance) !== undefined
             return { hasBalance, looksQuota }
           }
           const balanceSites = sites.filter((site) => classifySite(site).hasBalance)
@@ -8005,7 +8026,8 @@ function formatMoneyText(value) {
           const quotas = Array.isArray(balance?.quotas) ? balance.quotas : []
           // 注意命名：这里不能叫 currency，否则会遮蔽外层的货币切换状态，
           // 导致标签永远显示 USD、点击也不换算。
-          const nativeCurrency = balance?.currency
+          const native = nativeBalanceOf(balance)
+          const nativeCurrency = native?.currency
           const symbol = nativeCurrency === 'CNY' ? '¥' : '$'
           const money = (value) => (typeof value === 'number'
             ? `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
@@ -8027,7 +8049,7 @@ function formatMoneyText(value) {
                 site.label || site.id,
                 looksLikeQuota
                   ? h('span', { className: 'tu-kindtag', 'data-kind': 'quota' }, t('kind.quota'))
-                  : (typeof balance?.usd === 'number'
+                  : (native !== undefined
                     ? h('span', { className: 'tu-kindtag', 'data-kind': 'balance' }, t('kind.balance'))
                     : null),
                 modelCount > 0
@@ -8056,7 +8078,7 @@ function formatMoneyText(value) {
                     key: entry.label, entry, t, locale,
                   })),
                 )
-                : (typeof balance?.usd === 'number'
+                : (native !== undefined
                   ? h('div', {
                     className: 'tu-supcard-money tu-supcard-money-click',
                     role: 'button',
@@ -8075,17 +8097,18 @@ function formatMoneyText(value) {
                   // 于是出现「余额 · USD  ¥128.50」这种自相矛盾的组合。
                   (() => {
                     const shown = (() => {
+                      const amount = native.amount
                       // 余额本身是 CNY：换算成美元才符合「USD 模式」，
                       // 而不是把人民币数字贴上美元标签。
                       if (nativeCurrency === 'CNY') {
                         return currency === 'usd'
-                          ? { text: `$${(balance.usd / usdCny).toFixed(2)}`, unit: 'usd' }
-                          : { text: `¥${balance.usd.toFixed(2)}`, unit: 'cny' }
+                          ? { text: `$${(amount / usdCny).toFixed(2)}`, unit: 'usd' }
+                          : { text: `¥${amount.toFixed(2)}`, unit: 'cny' }
                       }
                       // 余额本身是 USD
                       return currency === 'cny'
-                        ? { text: `¥${(balance.usd * usdCny).toFixed(2)}`, unit: 'cny' }
-                        : { text: `$${balance.usd < 1 ? balance.usd.toFixed(3) : balance.usd.toFixed(2)}`, unit: 'usd' }
+                        ? { text: `¥${(amount * usdCny).toFixed(2)}`, unit: 'cny' }
+                        : { text: `$${amount < 1 ? amount.toFixed(3) : amount.toFixed(2)}`, unit: 'usd' }
                     })()
                     return [
                       h('span', { key: 'label', className: 'tu-supcard-money-label' },

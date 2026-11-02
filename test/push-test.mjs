@@ -36,6 +36,34 @@ function checkTrue(label, condition, detail = '') {
   checkTrue('告警含站点名', alerts[0].body.includes('快没钱了'), alerts[0].body)
   // 充足的站点不应报警
   check('充足不报警', alerts.some((a) => a.siteId === 'b'), false)
+
+  // —— 非美元余额：适配器只给 raw + currency，按 usdCny 换算后再比阈值 ——
+  // 回归点：早先只看 balance.usd，CNY 账号永远收不到「余额不足」。
+  const cny = evaluateAlerts({
+    sites: [
+      { id: 'cny-low', label: '人民币账号', lastBalance: { currency: 'CNY', raw: 20 } },
+      { id: 'cny-ok', label: '人民币充足', lastBalance: { currency: 'CNY', raw: 2000 } },
+    ],
+    thresholds: { balanceLowUsd: 5, usdCny: 7.2 },
+  })
+  check('CNY 余额可触发告警', cny.length, 1)
+  check('CNY 余额充足不报警', cny.some((a) => a.siteId === 'cny-ok'), false)
+  checkTrue('CNY 金额按人民币表述', cny[0].body.includes('¥20.00'), cny[0].body)
+  checkTrue('CNY 阈值按人民币表述', cny[0].body.includes('¥36.00'), cny[0].body)
+
+  // 没有汇率时不能把 ¥20 当成 $20 误报，也不能静默丢掉（宁可不下判断）
+  const noRate = evaluateAlerts({
+    sites: [{ id: 'cny-norate', label: 'C', lastBalance: { currency: 'CNY', raw: 1 } }],
+    thresholds: { balanceLowUsd: 5 },
+  })
+  check('无汇率时不误报', noRate.length, 0)
+
+  // 没有币种的 raw 无法判断单位，同样不下判断
+  const noCurrency = evaluateAlerts({
+    sites: [{ id: 'raw-only', label: 'R', lastBalance: { raw: 1 } }],
+    thresholds: { balanceLowUsd: 5, usdCny: 7.2 },
+  })
+  check('缺币种时不误报', noCurrency.length, 0)
 }
 
 // —— 预算告警 ——
