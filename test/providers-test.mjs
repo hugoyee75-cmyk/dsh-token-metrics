@@ -347,6 +347,50 @@ check('null 安全', windowLabel(null), 'Quota')
 
 //#endregion
 
+// —— OpenCode Go：订阅制配额，不是「余额」——
+{
+  check('OpenCode 识别', detectProvider('https://opencode.ai/inference/go/v1'), 'opencode-go')
+  check('OpenCode 支持查询', isSupportedProvider('https://opencode.ai/inference/go/v1'), true)
+  check('OpenCode 展示名', PROVIDER_LABELS['opencode-go'], 'OpenCode Go')
+
+  const body = {
+    usage: {
+      rolling: { status: 'ok', percent: 2, resetsAt: '2026-11-02T12:03:54.000Z' },
+      weekly: { status: 'ok', percent: 3, resetsAt: '2026-11-09T00:00:00.000Z' },
+      monthly: { status: 'ok', percent: 27, resetsAt: '2026-11-26T04:21:23.000Z' },
+    },
+  }
+  const ok = await probeOfficial({
+    baseUrl: 'https://opencode.ai/inference/go/v1',
+    apiKey: 'k',
+    fetchImpl: respond({ '/usage': body }),
+  })
+  check('OpenCode 查询成功', ok.ok, true)
+  check('OpenCode 结果类型', ok.kind, 'quota')
+  check('OpenCode 三个窗口', ok.quotas.map((q) => q.label), ['5-hour', 'Weekly', 'Monthly'])
+  check('OpenCode 已用百分比', ok.quotas.map((q) => q.used), [2, 3, 27])
+  check('OpenCode 上限归一化', ok.quotas.map((q) => q.limit), [100, 100, 100])
+  check('OpenCode 单位', ok.quotas[0].unit, '%')
+  checkTrue('OpenCode 重置时间可解析', Number.isFinite(ok.quotas[0].resetsAt), String(ok.quotas[0].resetsAt))
+
+  // 只有部分窗口也要能出结果
+  const partial = await probeOfficial({
+    baseUrl: 'https://opencode.ai/inference/go/v1',
+    apiKey: 'k',
+    fetchImpl: respond({ '/usage': { usage: { weekly: { percent: 40 } } } }),
+  })
+  check('OpenCode 部分窗口', partial.quotas.map((q) => q.label), ['Weekly'])
+  check('OpenCode 缺重置时间也不报错', partial.quotas[0].resetsAt, undefined)
+
+  // 响应形态不对时要明确失败，不能返回一个空配额数组冒充成功
+  const empty = await probeOfficial({
+    baseUrl: 'https://opencode.ai/inference/go/v1',
+    apiKey: 'k',
+    fetchImpl: respond({ '/usage': { nope: 1 } }),
+  })
+  check('OpenCode 无配额字段时失败', empty.ok, false)
+}
+
 //#region 边界
 
 {

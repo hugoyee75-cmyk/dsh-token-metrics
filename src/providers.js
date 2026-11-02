@@ -32,6 +32,10 @@ const HOST_PATTERNS = [
   { id: 'siliconflow', test: /(^|\.)api\.siliconflow\.(cn|com)$/ },
   { id: 'novita', test: /(^|\.)api\.novita\.ai$/ },
   { id: 'stepfun', test: /(^|\.)api\.stepfun\.(ai|com)$/ },
+  // OpenCode Go（opencode.ai）：订阅制，配额在 `{base}/usage`，
+  // 返回 rolling / weekly / monthly 三个窗口的已用百分比与重置时间。
+  // 主机只有一个，路径前缀（/inference/go/v1、/zen/go/v1）两种都存在。
+  { id: 'opencode-go', test: /(^|\.)opencode\.ai$/ },
   // 火山方舟（豆包）：余额在 /api/v3/billing/balance，需 AK/SK 或 API Key
   { id: 'volcano', test: /(^|\.)ark\.cn-beijing\.volces\.com$/ },
   // 阿里百炼（通义千问）：官方没有公开的余额接口，只识别以便给出准确说明
@@ -85,6 +89,7 @@ export const PROVIDER_LABELS = {
   openai: 'OpenAI',
   codex: 'ChatGPT (Codex)',
   gemini: 'Google Gemini',
+  'opencode-go': 'OpenCode Go',
 }
 
 /**
@@ -422,6 +427,9 @@ const WINDOW_LABELS = {
   five_hour: '5-hour',
   five_hourly: '5-hour',
   hourly: 'Hourly',
+  // OpenCode Go 的短窗口叫 rolling：滚动窗口 + 5 小时重置，
+  // 与 Kimi/GLM 的 five_hour 是同一类东西，展示名统一。
+  rolling: '5-hour',
   daily: 'Daily',
   weekly_limit: 'Weekly',
   weekly: 'Weekly',
@@ -678,6 +686,65 @@ const UNSUPPORTED_REASONS = {
   gemini: 'Google 未提供公开的配额查询接口，API key 无法查询余额。',
 }
 
+/**
+ * OpenCode Go（opencode.ai）：订阅制配额，没有「余额」概念。
+ *
+ * 端点：`GET {baseURL}/usage`，实测两种前缀都通：
+ *   https://opencode.ai/inference/go/v1/usage
+ *   https://opencode.ai/zen/go/v1/usage
+ * 响应形如：
+ *   { usage: { rolling: { status, percent, resetsAt },
+ *              weekly:  { status, percent, resetsAt },
+ *              monthly: { status, percent, resetsAt } } }
+ *
+ * `percent` 是**已用**百分比，因此换算成 used=percent / limit=100 / unit='%'，
+ * 页面据此画进度条并显示重置倒计时。任何失败都只返回 error，不抛异常。
+ */
+async function probeOpencodeGo({ baseUrl, apiKey, fetchImpl }) {
+  const url = new URL(baseUrl.includes('://') ? baseUrl : `https://${baseUrl}`)
+  const origin = url.origin
+  const base = baseUrl.trim().replace(/\/+$/, '')
+  // 只用同源地址：站点地址本身 + 官方两个已知前缀，不跨域探测。
+  const candidates = [
+    `${base}/usage`,
+    `${origin}/inference/go/v1/usage`,
+    `${origin}/zen/go/v1/usage`,
+  ]
+  const tried = new Set()
+  let lastError = '响应里没有配额字段'
+  for (const candidate of candidates) {
+    if (tried.has(candidate)) continue
+    tried.add(candidate)
+    const result = await getJson(candidate, apiKey, fetchImpl)
+    if (result.body === undefined) {
+      lastError = result.error ?? `HTTP ${result.status}`
+      continue
+    }
+    const quotas = parseOpencodeUsage(result.body)
+    if (quotas !== undefined) return { ok: true, kind: 'quota', quotas }
+    lastError = '响应里没有配额字段'
+  }
+  return { ok: false, error: lastError }
+}
+
+/** 解析 OpenCode 的 /usage 响应，转成页面用的配额条目。 */
+export function parseOpencodeUsage(body) {
+  const usage = body?.usage
+  if (usage === null || typeof usage !== 'object') return undefined
+  const quotas = []
+  // 窗口顺序固定：由短到长，和页面上的阅读顺序一致。
+  for (const window of ['rolling', 'weekly', 'monthly']) {
+    const entry = usage[window]
+    if (entry === null || typeof entry !== 'object') continue
+    const percent = num(entry.percent)
+    if (percent === undefined) continue
+    const resetsAt = num(Date.parse(String(entry.resetsAt ?? '')))
+    const q = quota(windowLabel(window), percent, 100, resetsAt, '%')
+    if (q !== undefined) quotas.push(q)
+  }
+  return quotas.length === 0 ? undefined : quotas
+}
+
 /** 平台 id -> 探测函数。 */
 const ADAPTERS = {
   deepseek: probeDeepseek,
@@ -690,6 +757,7 @@ const ADAPTERS = {
   stepfun: probeStepfun,
   volcano: probeVolcano,
   openai: probeOpenai,
+  'opencode-go': probeOpencodeGo,
 }
 
 /**
