@@ -117,7 +117,14 @@ globalThis.window = {
   },
 }
 globalThis.document = documentStub
-globalThis.fetch = async () => ({
+/**
+ * 按 URL 分流的假 fetch。
+ *
+ * 统计页走 summary，供应商页走 balanceResponse —— 后者由用例按需改写，
+ * 才能覆盖「CNY 余额站点」「配额站点」这类真实返回形态。
+ */
+let balanceResponse = { sites: [], discovered: [] }
+const summaryResponse = () => ({
   ok: true,
   status: 200,
   async json() {
@@ -255,6 +262,16 @@ globalThis.fetch = async () => ({
     }
   },
 })
+
+globalThis.fetch = async (url) => {
+  const target = String(url)
+  // 余额/供应商接口：返回用例准备好的数据
+  if (target.includes('/api/dsh-token-metrics/balance')
+    && !target.includes('/probe')) {
+    return { ok: true, status: 200, async json() { return balanceResponse } }
+  }
+  return summaryResponse()
+}
 
 const clientSource = readFileSync(join(here, '..', 'client.js'), 'utf8')
 // 在 vm 里执行，避免污染本进程。
@@ -1910,6 +1927,78 @@ const hoverRendered = (() => {
 if (hoverRendered !== undefined) {
   check('悬停后显示提示框', hoverRendered.includes('tu-chart-tip'), true)
   check('提示框带具体数值', /总量|命中率/.test(hoverRendered), true)
+}
+
+// —— 供应商页：有站点就必须能渲染 ——
+// 回归点：QUOTA_PLATFORMS 声明在 card() 内部，却被同一作用域的
+// classifySite() 先用。sites 为空时那两个函数不执行，问题被藏着；一旦
+// 添加过供应商，打开页面就是 `QUOTA_PLATFORMS is not defined`，整页白屏，
+// 且坏状态已落盘，重启后继续崩。
+/** 渲染供应商页：点「模型接入」→ 等余额请求返回 → 重渲染一帧。 */
+async function renderSupplierPage(fixture) {
+  balanceResponse = fixture
+  resetHooks()
+  let tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  walkTree(tree, (node) => {
+    if (node?.type === 'button' && Array.isArray(node.children)
+      && node.children.some((child) => child === '模型接入')) {
+      node.props?.onClick?.()
+    }
+  })
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  resetHooks()
+  tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  return tree
+}
+
+/** 一个普通美元余额站点的返回形态。 */
+const usdSite = () => ({
+  id: 'deepseek',
+  label: 'DeepSeek（API Key）',
+  baseUrl: 'https://api.deepseek.com',
+  keyEnv: 'DEEPSEEK_API_KEY',
+  api: 'openai-completions',
+  balanceKind: 'auto',
+  kind: 'auto',
+  provider: 'deepseek',
+  models: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }],
+  lastBalance: {
+    kind: 'balance', currency: 'USD', provider: 'deepseek',
+    label: 'DeepSeek', isAvailable: true, usd: 12.34,
+  },
+  lastCheckedAt: Date.now(),
+  error: '',
+})
+
+/** 发现列表里的一条：省略 baseURL 的 provider（目录兜底）。 */
+const discoveredEntry = () => ({
+  id: 'opencode-go',
+  label: 'OpenCode Go',
+  baseUrl: 'https://opencode.ai/inference/go/v1',
+  apiKeyEnv: 'OPENCODE_GO_API_KEY',
+  keyConfigured: true,
+  api: 'openai-completions',
+  configRow: 'llm-pi-ai',
+  source: 'catalog',
+})
+
+{
+  const tree = await renderSupplierPage({ sites: [usdSite()], discovered: [discoveredEntry()] })
+  const componentErrorsBefore = componentErrors.length
+  let renderError
+  try {
+    // 自定义组件要真的调用一次，才能暴露渲染期异常
+    walkTree(tree, () => {})
+  } catch (error) {
+    renderError = error
+  }
+  check('供应商页渲染不抛错（有站点 + 可添加条目）', renderError === undefined, renderError?.message)
+  check('供应商页里的子组件不抛错',
+    componentErrors.length === componentErrorsBefore,
+    componentErrors.slice(componentErrorsBefore).join(' | '))
+  const flat = textsOf(tree)
+  check('供应商页列出已添加站点', flat.includes('DeepSeek'), true)
+  check('供应商页列出可添加条目', flat.includes('OpenCode Go'), true)
 }
 
 if (failures.length > 0) {

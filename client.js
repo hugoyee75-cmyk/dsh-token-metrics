@@ -7943,6 +7943,15 @@ function formatMoneyText(value) {
         const discovered = (balanceState.discovered ?? [])
           .filter((entry) => !sites.some((site) => site.id === entry.id))
 
+        /**
+         * 订阅制平台：按时间窗口限流，没有「余额」概念。
+         *
+         * 必须声明在 supplierPage 这一层：`classifySite()` 与卡片里都要用。
+         * 早先它只在 `card()` 内部声明，而 `classifySite()` 先于它执行 ——
+         * 一旦存在站点就 `QUOTA_PLATFORMS is not defined`，整个面板渲染崩掉。
+         */
+        const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo'])
+
           /**
            * 已添加站点按**数据性质**分成两组：
            *   - 余额：能查账户余额的（预充值、按量扣减）
@@ -7988,7 +7997,6 @@ function formatMoneyText(value) {
             ? `${symbol}${value < 1 ? value.toFixed(3) : value.toFixed(2)}` : '—')
           const modelCount = Array.isArray(site.models) ? site.models.length : 0
           const hasQuota = quotas.length > 0
-          const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo'])
           // 订阅型判定：有配额数据、或平台本身是订阅制、或明确回报「无订阅」。
           // 最后一条很关键：GLM 没订阅时也属于订阅平台，按钮该说「刷新用量」
           // 而不是「查询余额」。
