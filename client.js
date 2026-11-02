@@ -118,6 +118,9 @@ window.__ModuleLoader__.load({
     { id: 'cerebras', label: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', api: 'openai-completions', balance: 'no' },
     { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', balance: 'yes' },
     { id: 'novita', label: 'Novita AI', baseUrl: 'https://api.novita.ai/v3/openai', api: 'openai-completions', balance: 'yes' },
+    // OpenCode Go（opencode.ai）：订阅制，没有「余额」概念；
+    // 配额走 `{base}/usage`，返回 rolling / weekly / monthly 三个窗口的已用百分比。
+    { id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/inference/go/v1', api: 'openai-completions', balance: 'yes', plan: true, keyHint: '订阅制；配额走 /usage（rolling / weekly / monthly）' },
 
     // ═══ 自定义中转站 ═══
     // 按网关类型区分，从源头决定用哪个余额接口——不自动探测，

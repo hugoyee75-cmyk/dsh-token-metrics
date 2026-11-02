@@ -34,8 +34,8 @@ provider-balance management.
 
 **Model access**
 
-- 34 service presets, China-first, filling in URL and protocol on selection
-- Provider balances and quotas: Sub2API / new-api / one-api gateways plus ten
+- 35 service presets, China-first, filling in URL and protocol on selection
+- Provider balances and quotas: Sub2API / new-api / one-api gateways plus eleven
   official platforms
 - Capabilities auto-detected from pi-ai's model catalog (1241 models): context
   window, output limit, thinking levels, attachments
@@ -408,13 +408,13 @@ balances, available models, and one-click sync into the DSH model config.
 Pick a **service** first — the URL and protocol fill in automatically, which avoids
 the classic mistake of pairing an Anthropic URL with the OpenAI protocol.
 
-**34 presets**, ordered China → international → custom:
+**35 presets**, ordered China → international → custom:
 
 | Group | Includes |
 | --- | --- |
 | China models | DeepSeek, Kimi, Zhipu GLM, MiniMax, Alibaba Bailian, Volcano Ark, Baidu Qianfan, Tencent Hunyuan, Baichuan, StepFun, SiliconFlow, Xiaomi MiMo |
 | China coding plans | Zhipu, Kimi, MiniMax, Alibaba, Volcano, Xiaomi MiMo |
-| International | OpenAI, Anthropic, Gemini, xAI, Groq, Mistral, Together, Fireworks, DeepInfra, Cerebras, OpenRouter, Novita |
+| International | OpenAI, Anthropic, Gemini, xAI, Groq, Mistral, Together, Fireworks, DeepInfra, Cerebras, OpenRouter, Novita, OpenCode Go |
 | Custom relays | Sub2API, new-api, one-api, no balance query |
 
 After picking a service the form shows what that platform supports: whether its
@@ -455,6 +455,7 @@ Detected by `baseURL` hostname, each hitting its own endpoint:
 | Kimi | `/coding/v1/usages` (falls back to `/v1/users/me/balance` with no plan) | quota + balance |
 | Zhipu GLM | `/api/monitor/usage/quota/limit` | quota |
 | MiniMax | `/v1/usage` | quota |
+| OpenCode Go | `/usage` (`rolling` / `weekly` / `monthly` windows) | quota |
 | OpenAI | `/v1/organization/costs` (needs an `sk-admin-` org key) | 30-day usage |
 
 **Platforms that cannot be queried say so explicitly** instead of failing vaguely:

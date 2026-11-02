@@ -29,8 +29,8 @@ Token 用量统计页，顺带管好成本与供应商余额。
 
 **模型接入**
 
-- 34 个服务预设，国内优先排序，选中即填好地址与协议
-- 供应商余额与配额：覆盖 Sub2API / new-api / one-api 三类网关与 10 家官方平台
+- 35 个服务预设，国内优先排序，选中即填好地址与协议
+- 供应商余额与配额：覆盖 Sub2API / new-api / one-api 三类网关与 11 家官方平台
 - 从 pi-ai 模型目录（1241 个模型）自动识别上下文、输出上限、思考档位与附件能力
 - 一键把供应商与模型写入 DSH 模型配置
 
@@ -473,13 +473,13 @@ LiteLLM 里同一个模型会挂在多个渠道下，价格能差几十倍（`co
 先选「服务」，地址与协议会自动填好——比手抄 `baseURL` 可靠，也避免把
 Anthropic 的地址配成 OpenAI 协议这类错误。
 
-内置 **34 个预设**，按「国内 → 国际 → 自定义」排序：
+内置 **35 个预设**，按「国内 → 国际 → 自定义」排序：
 
 | 分类 | 包含 |
 | --- | --- |
 | 国内模型 | DeepSeek、Kimi、智谱 GLM、MiniMax、阿里百炼、火山方舟、百度千帆、腾讯混元、百川、阶跃星辰、SiliconFlow、小米 MiMo |
 | 国内 Coding Plan | 智谱、Kimi、MiniMax、阿里、火山、小米 MiMo |
-| 国际 | OpenAI、Anthropic、Gemini、xAI、Groq、Mistral、Together、Fireworks、DeepInfra、Cerebras、OpenRouter、Novita |
+| 国际 | OpenAI、Anthropic、Gemini、xAI、Groq、Mistral、Together、Fireworks、DeepInfra、Cerebras、OpenRouter、Novita、OpenCode Go |
 | 自定义中转 | Sub2API、new-api、one-api、不查余额 |
 
 选中服务后会标注该平台的能力：余额能否用 API key 查询、需要什么凭据。
@@ -521,6 +521,7 @@ Anthropic 的地址配成 OpenAI 协议这类错误。
 | Kimi | `/coding/v1/usages`（无订阅时回退 `/v1/users/me/balance`）| 配额 + 余额 |
 | 智谱 GLM | `/api/monitor/usage/quota/limit` | 配额 |
 | MiniMax | `/v1/usage` | 配额 |
+| OpenCode Go | `/usage`（`rolling` / `weekly` / `monthly` 三个窗口）| 配额 |
 | OpenAI | `/v1/organization/costs`（需 `sk-admin-` 组织密钥）| 30 天用量 |
 
 **明确不支持查询的平台**会给出原因而不是含糊失败：
