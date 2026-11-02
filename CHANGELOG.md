@@ -3,6 +3,63 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+「模型接入」支持从 pi-ai 目录发现 provider，并复用 DSH 已有凭据。
+
+### 修复
+
+- **配置里省略 `baseURL` 的 provider 在「模型接入 → 可添加」里消失**：DSH
+  允许 provider 只写 `apiKeyEnv`，地址由 pi-ai 内置目录在运行时补齐
+  （`opencode-go` 就是这种）。发现逻辑此前只读配置文本，遇到空地址直接跳过，
+  于是只显示配置里手写了地址的那几条。现在用
+  `loadCatalogEndpoints()` 读目录默认端点兜底，并在条目上标注
+  `source: 'config' | 'catalog'`；目录按「模型数投票」选端点，能处理同一
+  provider 混用多个 baseUrl 的情况（opencode-go 的 24 个模型在 `/go/v1`、
+  5 个在 `/go`）
+- **开发态 `link:` 安装时读不到 pi-ai 目录**：`findCatalogDir()` 补上 pnpm
+  提升后的 `profiles/node_modules` 位置，否则从仓库路径 require 时解析失败
+- **发现逻辑无法单测**：抽成纯函数 `collectProviderEndpoints()`，`index.js`
+  只负责喂 configEditor 与目录数据
+- **新建供应商时「获取列表」必然 401**：`POST /supplier/models` 只在**已保存
+  的站点**里按 id 找密钥，而新建站点还没落盘；一旦表单允许「留空复用 DSH
+  凭据」，这条路径就永远拿不到 key。现在宿主按 provider id 从 DSH 配置反查
+  `apiKeyEnv`，再走「该凭据 → 默认名 → 环境变量」。**不接受请求体指定的
+  凭据名**：那等于开放「读任意凭据」
+- **`baseUrl` 协议校验是死代码**：少一个右花括号，http(s) 检查被嵌进了
+  `baseUrl === ''` 分支，对非空地址实际从不执行
+- **取列表失败时页面上看不到原因**：「添加供应商」是覆盖层，页面级提示被它
+  盖住。现在失败信息同时写进表单的模型列表空态
+- **「保存并同步」把 opencode-go 写坏（致命）**：`buildProviderConfig()` 无条件
+  在 route 上写 `api`。DSH 的 `buildProvider()` 只有在 `api` **未指定**时才复用
+  pi-ai 目录里的 provider；写死协议后会另建通用 provider，provider 层的
+  `x-opencode-session` 中间件随之丢失，上游一律返回
+  `400 MissingSessionID` —— 保存一次，模型接入就废了。现在按**模型全集**决策：
+  配置里的模型都被目录收录时，协议与地址一起交给目录（目录按模型决定，
+  opencode-go 的 5 个 anthropic 模型在 `/go` 而不是 `/go/v1`，写死地址会让它们
+  请求 `/go/v1/v1/messages`）；有任何一个模型没被收录时仍显式写 `api`/`baseURL`，
+  否则 DSH 的 strict 校验会以 `model "x" needs an api` 拒绝整条配置
+- **上述修复对「已经写坏的路由」无效**：`mergeProvider()` 是展开合并，只会
+  覆盖/新增、不会删除。旧版写进去的 `api` 会一直被保留，重新保存后依然不复用
+  目录 provider。现在决定交给目录时显式 `delete` 遗留的 `api`/`baseURL`，
+  升级后重新同步即可自愈
+- **采纳发现项后换服务会复用错凭据**：`keyReuse`/`keyEnv` 不随服务或地址
+  变化复位，切到别的平台后校验仍跳过密钥必填，保存后路由被写成上一条
+  provider 的 `apiKeyEnv`，取模型列表时还会把旧 key 发到新地址。现在复用绑定
+  采纳时的地址，换服务或改地址即失效并重新要求密钥；保存时也不再带上失效的
+  `keyEnv`
+
+### 新增
+
+- **新增供应商时复用 DSH 已有凭据**：「可添加」条目带上 DSH provider 的
+  `apiKeyEnv`、目录推断的 `api`，以及宿主侧算出的 `keyConfigured`。DSH 里
+  已经配好该凭据时，表单允许留空直接复用 —— 运行时的 `resolveSiteKey()`
+  本来就是按 `keyEnv` 从凭据服务取值，没必要让用户把同一把 key 再粘一遍。
+  没有现成凭据时仍然必填
+- 单测：新增 `test/discovery-test.mjs`（发现逻辑 + 目录读取与缓存），
+  `test/sync-test.mjs` 补「遗留 api/baseURL 清理」「目录外模型仍写协议」断言，
+  `test/client-test.mjs` 补「换服务后凭据复用失效」断言
+
 ## [0.3.8] - 2026-11-03
 
 合并社区 PR #4，修复非美元余额的显示与告警。
