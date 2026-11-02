@@ -2059,6 +2059,45 @@ const discoveredEntry = () => ({
   check('缺 raw 时退回「设置余额」', textsOf(legacyTree).includes('tu-balance-set'), true)
 }
 
+// —— 凭据复用：只在「原样采纳」时成立 ——
+// 回归点：采纳 OpenCode Go 后把服务改成 DeepSeek，keyReuse 若不复位，
+// 校验会跳过密钥必填，保存后 DeepSeek 路由被写成 OPENCODE_GO_API_KEY，
+// 取模型列表时还会把 OpenCode 的 key 发到 DeepSeek 的地址。
+{
+  const tree = await renderSupplierPage({ sites: [], discovered: [discoveredEntry()] })
+  const findByText = (node, text, type) => {
+    const hits = []
+    walkTree(node, (item) => {
+      if (type !== undefined && item?.type !== type) return
+      if (Array.isArray(item?.children) && item.children.includes(text)) hits.push(item)
+    })
+    return hits
+  }
+  // 点「可添加」卡片上的「添加」
+  for (const button of findByText(tree, '添加', 'button')) button.props?.onClick?.()
+  resetHooks()
+  let formTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  check('采纳后可复用 DSH 凭据', textsOf(formTree).includes('DSH 里已有该凭据'), true)
+
+  // 切服务 = 换站点：复用必须立刻失效
+  let serviceSelect
+  walkTree(formTree, (node) => {
+    if (node?.type === 'select' && node.props?.value === 'opencode-go') serviceSelect = node
+  })
+  check('服务下拉识别出内置预设', serviceSelect !== undefined, true)
+  serviceSelect?.props?.onChange?.({ target: { value: 'deepseek' } })
+  resetHooks()
+  formTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  check('换服务后不再复用旧凭据', !textsOf(formTree).includes('DSH 里已有该凭据'))
+
+  // 此时保存必须被「密钥必填」拦下，而不是拿旧 keyEnv 去同步
+  for (const button of findByText(formTree, '保存并同步', 'button')) button.props?.onClick?.()
+  resetHooks()
+  formTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  check('换服务后保存提示密钥必填',
+    textsOf(formTree).includes('请填写 API 密钥'), true)
+}
+
 if (failures.length > 0) {
   if (componentErrors.length > 0) {
     console.error('组件抛错：')
