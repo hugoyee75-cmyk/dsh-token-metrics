@@ -52,18 +52,92 @@ export function findProviderEntry(rows) {
   return undefined
 }
 
+/** 端点比较：去掉首尾空白与尾部斜杠，避免 `/v1` 与 `/v1/` 被当成两处。 */
+function normalizeEndpoint(value) {
+  return String(value ?? '').trim().replace(/\/+$/u, '')
+}
+
+/**
+ * 判断这条供应商能不能**完全交给 pi-ai 目录**（协议、按模型地址都由目录决定）。
+ *
+ * 背景（两次都真炸过）：
+ *
+ *  1. route 上写了 `api` → DSH 不再复用目录 provider，opencode 的
+ *     `x-opencode-session` 中间件丢失，上游 400 `MissingSessionID`；
+ *  2. 但「目录里有这个 provider」不等于「目录认得这些模型」。DSH 解析时
+ *     `api = route.api ?? 目录模型的 api ?? 该路由的公共 api`，混合协议路由
+ *     （fireworks / openrouter / opencode-go）没有公共 api，一旦用户勾了目录
+ *     还没收录的新模型，解析就报 `model "x" needs an api`，strict 校验会直接
+ *     拒绝写入。
+ *
+ * 所以这里按**模型全集**判断：全部命中目录时才有资格省略 `api`，并且只有
+ * 地址也与目录默认端点一致时才省略 `baseURL`（目录里同一 provider 的模型可能
+ * 分属多个 baseURL，opencode-go 的 5 个 anthropic 模型在 `/go`，写死
+ * `/go/v1` 会让它们请求 `/go/v1/v1/messages`）。
+ *
+ * `models` 未提供（只改名称/地址）时按目录外处理：照写 `api`/`baseURL`，
+ * 但不删除旧键（`omitApi`/`omitEndpoint` 都是 false）。
+ *
+ * @param {object} site 供应商描述
+ * @param {object} [options]
+ * @param {Record<string, {baseUrl: string, api?: string, modelIds?: string[]}>} [options.catalog]
+ * @returns {{known: boolean, allModelsKnown: boolean, sameEndpoint: boolean,
+ *   omitApi: boolean, omitEndpoint: boolean}}
+ */
+export function catalogRoutePlan(site, { catalog } = {}) {
+  const routeId = String(site?.id ?? '')
+  const known = routeId !== '' && catalog !== null && typeof catalog === 'object'
+    ? catalog[routeId]
+    : undefined
+  const modelIds = Array.isArray(known?.modelIds) ? known.modelIds : []
+  const models = Array.isArray(site?.models) ? site.models : undefined
+  const allModelsKnown = known !== undefined
+    && modelIds.length > 0
+    && models !== undefined
+    && models.length > 0
+    && models.every((model) => modelIds.includes(String(model?.id ?? '')))
+  const catalogEndpoint = normalizeEndpoint(known?.baseUrl)
+  const sameEndpoint = known !== undefined
+    && catalogEndpoint !== ''
+    && catalogEndpoint === normalizeEndpoint(site?.baseUrl)
+  return {
+    known: known !== undefined,
+    allModelsKnown,
+    sameEndpoint,
+    // 全部模型都认得：协议交给目录（每模型一个，混合协议也能对）
+    omitApi: allModelsKnown,
+    // 全部模型都认得且地址就是目录端点：地址也交给目录（按模型决定前缀）
+    omitEndpoint: allModelsKnown && sameEndpoint,
+  }
+}
+
 /**
  * 把一个供应商描述转换成 pi-ai 的 provider 配置片段。
  *
  * @param {object} site 供应商（含 baseUrl / label / keyEnv / models）
+ * @param {object} [options]
+ * @param {Record<string, {baseUrl: string, api?: string, modelIds?: string[]}>} [options.catalog]
+ *   pi-ai 目录里的已知 provider。模型全部命中目录时**不写 route 级 `api`/`baseURL`**。
  * @returns {object}
  */
-export function buildProviderConfig(site) {
+export function buildProviderConfig(site, { catalog } = {}) {
+  const plan = catalogRoutePlan(site, { catalog })
   const config = {
     displayName: String(site.label ?? site.id ?? ''),
-    api: site.api ?? DEFAULT_API,
-    baseURL: String(site.baseUrl ?? ''),
   }
+  if (!plan.omitEndpoint) config.baseURL = String(site.baseUrl ?? '')
+  /**
+   * 只有「模型全部命中目录」时才省略协议。
+   *
+   * 回归点（真炸过）：opencode-go 的模型分属多种协议，而且 provider 层挂了
+   * `x-opencode-session` 中间件。一旦在 route 上写死 `api`，DSH 就不再复用
+   * 目录里的 provider（`dsh-llm-pi-ai` 的 `buildProvider` 只在 `api` 未指定
+   * 时才 reuseCatalogProvider），中间件随之丢失，请求被上游以
+   * `400 MissingSessionID` 拒绝 —— 保存一次就把模型接入写坏了。
+   *
+   * 反过来，目录不认得的模型必须显式给协议，否则 strict 校验直接拒绝写入。
+   */
+  if (!plan.omitApi) config.api = site.api ?? DEFAULT_API
   // apiKeyEnv 是「凭据引用名」，不是密钥。没有就省略，让路由保持无密钥状态。
   if (typeof site.keyEnv === 'string' && site.keyEnv !== '') {
     config.apiKeyEnv = site.keyEnv
@@ -132,11 +206,11 @@ export function buildProviderConfig(site) {
  *
  * 纯函数，便于测试：不读文件、不碰服务。
  */
-export function mergeProvider(providers, site) {
+export function mergeProvider(providers, site, { catalog } = {}) {
   const routeName = String(site.id ?? '')
   if (routeName === '') throw new Error('供应商缺少 id，无法同步')
   const next = { ...(providers ?? {}) }
-  const config = buildProviderConfig(site)
+  const config = buildProviderConfig(site, { catalog })
   /**
    * 模型被**明确清空**时移除整个 provider，而不是写 `models: []`。
    *
@@ -158,6 +232,16 @@ export function mergeProvider(providers, site) {
     ...(next[routeName] ?? {}),
     ...config,
   }
+  /**
+   * 展开合并只会「覆盖/新增」，不会「删除」。
+   *
+   * 历史遗留：旧版一定会写 route 级 `api`，于是已经坏掉的路由在升级后再点
+   * 「保存并同步」时，旧 `api` 会被展开保留下来，DSH 依旧不复用目录 provider，
+   * 中间件照样丢 —— 修复等于没生效。所以这里显式删掉决定交给目录的键。
+   */
+  const plan = catalogRoutePlan(site, { catalog })
+  if (plan.omitApi) delete next[routeName].api
+  if (plan.omitEndpoint) delete next[routeName].baseURL
   return next
 }
 
@@ -183,7 +267,7 @@ export function removeProvider(providers, routeName) {
  * @param {string} [options.apiKey] 明文密钥；给了才写凭据
  * @returns {Promise<{ok:boolean, route?:string, wroteKey?:boolean, error?:string}>}
  */
-export async function syncProviderToDsh({ ctx, site, apiKey }) {
+export async function syncProviderToDsh({ ctx, site, apiKey, catalog }) {
   const routeName = String(site?.id ?? '')
   if (routeName === '') return { ok: false, error: '供应商缺少 id' }
   if (typeof site.baseUrl !== 'string' || site.baseUrl === '') {
@@ -236,7 +320,7 @@ export async function syncProviderToDsh({ ctx, site, apiKey }) {
       const providers = current?.providers ?? {}
       return {
         ...current,
-        providers: mergeProvider(providers, { ...site, keyEnv }),
+        providers: mergeProvider(providers, { ...site, keyEnv }, { catalog }),
       }
     })
   } catch (error) {

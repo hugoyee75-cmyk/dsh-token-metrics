@@ -137,6 +137,184 @@ export function loadModelCatalog({ dataDir, home } = {}) {
   return catalog
 }
 
+const catalogEndpointCache = new Map()
+const CATALOG_ENDPOINT_TTL_MS = 300_000
+
+/**
+ * pi-ai 目录里每个 provider 的默认端点。
+ *
+ * 目录文件是 `providers/data/<provider>.json`，形如：
+ *   { "openai-completions": { "chat:deepseek-v4.1-flash": { baseUrl, api, … } } }
+ * 同一 provider 下的模型可能分属多个 api，**也可能分属多个 baseUrl**
+ * （opencode-go 就有 24 个模型在 `…/go/v1`、5 个在 `…/go`）。所以按出现
+ * 次数投票：用得最多的那个才是该 provider 的默认端点，api 跟着它走。
+ *
+ * 为什么需要：DSH 允许 provider 只写 `apiKeyEnv` 而不写 `baseURL`，地址由
+ * pi-ai 内置目录在运行时补齐。token-metrics 的「模型接入 → 可添加」早先只
+ * 读配置文本，这类 provider（例如 opencode-go）会被整条漏掉。
+ *
+ * `modelIds` 是这个 provider 在目录里收录的全部模型 id。带出来是为了让同步
+ * 侧判断「配置里的模型是否都认得」：只有全部认得，才能把协议与地址完全交给
+ * 目录（见 sync.js 的 `catalogRoutePlan()`）。只要有一个不认得就必须显式写
+ * `api`/`baseURL`，否则 DSH 解析该模型时拿不到协议，strict 校验会拒绝写入。
+ *
+ * @returns {Record<string, {baseUrl: string, api?: string, modelIds: string[]}>}
+ */
+export function loadCatalogEndpoints({ dataDir, home, ttlMs = CATALOG_ENDPOINT_TTL_MS } = {}) {
+  try {
+    const dir = dataDir ?? findCatalogDir({ home })
+    if (dir === null) return {}
+    const cached = catalogEndpointCache.get(dir)
+    if (ttlMs > 0 && cached !== undefined && Date.now() - cached.at < ttlMs) return cached.endpoints
+    const endpoints = {}
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue
+      let parsed
+      try { parsed = JSON.parse(readFileSync(join(dir, name), 'utf8')) } catch { continue }
+      // baseUrl -> { count, apis }：同一 provider 内按模型数投票
+      const votes = new Map()
+      const modelIds = new Set()
+      for (const models of Object.values(parsed)) {
+        if (models === null || typeof models !== 'object') continue
+        for (const entry of Object.values(models)) {
+          if (entry === null || typeof entry !== 'object') continue
+          // 模型 id 与 baseUrl 分开收集：id 认得就算「目录知道这个模型」，
+          // 与它是否声明了地址无关。
+          if (typeof entry.id === 'string' && entry.id !== '') modelIds.add(entry.id)
+          if (typeof entry.baseUrl !== 'string' || entry.baseUrl === '') continue
+          let vote = votes.get(entry.baseUrl)
+          if (vote === undefined) {
+            vote = { count: 0, apis: new Map() }
+            votes.set(entry.baseUrl, vote)
+          }
+          vote.count += 1
+          if (typeof entry.api === 'string' && entry.api !== '') {
+            vote.apis.set(entry.api, (vote.apis.get(entry.api) ?? 0) + 1)
+          }
+        }
+      }
+      let best
+      for (const [baseUrl, vote] of votes) {
+        if (best === undefined || vote.count > best.vote.count) best = { baseUrl, vote }
+      }
+      if (best === undefined) continue
+      // api 也按模型数投票：同一个 baseUrl 下混着多种协议时，取占比最大的那种
+      let api = ''
+      let apiCount = -1
+      for (const [candidate, count] of best.vote.apis) {
+        if (count > apiCount) { api = candidate; apiCount = count }
+      }
+      const endpoint = { baseUrl: best.baseUrl, modelIds: [...modelIds].sort() }
+      if (api !== '') endpoint.api = api
+      endpoints[name.slice(0, -'.json'.length)] = endpoint
+    }
+    catalogEndpointCache.set(dir, { at: Date.now(), endpoints })
+    return endpoints
+  } catch {
+    // 目录不可读时返回空映射：页面退回「只认配置里显式写了地址的 provider」
+    return {}
+  }
+}
+
+/**
+ * 把 DSH 配置行里的 provider 端点摊平，供「模型接入 → 可添加」使用。
+ *
+ * 配置有两层：用户 override 与继承值。两层都要看，否则会漏掉写在 profile
+ * 里的 providers（实测就是这种情况）。provider 的 baseURL 允许省略，此时用
+ * pi-ai 目录里的默认端点兜底，并在 `source` 上标明来源，便于排查。
+ *
+ * 纯函数，不碰 ctx，便于单测。
+ *
+ * `apiKeyEnv` 是 DSH 里该 provider 的凭据引用名（形如 `OPENCODE_GO_API_KEY`）。
+ * 带出来是为了让「添加」表单不必再让用户粘贴一遍已经存在的 key —— 宿主侧
+ * `resolveSiteKey()` 本来就是按这个名字读 DSH 凭据服务的。
+ *
+ * @param {object} [options]
+ * @param {Array} [options.rows] `configEditor.configuration()` 的结果
+ * @param {Record<string, {baseUrl: string, api?: string, modelIds?: string[]}>} [options.catalog]
+ *   `loadCatalogEndpoints()` 的结果
+ * @returns {Array<{id:string,label:string,baseUrl:string,configRow:string,
+ *   source:'config'|'catalog',apiKeyEnv?:string,api?:string}>}
+ */
+export function collectProviderEndpoints({ rows, catalog } = {}) {
+  const out = []
+  const seen = new Set()
+  const fallback = catalog !== null && typeof catalog === 'object' ? catalog : {}
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = row?.entry?.options?.id ?? ''
+    for (const layer of [row?.override, row?.inherited]) {
+      if (layer === null || typeof layer !== 'object') continue
+      const providers = layer.providers
+      if (providers !== null && typeof providers === 'object') {
+        for (const [name, entry] of Object.entries(providers)) {
+          if (seen.has(name)) continue
+          const configured = entry?.baseURL ?? entry?.baseUrl ?? entry?.base_url
+          const fromConfig = typeof configured === 'string' && configured !== ''
+          const base = fromConfig ? configured : fallback[name]?.baseUrl
+          if (typeof base !== 'string' || base === '') continue
+          seen.add(name)
+          // 凭据引用名与协议：配置里有就用配置的，没有就用目录推断的
+          const keyEnv = entry?.apiKeyEnv ?? entry?.apiKey_env
+          const api = entry?.api ?? fallback[name]?.api
+          out.push({
+            id: name,
+            label: String(entry?.displayName ?? entry?.display_name ?? name),
+            // **不要**归一化：这里是从 DSH 已有配置**读回**给用户看，
+            // 必须如实反映存的是什么。早先调了 normalizeBaseUrl，
+            // DSH 里写的 `https://x/v1` 会被显示成 `https://x`，
+            // 用户看到的和实际配置不一致。
+            baseUrl: String(base).trim(),
+            configRow: id,
+            source: fromConfig ? 'config' : 'catalog',
+            ...(typeof keyEnv === 'string' && keyEnv !== '' ? { apiKeyEnv: keyEnv } : {}),
+            ...(typeof api === 'string' && api !== '' ? { api } : {}),
+          })
+        }
+      }
+      // 单 provider 形态：baseURL 直接挂在配置顶层
+      const direct = layer.baseURL ?? layer.baseUrl ?? layer.base_url
+      if (typeof direct === 'string' && direct !== '' && id !== '' && !seen.has(id)) {
+        seen.add(id)
+        const keyEnv = layer.apiKeyEnv ?? layer.apiKey_env
+        const api = layer.api ?? fallback[id]?.api
+        out.push({
+          id,
+          label: String(layer.displayName ?? id),
+          // 同上：读回时保留原样，不剥 /v1
+          baseUrl: String(direct).trim(),
+          configRow: id,
+          source: 'config',
+          ...(typeof keyEnv === 'string' && keyEnv !== '' ? { apiKeyEnv: keyEnv } : {}),
+          ...(typeof api === 'string' && api !== '' ? { api } : {}),
+        })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * 判断一条凭据引用名在宿主凭据服务里是否**已经配好**。
+ *
+ * 只读、只取布尔值，不碰密钥内容（`describe` 返回的是脱敏状态）。
+ * 用途：新增供应商时，如果 DSH 里已经有同名凭据，就不必让用户把同一把
+ * key 再粘贴一遍 —— 运行时的 `resolveSiteKey()` 本来就是按这个名字取值。
+ *
+ * @param {{describe?: Function}} [credentials] 宿主的 credentials 服务
+ * @param {string} name 凭据引用名（形如 `OPENCODE_GO_API_KEY`）
+ * @returns {Promise<boolean>}
+ */
+export async function credentialConfigured(credentials, name) {
+  if (credentials === undefined || credentials === null) return false
+  if (typeof name !== 'string' || name === '') return false
+  try {
+    const info = await credentials.describe?.(name)
+    return info?.configured === true
+  } catch {
+    return false
+  }
+}
+
 /** 把 thinkingLevelMap 转成「支持哪些档位」。 */
 function levelsFromMap(map) {
   if (map === null || map === undefined || typeof map !== 'object') return undefined
