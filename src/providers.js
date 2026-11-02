@@ -190,6 +190,11 @@ export function findCatalogDir({ home } = {}) {
 
   const root = home ?? process.env.DSH_HOME ?? join(homedirPath(), '.dsh')
   const rel = 'node_modules/@earendil-works/pi-ai/dist/providers/data'
+  // pnpm 把多数组依赖提升到 `profiles/node_modules`（所有 profile 共用）。
+  // 开发时用 `link:` 装的插件按 realpath 解析，上面第 1 步（从插件目录
+  // require）会失败，所以这里必须显式看一眼共享位置。
+  candidates.push(join(root, 'profiles', 'node_modules',
+    '@earendil-works/pi-ai/dist/providers/data'))
   const profileName = process.env.DSH_PROFILE
   if (profileName !== undefined && profileName !== '') {
     candidates.push(join(root, 'profiles', profileName, rel))
