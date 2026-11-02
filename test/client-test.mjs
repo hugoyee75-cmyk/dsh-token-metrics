@@ -2001,6 +2001,22 @@ const discoveredEntry = () => ({
   check('供应商页列出可添加条目', flat.includes('OpenCode Go'), true)
 }
 
+// —— QUOTA_PLATFORMS 必须覆盖所有订阅制平台 ——
+// 回归点：PR #3 新增 opencode-go 但漏了这个集合。后果不是「少显示一项」，
+// 而是分组随查询状态来回跳：成功时因 quotas 非空算限额型，失败时掉进
+// 「已添加」组，同类的 kimi 则无论成败都稳定在限额组。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+  const m = src.match(/QUOTA_PLATFORMS\s*=\s*new Set\(\[([^\]]+)\]\)/)
+  check('QUOTA_PLATFORMS 声明存在', m !== null)
+  const list = m === null ? [] : m[1].split(',').map((x) => x.trim().replace(/['"]/g, '')).filter(Boolean)
+  for (const id of ['kimi', 'glm', 'minimax', 'codex', 'mimo', 'opencode-go']) {
+    check(`QUOTA_PLATFORMS 含 ${id}`, list.includes(id), `实际: ${list.join(',')}`)
+  }
+  check('订阅制平台与 providers.js 的 ADAPTERS 一致（防止再漏）',
+    src.includes("'opencode-go'"), true)
+}
+
 if (failures.length > 0) {
   if (componentErrors.length > 0) {
     console.error('组件抛错：')

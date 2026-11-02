@@ -7953,7 +7953,18 @@ function formatMoneyText(value) {
          * 早先它只在 `card()` 内部声明，而 `classifySite()` 先于它执行 ——
          * 一旦存在站点就 `QUOTA_PLATFORMS is not defined`，整个面板渲染崩掉。
          */
-        const QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo'])
+        /**
+         * 订阅制平台：按时间窗口限流，没有「余额」概念。
+         *
+         * **必须包含所有订阅制平台**：这个集合决定站点稳定归属哪一组。
+         * 漏掉一个的后果不是「少显示一项」，而是分组会随查询状态来回跳 ——
+         * 查询成功时因为 quotas 非空算限额型，查询失败时就掉进「已添加」，
+         * 而同类的 kimi/glm 无论成败都稳定在限额组。用户看到站点自己换组，
+         * 会以为配置出了问题。
+         */
+        const QUOTA_PLATFORMS = new Set([
+          'kimi', 'glm', 'minimax', 'codex', 'mimo', 'opencode-go',
+        ])
 
           /**
            * 已添加站点按**数据性质**分成两组：
