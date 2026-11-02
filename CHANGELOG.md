@@ -3,6 +3,36 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.7] - 2026-11-02
+
+合并两个社区贡献的 PR，并修复其中一处遗漏。
+
+### 修复
+
+- **供应商页在存在站点时整页白屏**（PR #2 by @Ignareo）：`classifySite()`
+  在 `QUOTA_PLATFORMS` 声明之前就使用了它，一旦添加过供应商就抛
+  `ReferenceError`，整个面板渲染崩溃，且坏状态已落盘、重启后继续崩。
+  现将其提升到 `supplierPage` 作用域
+- **`opencode-go` 未加入 `QUOTA_PLATFORMS` 导致分组漂移**：该集合漏掉
+  `opencode-go` 时，查询成功靠「quotas 非空」侥幸归对组，查询失败就掉进
+  「已添加」组，而同类的 kimi/glm 无论成败都稳定在「限额用量」组 ——
+  用户会看到站点自己换组
+
+### 新增
+
+- **OpenCode Go 订阅配额查询**（PR #3 by @Ignareo）：`opencode.ai` 是订阅制，
+  配额走 `GET {base}/usage`，返回 `rolling` / `weekly` / `monthly` 三个窗口
+  的已用百分比与重置时间。支持 `inference/go/v1` 与 `zen/go/v1` 两种前缀；
+  `rolling` 映射为 5 小时窗口
+
+### 说明
+
+- OpenCode Go 端点已实际验证存在：两个前缀均返回 HTTP 401（需认证）而非
+  404，解析逻辑基于真实响应形态
+- 新增测试校验 `QUOTA_PLATFORMS` 覆盖全部订阅制平台，防止再漏
+
+[0.3.7]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.7
+
 ## [0.3.6] - 2026-10-28
 
 模型配置双向同步，以及从端点自动获取思考档位。
