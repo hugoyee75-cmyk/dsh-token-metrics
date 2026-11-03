@@ -3,6 +3,37 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.8] - 2026-11-03
+
+合并社区 PR #4，修复非美元余额的显示与告警。
+
+### 修复
+
+- **非美元余额无法显示**（PR #4 by @Ignareo）：`BalanceBook.recordResult()`
+  只保存 `currency` 没保存 `raw` —— 适配器对非美元余额返回 `raw` + `currency`
+  （不做汇率换算），丢掉 `raw` 后 `lastBalance` 只剩币种没有数值，页面据此
+  判定「没有余额」，卡片只剩「手动设置余额」按钮
+- **余额不足告警对 CNY 账号从不触发**：`evaluateAlerts()` 只比较 `usd`，
+  只有人民币余额的账号永远不报警。现在用 `usdCny` 把原币换算成美元等值再比
+  阈值；**没有汇率或没有币种时不下判断** —— 宁可不提醒，也不把 ¥20 当成
+  $20 误报
+- **页面按原生币种显示**：USD 模式下用宿主已有的 `usdCny` 汇率换算，不再把
+  CNY 余额当成「无余额」
+
+### 兼容
+
+- 升级前保存的 `lastBalance` 没有 `raw`：页面退回「设置余额」按钮，不会崩溃
+- 美元余额逻辑不变，仍直接读 `usd`
+
+### 测试
+
+- 新增 `recordResult` 原生币种的回归测试。**这填补了一个真实盲区**：
+  push/client 测试都直接构造 `lastBalance`，绕过了 `recordResult`，
+  「适配器 → 保存 → 页面」这条链路此前从未被覆盖 —— 实测回退 `raw` 保存后，
+  原有测试依然全绿。新断言已验证能抓住该缺陷
+
+[0.3.8]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.8
+
 ## [0.3.7] - 2026-11-02
 
 合并两个社区贡献的 PR，并修复其中一处遗漏。
