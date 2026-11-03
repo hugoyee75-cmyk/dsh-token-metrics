@@ -547,6 +547,9 @@ export class BalanceBook {
     if (result?.ok === true) {
       site.lastBalance = {
         usd: result.usd,
+        // 非美元余额（例如只有 CNY 的 DeepSeek 账号）只给 raw + currency，
+        // 不硬换算成 USD。丢掉 raw 的话页面就只剩「查不到余额」。
+        raw: result.raw,
         usedUsd: result.usedUsd,
         limitUsd: result.limitUsd,
         kind: result.kind,

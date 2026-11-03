@@ -267,9 +267,35 @@ export function evaluatePeakAlerts({ at = new Date(), leadMinutes = 10 } = {}) {
   }]
 }
 
+/**
+ * 把余额换算成「美元等值」，用于和 `balanceLowUsd` 比。
+ *
+ * 适配器对非美元余额只给 `raw` + `currency`（不做汇率换算），所以只看
+ * `usd` 会让 CNY 账号永远不触发余额告警。没有可用汇率时返回 undefined：
+ * 宁可不提醒，也不能把 ¥20 当成 $20 误报。
+ *
+ * @returns {{usd: number, currency: string, native: number}|undefined}
+ */
+function balanceInUsd(balance, usdCny) {
+  if (typeof balance?.usd === 'number' && Number.isFinite(balance.usd)) {
+    return { usd: balance.usd, currency: 'USD', native: balance.usd }
+  }
+  if (typeof balance?.raw === 'number' && Number.isFinite(balance.raw)) {
+    const currency = String(balance.currency ?? '').toUpperCase()
+    if (currency === 'USD') return { usd: balance.raw, currency, native: balance.raw }
+    if (currency === 'CNY' && usdCny !== undefined) {
+      return { usd: balance.raw / usdCny, currency, native: balance.raw }
+    }
+  }
+  return undefined
+}
+
 export function evaluateAlerts({ sites, thresholds = {} }) {
   const balanceLowUsd = Number.isFinite(thresholds.balanceLowUsd) ? thresholds.balanceLowUsd : 5
   const quotaLowPercent = Number.isFinite(thresholds.quotaLowPercent) ? thresholds.quotaLowPercent : 10
+  const usdCny = Number.isFinite(thresholds.usdCny) && thresholds.usdCny > 0
+    ? thresholds.usdCny
+    : undefined
   // 「即将重置」的提前量：默认 10 分钟
   const quotaResetSoonMs = Number.isFinite(thresholds.quotaResetSoonMinutes)
     ? thresholds.quotaResetSoonMinutes * 60_000
@@ -295,15 +321,22 @@ export function evaluateAlerts({ sites, thresholds = {} }) {
 
     if (balance === null || balance === undefined) continue
 
-    // ① 余额不足
-    if (typeof balance.usd === 'number' && balance.usd < balanceLowUsd) {
+    // ① 余额不足（USD 直读；非美元按 usdCny 换算成美元等值再比阈值）
+    const money = balanceInUsd(balance, usdCny)
+    if (money !== undefined && money.usd < balanceLowUsd) {
+      const nativeText = money.currency === 'CNY'
+        ? `¥${money.native.toFixed(2)}`
+        : `$${money.native.toFixed(2)}`
+      const thresholdText = money.currency === 'CNY' && usdCny !== undefined
+        ? `¥${(balanceLowUsd * usdCny).toFixed(2)}`
+        : `$${balanceLowUsd}`
       alerts.push({
         id: `balance-low:${site.id}`,
-        level: balance.usd <= 0 ? 'error' : 'warn',
+        level: money.usd <= 0 ? 'error' : 'warn',
         kind: 'balance-low',
         siteId: site.id,
-        title: balance.usd <= 0 ? '余额已用尽' : '余额不足',
-        body: `${label} 剩余 $${balance.usd.toFixed(2)}（阈值 $${balanceLowUsd}）`,
+        title: money.usd <= 0 ? '余额已用尽' : '余额不足',
+        body: `${label} 剩余 ${nativeText}（阈值 ${thresholdText}）`,
       })
     }
 
