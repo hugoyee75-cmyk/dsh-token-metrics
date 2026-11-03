@@ -346,6 +346,52 @@ check('非字符串安全', normalizeBaseUrl(null), '')
 
 //#endregion
 
+//#region recordResult 必须保留原生币种余额
+
+// 回归点（PR #4 发现的盲区）：push/client 测试都**直接构造** lastBalance，
+// 绕过了 recordResult。于是「适配器返回 CNY 余额 → recordResult 保存 →
+// 页面读取」这条真实链路从未被覆盖 —— 回退 raw 保存后测试依然全绿。
+// 这里补上真正跑通整条链路的断言。
+{
+  const dir = mkdtempSync(join(tmpdir(), 'tm-recb-'))
+  try {
+    const book = new BalanceBook({ dataDir: dir })
+    book.upsertSite({ id: 'cny-site', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com' })
+
+    // 适配器对非美元余额返回 raw + currency，不做汇率换算（无 usd 字段）
+    book.recordResult('cny-site', {
+      ok: true, raw: 20.5, currency: 'CNY', kind: 'deepseek',
+    })
+    const saved = book.sites.find((x) => x.id === 'cny-site').lastBalance
+
+    check('CNY 余额的 raw 被保存', saved.raw, 20.5)
+    check('CNY 余额的 currency 被保存', saved.currency, 'CNY')
+    check('CNY 余额没有 usd', saved.usd, undefined)
+    // 页面判断「有无余额」用的就是这个：有 raw 才有数值
+    check('保存后有可显示的数值',
+      typeof saved.raw === 'number' || typeof saved.usd === 'number', true)
+
+    // 美元余额仍走 usd，不受影响
+    book.recordResult('cny-site', { ok: true, usd: 12.5, kind: 'deepseek' })
+    const usdSaved = book.sites.find((x) => x.id === 'cny-site').lastBalance
+    check('美元余额的 usd 被保存', usdSaved.usd, 12.5)
+
+    // 落盘再读回：raw 必须能持久化（否则重启后 CNY 站点又变「无余额」）。
+    // 注意 recordResult 是**整体替换** lastBalance，所以要先回到 CNY 状态再落盘；
+    // 且 recordResult 只改内存，需要显式 saveTo（与 Host 侧调用方式一致）。
+    book.recordResult('cny-site', { ok: true, raw: 20.5, currency: 'CNY', kind: 'deepseek' })
+    book.saveTo(join(dir, 'balance.json'))
+    const persisted = JSON.parse(readFileSync(join(dir, 'balance.json'), 'utf8'))
+      .sites.find((x) => x.id === 'cny-site')
+    check('raw 能落盘', typeof persisted.lastBalance.raw === 'number', true)
+    check('落盘后币种也在', persisted.lastBalance.currency, 'CNY')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+//#endregion
+
 if (failures.length > 0) {
   console.log('失败：')
   for (const line of failures) console.log(`  ✗ ${line}`)
