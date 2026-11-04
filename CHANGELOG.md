@@ -3,7 +3,11 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.3.9] - 2026-11-04
+
+合并社区 PR #5：模型接入支持从 pi-ai 目录发现 provider、复用 DSH 已有凭据，
+并修复同步与安全链路上的若干问题。
+
 
 「模型接入」支持从 pi-ai 目录发现 provider，并复用 DSH 已有凭据。
 
@@ -89,6 +93,7 @@
   「适配器 → 保存 → 页面」这条链路此前从未被覆盖 —— 实测回退 `raw` 保存后，
   原有测试依然全绿。新断言已验证能抓住该缺陷
 
+[0.3.9]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.9
 [0.3.8]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.3.8
 
 ## [0.3.7] - 2026-11-02
