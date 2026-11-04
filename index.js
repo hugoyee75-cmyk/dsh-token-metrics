@@ -41,7 +41,8 @@ import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, removeProviderFromDsh, diffProviders, defaultKeyEnvName } from './src/sync.js'
-import { probeOfficial, detectProvider, loadModelCatalog, catalogStatus } from './src/providers.js'
+import { probeOfficial, detectProvider, loadModelCatalog, catalogStatus,
+  loadCatalogEndpoints, collectProviderEndpoints, credentialConfigured } from './src/providers.js'
 import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts } from './src/push.js'
 import { createMemoryGate } from './src/memory.js'
 import { runSelfCheck } from './src/selfcheck.js'
@@ -3094,17 +3095,33 @@ export function apply(ctx, rawConfig) {
                 if (baseUrl === '') {
                   sendJson(res, 400, { error: '缺少 baseUrl' })
                   return
+                }
                 // 只接受 http(s)：baseUrl 会被拼成请求地址发出去，
                 // 允许其它协议（file: / data: / ftp:）没有正当用途。
                 if (!/^https?:\/\//i.test(baseUrl)) {
                   sendJson(res, 400, { error: 'baseUrl 必须是 http(s) 地址' })
                   return
                 }
-                }
+                /**
+                 * 取密钥：请求里带了就直接用；否则按「已存站点 → DSH 配置里
+                 * 该 provider 的 apiKeyEnv」去凭据服务里找。
+                 *
+                 * **不能信请求体里的 keyEnv/keyRef**：那等于让调用方指定「用
+                 * 哪条凭据」，同源脚本（DSH 的 client 插件都同源）可以借它把
+                 * 任意凭据 / 环境变量发给任意地址。provider id 已经够用了 ——
+                 * 新增站点还没落盘时，按 id 从 DSH 配置反查那条凭据。
+                 */
                 let apiKey = String(body.apiKey ?? '')
-                if (apiKey === '' && body.id !== undefined) {
-                  const site = tracker.balanceBook.sites.find((entry) => entry.id === body.id)
-                  if (site !== undefined) apiKey = await resolveSiteKey(ctx, site)
+                if (apiKey === '') {
+                  const id = typeof body.id === 'string' ? body.id : ''
+                  const saved = id === ''
+                    ? undefined
+                    : tracker.balanceBook.sites.find((entry) => entry.id === id)
+                  if (saved !== undefined) {
+                    apiKey = await resolveSiteKey(ctx, saved)
+                  } else if (id !== '') {
+                    apiKey = await resolveSiteKey(ctx, { id, keyEnv: discoveredKeyEnv(ctx, id) })
+                  }
                 }
                 sendJson(res, 200, await discoverModels({ baseUrl, apiKey, fetchImpl: globalThis.fetch }))
               } catch (error) {
@@ -3131,6 +3148,9 @@ export function apply(ctx, rawConfig) {
                   ctx,
                   site: saved,
                   apiKey: typeof body.apiKey === 'string' ? body.apiKey : '',
+                  // 目录里已有的 provider 不要写 route 级 api（会丢 pi-ai 的
+                  // 协议中间件，例如 opencode 的 x-opencode-session）
+                  catalog: loadCatalogEndpoints(),
                 })
                 // 同步确定了最终的凭据引用名，回写到站点记录，
                 // 否则下次「查询余额」找不到密钥。
@@ -3248,7 +3268,7 @@ export function apply(ctx, rawConfig) {
                 ...tracker.balanceBook.status(),
                 // 余额接口本身不知道 provider 的 baseURL，这里把 DSH 里
                 // 已配置的 provider 一并给出，供页面「一键采纳」。
-                discovered: discoverProviderEndpoints(ctx),
+                discovered: await discoverProviderEndpoints(ctx),
                 // 供页面展示「DSH 里有、插件里没有」的 provider
                 dshProviders: discoverProviderModels(ctx),
               })
@@ -3550,67 +3570,68 @@ function discoverProviderModels(ctx) {
   return out
 }
 
-function discoverProviderEndpoints(ctx) {
-  const out = []
-  const seen = new Set()
+/**
+ * 从 DSH 配置里凑出「可添加」列表。
+ *
+ * 逻辑本身在 `collectProviderEndpoints()`（纯函数、有单测），这里只负责把
+ * configEditor 的配置行和 pi-ai 目录端点喂给它，再补一项宿主侧信息：
+ * `apiKeyEnv` 指向的那条凭据在 DSH 里**是否已经配好**。
+ *
+ * 目录兜底是关键：DSH 允许 provider 省略 baseURL（地址由 pi-ai 内置目录在
+ * 运行时补齐，opencode-go 就是这种），只读配置文本会让它整条消失。
+ *
+ * `keyConfigured` 让「添加」表单知道可以不填 key：宿主的 `resolveSiteKey()`
+ * 本来就是按 `keyEnv` 从凭据服务取值，用户没必要把同一把 key 再粘贴一遍。
+ */
+async function discoverProviderEndpoints(ctx) {
   try {
     const editor = ctx.get('configEditor')
-    if (editor === undefined) return out
-    const rows = editor.configuration()
-    for (const row of rows) {
-      const id = row?.entry?.options?.id ?? ''
-      // 配置有两层：用户 override 与继承值。两者都要看，否则会漏掉
-      // 写在 profile 里的 providers（实测就是这种情况）。
-      for (const layer of [row?.override, row?.inherited]) {
-        if (layer === null || typeof layer !== 'object') continue
-        const providers = layer.providers
-        if (providers !== null && typeof providers === 'object') {
-          for (const [name, entry] of Object.entries(providers)) {
-            const base = entry?.baseURL ?? entry?.baseUrl ?? entry?.base_url
-            if (typeof base !== 'string' || base === '') continue
-            if (seen.has(name)) continue
-            seen.add(name)
-            out.push({
-              id: name,
-              label: String(entry?.displayName ?? entry?.display_name ?? name),
-              // **不要**归一化：这里是从 DSH 已有配置**读回**给用户看，
-              // 必须如实反映存的是什么。早先调了 normalizeBaseUrl，
-              // DSH 里写的 `https://x/v1` 会被显示成 `https://x`，
-              // 用户看到的和实际配置不一致。
-              baseUrl: String(base).trim(),
-              configRow: id,
-            })
-          }
-        }
-        // 单 provider 形态：baseURL 直接挂在配置顶层
-        const direct = layer.baseURL ?? layer.baseUrl ?? layer.base_url
-        if (typeof direct === 'string' && direct !== '' && id !== '' && !seen.has(id)) {
-          seen.add(id)
-          out.push({
-            id,
-            label: String(layer.displayName ?? id),
-            // 同上：读回时保留原样，不剥 /v1
-            baseUrl: String(direct).trim(),
-            configRow: id,
-          })
-        }
+    if (editor === undefined) return []
+    const entries = collectProviderEndpoints({
+      rows: editor.configuration(),
+      // 目录读不到时返回空映射，页面退回「只认配置里显式地址」的老行为。
+      catalog: loadCatalogEndpoints(),
+    })
+    const credentials = ctx.get('credentials')
+    // 并行查：串行 await 会让一个慢凭据拖住整页的 status 响应。
+    await Promise.all(entries.map(async (entry) => {
+      if (typeof entry.apiKeyEnv === 'string' && entry.apiKeyEnv !== '') {
+        entry.keyConfigured = await credentialConfigured(credentials, entry.apiKeyEnv)
       }
-    }
+    }))
+    return entries
   } catch {
     // configEditor 不可用就返回空列表，页面仍然支持手工填写
+    return []
   }
-  return out
 }
 
 /**
- * 取某个站点要用的访问令牌。
+ * 按 provider id 从 DSH 配置里反查凭据引用名。
  *
- * 优先级：
- *  1. 凭据服务里以 `keyRef` 存的记录（插件自己写入的）
- *  2. 环境变量（用户可能已经在 shell 里导出过）
+ * 用于 `/supplier/models`：新增站点还没落盘，但 DSH 里可能已经配好了这个
+ * provider 的 `apiKeyEnv`。**只按服务端自己的配置查**，不接受请求体指定的
+ * 名字（否则等于开放「读任意凭据」的接口）。
  *
- * 找不到就返回空串，让探测报「没有可用的访问令牌」而不是崩掉。
+ * @param {object} ctx 插件上下文
+ * @param {string} id provider 路由名
+ * @returns {string} 凭据引用名；查不到返回空串
  */
+function discoveredKeyEnv(ctx, id) {
+  if (id === '') return ''
+  try {
+    const editor = ctx.get('configEditor')
+    if (editor === undefined) return ''
+    const entry = collectProviderEndpoints({
+      rows: editor.configuration(),
+      catalog: loadCatalogEndpoints(),
+    }).find((candidate) => candidate.id === id)
+    return typeof entry?.apiKeyEnv === 'string' ? entry.apiKeyEnv : ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * 取某个站点要用的访问令牌。
  *
@@ -3656,12 +3677,6 @@ async function resolveSiteKey(ctx, site) {
 }
 
 /**
- * 读取并解析 JSON 请求体。
- *
- * 带大小上限：补价请求体只有几十字节，给 64KB 足够，同时避免恶意/异常
- * 请求把内存吃满。上限内也要求 content-type 是 JSON，减少意外的表单提交。
- */
-/**
  * 判断请求是否来自 DSH 自己的页面（同源）。
  *
  * **为什么必须自己查**：插件通过 `webServer.register({kind:'prefix'})` 挂路由，
@@ -3704,6 +3719,12 @@ export function isTrustedRequest(req) {
   }
 }
 
+/**
+ * 读取并解析 JSON 请求体。
+ *
+ * 带大小上限：补价请求体只有几十字节，给 64KB 足够，同时避免恶意/异常
+ * 请求把内存吃满。
+ */
 async function readJsonBody(req, limitBytes = 64 * 1024) {
   const chunks = []
   let total = 0

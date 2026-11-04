@@ -316,6 +316,7 @@ window.__ModuleLoader__.load({
       'supplier.editing': '编辑中',
       'supplier.addNew': '新建',
       'supplier.secretNote': '密钥经 DSH 凭据服务保存，不会写进配置文件，也不会回显。',
+      'supplier.keyReuse': 'DSH 里已有该凭据，留空即复用，不用再粘贴',
       'supplier.preset': '常用',
       'supplier.custom': '自定义',
       'supplier.thinking': '思考',
@@ -754,6 +755,7 @@ window.__ModuleLoader__.load({
       'supplier.editing': 'Editing',
       'supplier.addNew': 'New',
       'supplier.secretNote': 'The key is stored via DSH credentials; it is never written to config files or echoed back.',
+      'supplier.keyReuse': 'DSH already has this credential — leave it blank to reuse',
       'supplier.preset': 'Presets',
       'supplier.custom': 'Custom',
       'supplier.thinking': 'Thinking',
@@ -5240,9 +5242,22 @@ function formatMoneyText(value) {
        * 明细表、占比图、趋势图都要用同一套映射，否则同一个模型在不同
        * 视图里叫不同名字，看起来像两条独立记录。
        */
-      /** 从站点拉取模型列表（用于添加供应商时的勾选）。 */
+      /**
+       * 从站点拉取模型列表（用于添加供应商时的勾选）。
+       *
+       * 不传凭据名字：新增供应商时站点还没保存，宿主会按 `id` 从 DSH 配置
+       * 反查该 provider 的 `apiKeyEnv` 去凭据服务取 key（凭据复用）。让请求
+       * 指定「用哪条凭据」等于开放任意凭据读取，所以这一层不提供该能力。
+       */
       const fetchSupplierModels = useCallback(async (baseUrl, apiKey, id) => {
         setSupplierBusy('models')
+        // 表单是覆盖层，页面级提示会被盖住：失败时同时写一份进表单。
+        const fail = (text) => {
+          setSupplierNotice({ kind: 'error', text })
+          setSupplierForm((current) => (current === null
+            ? null
+            : { ...current, modelsError: text }))
+        }
         try {
           const response = await fetch(SUPPLIER_MODELS_ROUTE, {
             method: 'POST',
@@ -5254,7 +5269,7 @@ function formatMoneyText(value) {
           if (body.ok === true && Array.isArray(body.models)) {
             setSupplierForm((current) => (current === null
               ? null
-              : { ...current, available: body.models }))
+              : { ...current, available: body.models, modelsError: '' }))
           } else {
             /**
              * 按失败类型给可操作的提示：
@@ -5267,10 +5282,10 @@ function formatMoneyText(value) {
               'invalid-response': 'supplier.fetchInvalidResponse',
             }[body.kind]
             const hint = kindKey === undefined ? t('supplier.fetchFail') : t(kindKey)
-            setSupplierNotice({ kind: 'error', text: `${hint}：${body.error ?? ''}` })
+            fail(`${hint}：${body.error ?? ''}`)
           }
         } catch (error) {
-          setSupplierNotice({ kind: 'error', text: `${t('supplier.fetchFail')}：${error?.message ?? error}` })
+          fail(`${t('supplier.fetchFail')}：${error?.message ?? error}`)
         } finally { setSupplierBusy('') }
       }, [t])
 
@@ -6928,6 +6943,22 @@ function formatMoneyText(value) {
 
         const setField = (key, value) => setSupplierForm((current) => (
           current === null ? null : { ...current, [key]: value }))
+
+        /** 端点比较用：忽略首尾空白与尾部斜杠。 */
+        const normalizeUrl = (value) => String(value ?? '').trim().replace(/\/+$/u, '')
+
+        /**
+         * 「留空复用 DSH 凭据」是否仍然成立。
+         *
+         * 采纳发现项时把当时的地址记进 `keyReuseBaseUrl`：一旦用户换了服务
+         * 或改了地址，这条 provider 已不是原来那条，必须重新要求密钥 ——
+         * 否则会拿 A 平台的 key 去配 B 平台（保存/取模型时还会把 A 的凭据
+         * 发给 B 的地址）。
+         */
+        const canReuseKey = (target = form) => target.keyReuse === true
+          && String(target.keyEnv ?? '').trim() !== ''
+          && normalizeUrl(target.baseUrl) === normalizeUrl(target.keyReuseBaseUrl)
+
         const toggleModel = (model) => setSupplierForm((current) => {
           if (current === null) return null
           const models = current.models ?? []
@@ -7087,6 +7118,13 @@ function formatMoneyText(value) {
                         available: [],
                         keyword: '',
                         activeModel: undefined,
+                        // 取列表的失败提示也属于旧站点，一起清掉
+                        modelsError: '',
+                        // 新站点上从「可添加」条目继承的凭据引用属于旧 provider，
+                        // 必须一并丢弃；编辑已有站点时保留它自己的凭据引用。
+                        ...(current.editing === true
+                          ? {}
+                          : { keyEnv: '', keyReuse: false, keyReuseBaseUrl: undefined }),
                       }
                     })
                   },
@@ -7130,7 +7168,7 @@ function formatMoneyText(value) {
             ),
             h('div', { className: 'tu-row' },
               h('div', { className: 'tu-col tu-col-grow' },
-                fieldLabel(t('supplier.apiKey'), form.editing !== true),
+                fieldLabel(t('supplier.apiKey'), form.editing !== true && !canReuseKey()),
                 h('input', {
                   type: 'password',
                   className: 'tu-input',
@@ -7138,6 +7176,10 @@ function formatMoneyText(value) {
                   placeholder: t('supplier.keyPlaceholder'),
                   onChange: (event) => setField('apiKey', event.target.value),
                 }),
+                canReuseKey()
+                  ? h('p', { className: 'tu-hint' },
+                    `${t('supplier.keyReuse')} · ${form.keyEnv}`)
+                  : null,
               ),
               h('div', { className: 'tu-col' },
                 fieldLabel(t('supplier.apiFormat')),
@@ -7209,6 +7251,10 @@ function formatMoneyText(value) {
                 h('div', { className: 'tu-list-pane' },
                   available.length === 0 && selected.length === 0
                     ? h('div', { className: 'tu-empty-block tu-empty-inline' },
+                      // 失败原因就地显示：表单是覆盖层，页面级提示会被挡住
+                      form.modelsError !== undefined && form.modelsError !== ''
+                        ? h('div', { className: 'tu-notice', 'data-kind': 'error' }, form.modelsError)
+                        : null,
                       h('div', { className: 'tu-empty-title' }, t('supplier.needUrl')),
                       h('div', { className: 'tu-empty-hint' }, t('supplier.fetchHint')),
                     )
@@ -7665,8 +7711,11 @@ function formatMoneyText(value) {
           const url = String(form.baseUrl ?? '').trim()
           if (url === '') return t('err.urlRequired')
           if (!/^https?:\/\//i.test(url)) return t('err.urlInvalid')
-          // 新增时必须填密钥；编辑时留空表示沿用已保存的，不算错
-          if (form.editing !== true && String(form.apiKey ?? '').trim() === '') {
+          // 新增时密钥必填——除非这条 provider 在 DSH 里已经有同名凭据，
+          // 且用户没有把地址改到别的站点（改了就必须重新给 key）：
+          // 宿主的 resolveSiteKey() 按 keyEnv 从凭据服务取值，再粘一遍没意义。
+          const reuseKey = canReuseKey()
+          if (form.editing !== true && reuseKey !== true && String(form.apiKey ?? '').trim() === '') {
             return t('err.keyRequired')
           }
           // DSH 的 provider 配置必须声明模型，否则写入会被拒绝
@@ -7686,7 +7735,9 @@ function formatMoneyText(value) {
             id: form.id || (form.label || form.baseUrl).trim().replace(/\s+/g, '-').toLowerCase(),
             label: form.label,
             baseUrl: form.baseUrl,
-            keyEnv: form.keyEnv,
+            // 只有「原样采纳、地址没改」时才把复用的凭据引用带下去；
+            // 编辑已有站点沿用它的 keyEnv；其余情况让宿主按 id 生成默认名。
+            keyEnv: canReuseKey() || form.editing === true ? form.keyEnv : '',
             api: form.api ?? 'openai-completions',
             service: form.service ?? 'custom',
             balanceKind: form.balanceKind ?? 'auto',
@@ -8242,27 +8293,46 @@ function formatMoneyText(value) {
               h('div', { className: 'tu-page-grouphead' },
                 `${t('supplier.discovered')} · ${discovered.length}`),
               h('div', { className: 'tu-suplist' },
-                ...discovered.map((entry) => h('div', {
-                  key: entry.id, className: 'tu-supcard tu-supcard-discovered',
-                },
-                h('div', { className: 'tu-supcard-main' },
-                  h('div', { className: 'tu-supcard-name' }, entry.label || entry.id),
-                  h('div', { className: 'tu-supcard-url' }, entry.baseUrl),
-                ),
-                h('div', { className: 'tu-supcard-actions' },
-                  h('button', {
-                    type: 'button', className: 'tu-btn tu-btn-ghost',
-                    onClick: () => setSupplierForm({
-                      id: entry.id,
-                      label: entry.label ?? entry.id,
-                      baseUrl: entry.baseUrl ?? '',
-                      apiKey: '', keyEnv: '',
-                      service: 'custom', api: 'openai-completions',
-                      models: [], available: [], editing: false,
-                    }),
-                  }, t('supplier.add')),
-                ),
-                )),
+                ...discovered.map((entry) => {
+                  /**
+                   * 能对上内置预设时，把 service 设成预设 id：弹窗里的
+                   * 「能否查余额 / 用量」说明、keyHint 才会按真实能力显示。
+                   * 地址仍用 DSH 配置里的实际值（预设地址只在用户主动改
+                   * 服务时才覆盖）。
+                   */
+                  const preset = SERVICE_PRESETS.find((candidate) => candidate.id === entry.id
+                    && typeof candidate.baseUrl === 'string' && candidate.baseUrl !== ''
+                    && candidate.baseUrl.replace(/\/+$/u, '') === String(entry.baseUrl ?? '').replace(/\/+$/u, ''))
+                  return h('div', {
+                    key: entry.id, className: 'tu-supcard tu-supcard-discovered',
+                  },
+                  h('div', { className: 'tu-supcard-main' },
+                    h('div', { className: 'tu-supcard-name' }, entry.label || entry.id),
+                    h('div', { className: 'tu-supcard-url' }, entry.baseUrl),
+                  ),
+                  h('div', { className: 'tu-supcard-actions' },
+                    h('button', {
+                      type: 'button', className: 'tu-btn tu-btn-ghost',
+                      onClick: () => setSupplierForm({
+                        id: entry.id,
+                        label: entry.label ?? entry.id,
+                        baseUrl: entry.baseUrl ?? '',
+                        // DSH 里这条 provider 的凭据引用名带上：
+                        // 宿主 resolveSiteKey() 按它读凭据，keyConfigured 为真时
+                        // 用户不必把同一把 key 再粘贴一遍。
+                        apiKey: '', keyEnv: entry.apiKeyEnv ?? '',
+                        keyReuse: entry.keyConfigured === true,
+                        // 记住采纳时的地址：之后改了地址，复用即失效，
+                        // 避免把 A 平台的凭据发给 B 平台的地址。
+                        keyReuseBaseUrl: entry.baseUrl ?? '',
+                        service: preset?.id ?? 'custom',
+                        api: entry.api ?? preset?.api ?? 'openai-completions',
+                        models: [], available: [], editing: false,
+                      }),
+                    }, t('supplier.add')),
+                  ),
+                  )
+                }),
               ),
             ),
         )

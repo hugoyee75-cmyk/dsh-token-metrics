@@ -69,6 +69,74 @@ function checkTrue(label, condition, detail = '') {
   // 只有 id 的模型不应出现多余字段
   check('最简模型只有 id', Object.keys(config.models[1]), ['id'])
 
+  // pi-ai 目录里已有的路由：模型全集命中时不能写 route 级 api，否则 DSH
+  // 不再复用目录 provider，opencode 的 x-opencode-session 中间件会丢，请求 400。
+  const knownCatalog = {
+    'opencode-go': {
+      baseUrl: 'https://opencode.ai/inference/go/v1',
+      api: 'openai-completions',
+      modelIds: ['deepseek-v4.1-flash', 'gpt-6-luna', 'claude-haiku-5-5'],
+    },
+  }
+  const known = buildProviderConfig({
+    id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/inference/go/v1',
+    api: 'openai-completions', models: [{ id: 'deepseek-v4.1-flash' }],
+  }, { catalog: knownCatalog })
+  check('目录内路由不写 api', known.api, undefined)
+  // 地址与目录默认端点一致时也交给目录：opencode-go 的 5 个 anthropic 模型
+  // 在 `/go` 而不是 `/go/v1`，写死地址会让它们请求 `/go/v1/v1/messages`。
+  check('目录内路由不写地址', known.baseURL, undefined)
+  check('目录内路由仍写模型', known.models.map((m) => m.id), ['deepseek-v4.1-flash'])
+
+  // 目录不认得的模型：必须写 api + 地址，否则 DSH strict 校验直接拒绝写入
+  // （混合协议路由没有公共 api，model "x" needs an api）。
+  const unknownModel = buildProviderConfig({
+    id: 'opencode-go', baseUrl: 'https://opencode.ai/inference/go/v1',
+    api: 'openai-completions', models: [{ id: 'brand-new-model' }],
+  }, { catalog: knownCatalog })
+  check('目录外模型写 api', unknownModel.api, 'openai-completions')
+  check('目录外模型写地址', unknownModel.baseURL, 'https://opencode.ai/inference/go/v1')
+
+  // 模型全命中、但地址是用户自己换的中转：保留地址，协议仍交给目录
+  const customEndpoint = buildProviderConfig({
+    id: 'opencode-go', baseUrl: 'https://relay.test/go/v1',
+    api: 'openai-completions', models: [{ id: 'deepseek-v4.1-flash' }],
+  }, { catalog: knownCatalog })
+  check('自定义地址保留', customEndpoint.baseURL, 'https://relay.test/go/v1')
+  check('自定义地址时仍不写 api', customEndpoint.api, undefined)
+
+  // 旧版插件写坏过的路由：合并时必须把遗留的 api/baseURL 删掉，
+  // 否则「重新保存」无法自愈（展开合并不会删除键）。
+  const legacy = {
+    'opencode-go': {
+      displayName: 'OpenCode Go', apiKeyEnv: 'OPENCODE_GO_API_KEY',
+      api: 'openai-completions', baseURL: 'https://opencode.ai/inference/go/v1',
+      models: [{ id: 'deepseek-v4.1-flash' }],
+    },
+  }
+  const repaired = mergeProvider(legacy, {
+    id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/inference/go/v1',
+    api: 'openai-completions', keyEnv: 'OPENCODE_GO_API_KEY',
+    models: [{ id: 'deepseek-v4.1-flash' }],
+  }, { catalog: knownCatalog })
+  check('合并后遗留 api 被删除', repaired['opencode-go'].api, undefined)
+  check('合并后遗留 baseURL 被删除', repaired['opencode-go'].baseURL, undefined)
+  check('合并后模型仍在', repaired['opencode-go'].models.map((m) => m.id), ['deepseek-v4.1-flash'])
+  // 目录外的自定义路由不能受这条规则影响
+  const relayMerged = mergeProvider({
+    relay: { api: 'anthropic-messages', baseURL: 'https://relay.test/v1' },
+  }, {
+    id: 'relay', label: 'Relay', baseUrl: 'https://relay.test/v1',
+    api: 'anthropic-messages', models: [{ id: 'm1' }],
+  })
+  check('自定义路由保留 api', relayMerged.relay.api, 'anthropic-messages')
+
+  // 目录外的自定义路由：必须写协议，否则 DSH 不知道用哪种 wire protocol
+  const unknown = buildProviderConfig({
+    id: 'my-relay', baseUrl: 'https://relay.test/v1', api: 'anthropic-messages',
+  }, { catalog: knownCatalog })
+  check('目录外路由写 api', unknown.api, 'anthropic-messages')
+
   // 没有 keyEnv 时不写该字段（让路由保持无密钥状态，而不是写个空串）
   const noKey = buildProviderConfig({ id: 'x', baseUrl: 'https://x' })
   check('无 keyEnv 时不写该字段', noKey.apiKeyEnv, undefined)
