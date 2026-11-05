@@ -40,6 +40,17 @@ window.__ModuleLoader__.load({
      * 只有提到这一层才能同时被两边看到。
      */
     const MODULE_REFRESH_HANDLERS = { current: [] }
+    /**
+     * 打开统计页时希望落在哪个内部页签。
+     *
+     * 悬浮窗点「明细」/ 供应商行时，面板可能还没挂载；只发事件会丢。
+     * 所以先写这个槽位，面板挂载时读一次；已挂载时由事件即时切换。
+     * 槽位带写入时间：宿主没切成功时（面板早已挂好或事件不支持），请求
+     * 会一直滞留——过期就丢弃，避免用户很久以后打开统计页被莫名跳走。
+     */
+    const MODULE_VIEW_REQUEST = { current: null }
+    /** 悬浮窗的面板页签请求在这么久内有效；面板挂载间隔通常在几百毫秒内。 */
+    const MODULE_VIEW_REQUEST_TTL_MS = 10_000
 
     const NS = 'settings.tokenUsage'
     const PANEL_ID = 'token-metrics'
@@ -58,6 +69,18 @@ window.__ModuleLoader__.load({
   const BALANCE_REMOVE_ROUTE = '/api/dsh-token-metrics/balance/remove'
   const BALANCE_PROBE_ROUTE = '/api/dsh-token-metrics/balance/probe'
   const PRICING_ALIAS_ROUTE = '/api/dsh-token-metrics/pricing/alias'
+
+    /** 悬浮窗设置存 localStorage：位置、勾选的站点、币种都按用户记忆。 */
+    const WIDGET_STORAGE_KEY = 'dsh-token-metrics:widget'
+    /** 卡片基准宽度；空间不足时会缩到这个下限与 300 之间。 */
+    const WIDGET_WIDTH = 300
+    const WIDGET_MIN_WIDTH = 250
+    /** 卡片与正文之间至少留出的呼吸距离。 */
+    const WIDGET_GAP = 16
+    /** 订阅制平台：这些站点的「今日花费」按 0 计，行内显示「订阅内」。 */
+    const WIDGET_QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo', 'opencode-go'])
+    /** 打开统计页 / 模型接入页的跨组件事件。 */
+    const WIDGET_VIEW_EVENT = 'dsh-token-metrics:view'
   /**
    * 各家服务的预设连接信息。
    *
@@ -581,6 +604,46 @@ window.__ModuleLoader__.load({
       'scanned': '已回扫会话',
       'noTitle': '（未命名会话）',
       'integrityWarn': '数据自检未通过：计数与去重记录不一致，建议重启 DSH 后重建。',
+      'widget.title': '用量',
+      'widget.live': '实时',
+      'widget.todayTokens': '今日 Token',
+      'widget.todayCost': '今日花费',
+      'widget.calls': '次调用',
+      'widget.balance': '余额',
+      'widget.quota': '订阅',
+      'widget.subscription': '订阅内',
+      'widget.noPlan': '未订阅',
+      'widget.error': '查询失败',
+      'widget.unpriced': '未定价',
+      'widget.settings': '悬浮窗设置',
+      'widget.sites': '显示的供应商',
+      'widget.currency': '币种',
+      'widget.cny': '人民币',
+      'widget.usd': '美元',
+      'widget.auto': '自动避让',
+      'widget.autoHint': '展开时让出正文空间，不覆盖内容',
+      'widget.reset': '重置位置',
+      'widget.empty': '还没有可显示的供应商',
+      'widget.emptyHint': '先到「模型接入」添加余额或订阅',
+      'widget.updated': '更新于',
+      'widget.detail': '明细',
+      'widget.refresh': '刷新余额',
+      'widget.collapse': '收起',
+      'widget.expand': '展开',
+      'widget.closeSettings': '关闭设置',
+      'widget.left': '剩余',
+      'widget.scope': '统计范围',
+      'widget.scopeSelected': '所选供应商',
+      'widget.scopeAll': '全部',
+      'widget.quotaMain': '主窗口',
+      'widget.dragHint': '拖动标题可移动；双击恢复自动避让',
+      'widget.noSitesHint': '勾选后才会显示',
+      'widget.loading': '读取中…',
+      'widget.offline': '离线',
+      'widget.pinned': '已固定',
+      'widget.unpin': '恢复自动避让',
+      'widget.todayShort': '今日',
+      'widget.openPanel': '打开统计页',
     }
 
     const en = {
@@ -1020,6 +1083,46 @@ window.__ModuleLoader__.load({
       'scanned': 'Sessions scanned',
       'noTitle': '(untitled session)',
       'integrityWarn': 'Self-check failed: counts disagree with the dedupe log. Restart DSH to rebuild.',
+      'widget.title': 'Usage',
+      'widget.live': 'Live',
+      'widget.todayTokens': 'Tokens today',
+      'widget.todayCost': 'Cost today',
+      'widget.calls': 'calls',
+      'widget.balance': 'Balance',
+      'widget.quota': 'Plan',
+      'widget.subscription': 'In plan',
+      'widget.noPlan': 'No plan',
+      'widget.error': 'Query failed',
+      'widget.unpriced': 'Unpriced',
+      'widget.settings': 'Floating widget settings',
+      'widget.sites': 'Providers shown',
+      'widget.currency': 'Currency',
+      'widget.cny': 'CNY',
+      'widget.usd': 'USD',
+      'widget.auto': 'Avoid content',
+      'widget.autoHint': 'Reserve space instead of covering the page',
+      'widget.reset': 'Reset position',
+      'widget.empty': 'No providers to show yet',
+      'widget.emptyHint': 'Add a balance or plan in Model access first',
+      'widget.updated': 'Updated',
+      'widget.detail': 'Details',
+      'widget.refresh': 'Refresh balance',
+      'widget.collapse': 'Collapse',
+      'widget.expand': 'Expand',
+      'widget.closeSettings': 'Close settings',
+      'widget.left': 'left',
+      'widget.scope': 'Scope',
+      'widget.scopeSelected': 'Selected',
+      'widget.scopeAll': 'All',
+      'widget.quotaMain': 'Main window',
+      'widget.dragHint': 'Drag the header to move; double-click to restore auto-avoid',
+      'widget.noSitesHint': 'Check a provider to show it',
+      'widget.loading': 'Loading…',
+      'widget.offline': 'Offline',
+      'widget.pinned': 'Pinned',
+      'widget.unpin': 'Restore auto-avoid',
+      'widget.todayShort': 'Today',
+      'widget.openPanel': 'Open stats',
     }
 
     //#endregion
@@ -3484,6 +3587,491 @@ body[data-ds-dark-theme] .tu-toasts,
   justify-content: space-between;
   gap: 12px;
 }
+/* ═══ 悬浮用量窗 ═══
+   挂在 shell.overlay 上，跨页面常驻。位置由组件算好后写 right / bottom，
+   所以这里的定位只负责「在 overlay 坐标系里绝对定位」。 */
+.tu-float {
+  position: absolute;
+  z-index: 30;
+  font-family: inherit;
+  color: var(--dsw-alias-label-primary);
+  pointer-events: auto;
+}
+.tu-float[data-mode='card'] {
+  width: var(--tu-float-w, 300px);
+}
+.tu-float[data-mode='pill'] {
+  width: auto;
+}
+.tu-float[data-dragging='true'] {
+  transition: none;
+}
+.tu-float-card {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 15px;
+  background: var(--dsw-alias-bg-overlay);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  overflow: hidden;
+}
+body[data-ds-dark-theme] .tu-float-card,
+[data-theme='dark'] .tu-float-card {
+  box-shadow: 0 18px 44px rgb(0 0 0 / 46%);
+}
+.tu-float-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px 8px 12px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.tu-float-head:active {
+  cursor: grabbing;
+}
+.tu-float-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--dsw-alias-state-success-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent);
+  animation: tu-float-breathe 3.2s ease-in-out infinite;
+}
+@keyframes tu-float-breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--dsw-alias-state-success-primary) 5%, transparent);
+  }
+}
+.tu-float-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.tu-float-live {
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  opacity: 0.8;
+}
+.tu-float-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 1px;
+}
+.tu-float-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+}
+.tu-float-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tu-float-btn[data-busy='true'] {
+  animation: tu-float-spin 0.9s linear infinite;
+}
+@keyframes tu-float-spin {
+  to { transform: rotate(360deg); }
+}
+.tu-float-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px 0 12px;
+}
+.tu-float-stat {
+  padding: 0 12px;
+  min-width: 0;
+}
+.tu-float-stat + .tu-float-stat {
+  border-left: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-float-label {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+  letter-spacing: 0.02em;
+}
+.tu-float-value {
+  margin-top: 3px;
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tu-float-value[data-size='small'] {
+  font-size: 18px;
+}
+.tu-float-value .tu-float-unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  margin-left: 1px;
+}
+.tu-float-value .tu-float-cur {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  margin-right: 1px;
+}
+.tu-float-sub {
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tu-float-rows {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-float-row {
+  padding: 9px 12px 10px;
+  cursor: pointer;
+  transition: background 130ms ease;
+}
+.tu-float-row + .tu-float-row {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-float-row:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tu-float-rowtop {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.tu-float-name {
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tu-float-tag {
+  flex: none;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  letter-spacing: 0.02em;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-float-tag[data-kind='balance'] {
+  color: var(--dsw-alias-state-success-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+  border-color: transparent;
+}
+.tu-float-tag[data-kind='quota'] {
+  color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);
+  border-color: transparent;
+}
+.tu-float-amount {
+  margin-left: auto;
+  flex: none;
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.tu-float-amount[data-dim='true'] {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-float-amount[data-level='warn'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+.tu-float-amount[data-level='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+.tu-float-rowsub {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-float-dot {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+  flex: none;
+}
+.tu-float-bar {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  overflow: hidden;
+}
+.tu-float-barfill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--dsw-alias-brand-primary);
+  transition: width 220ms ease;
+}
+.tu-float-barfill[data-level='warn'] {
+  background: var(--dsw-alias-state-warn-primary);
+}
+.tu-float-barfill[data-level='danger'] {
+  background: var(--dsw-alias-state-error-primary);
+}
+.tu-float-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-float-link {
+  margin-left: auto;
+  color: var(--dsw-alias-brand-primary);
+  text-decoration: none;
+  font-weight: 550;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+}
+.tu-float-link:hover {
+  text-decoration: underline;
+}
+.tu-float-empty {
+  padding: 14px 13px 15px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-float-empty strong {
+  display: block;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.tu-float-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-overlay);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 16%);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 130ms ease;
+}
+body[data-ds-dark-theme] .tu-float-pill,
+[data-theme='dark'] .tu-float-pill {
+  box-shadow: 0 14px 34px rgb(0 0 0 / 42%);
+}
+.tu-float-pill:hover {
+  transform: translateY(-1px);
+}
+.tu-float-pill .tu-float-pulse {
+  width: 6px;
+  height: 6px;
+}
+.tu-float-pill b {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.tu-float-pill .tu-float-pillsub {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.tu-float-pill .tu-float-pillsep {
+  width: 1px;
+  height: 11px;
+  background: var(--dsw-alias-border-l1);
+}
+.tu-float-pill .tu-float-chev {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+}
+.tu-float-settings {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 268px;
+  max-height: min(60vh, 430px);
+  overflow: auto;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-overlay);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  padding: 11px 12px 12px;
+  font-size: 11.5px;
+}
+body[data-ds-dark-theme] .tu-float-settings,
+[data-theme='dark'] .tu-float-settings {
+  box-shadow: 0 18px 44px rgb(0 0 0 / 50%);
+}
+.tu-float-sethead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.tu-float-sethint {
+  margin: -2px 0 8px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-float-setlabel {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--dsw-alias-label-secondary);
+  margin: 10px 0 4px;
+}
+.tu-float-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+.tu-float-check input {
+  accent-color: var(--dsw-alias-brand-primary);
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  flex: none;
+}
+.tu-float-check span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tu-float-check .tu-float-checkval {
+  margin-left: auto;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.tu-float-check[data-disabled='true'] {
+  cursor: default;
+  opacity: 0.45;
+}
+.tu-float-seg {
+  display: flex;
+  gap: 4px;
+}
+.tu-float-segbtn {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 10.5px;
+  padding: 5px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tu-float-segbtn:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tu-float-segbtn[data-on='true'] {
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-label-primary));
+}
+.tu-float-setrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.tu-float-setrow .tu-float-setlabel {
+  margin: 0;
+}
+.tu-float-setrow .tu-float-btn {
+  margin-left: auto;
+  width: auto;
+  padding: 0 7px;
+  font-size: 10.5px;
+}
+.tu-float-skeleton {
+  height: 11px;
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  margin: 6px 0;
+  animation: tu-float-pulse 1.4s ease-in-out infinite;
+}
+.tu-float-skeleton[data-w='70'] { width: 70%; }
+.tu-float-skeleton[data-w='50'] { width: 50%; }
+@keyframes tu-float-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+.tu-float[data-overlap='true'] .tu-float-card {
+  border-style: dashed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tu-float-pulse,
+  .tu-float-skeleton {
+    animation: none;
+  }
+  .tu-float-card,
+  .tu-float-settings,
+  .tu-float-pill,
+  .tu-float-barfill {
+    transition: none;
+  }
+}
+
 `
 
     //#endregion
@@ -4760,6 +5348,972 @@ function formatMoneyText(value) {
     }
 
     /** 统计页主体。 */
+    //#region 悬浮用量窗
+
+    /** 悬浮窗设置的默认值。 */
+    const WIDGET_DEFAULTS = {
+      collapsed: false,
+      /** null 表示「还没手动勾选过」，此时显示全部已配置站点。 */
+      sites: null,
+      scope: 'selected',
+      currency: 'cny',
+      autoAvoid: true,
+      pinned: false,
+      right: 16,
+      bottom: 30,
+    }
+
+    function readWidgetSettings() {
+      try {
+        const raw = window.localStorage?.getItem(WIDGET_STORAGE_KEY)
+        if (raw === null || raw === undefined || raw === '') return { ...WIDGET_DEFAULTS }
+        const parsed = JSON.parse(raw)
+        if (parsed === null || typeof parsed !== 'object') return { ...WIDGET_DEFAULTS }
+        return {
+          ...WIDGET_DEFAULTS,
+          collapsed: parsed.collapsed === true,
+          sites: Array.isArray(parsed.sites) ? parsed.sites.filter(Boolean).map((id) => String(id)) : null,
+          scope: parsed.scope === 'all' ? 'all' : 'selected',
+          currency: parsed.currency === 'usd' ? 'usd' : 'cny',
+          autoAvoid: parsed.autoAvoid !== false,
+          pinned: parsed.pinned === true,
+          right: Number.isFinite(Number(parsed.right)) ? Number(parsed.right) : WIDGET_DEFAULTS.right,
+          bottom: Number.isFinite(Number(parsed.bottom)) ? Number(parsed.bottom) : WIDGET_DEFAULTS.bottom,
+        }
+      } catch {
+        return { ...WIDGET_DEFAULTS }
+      }
+    }
+
+    /** 卡片几何记忆的有效期：太久之前的位置不一定适配当前视口，过期不用。 */
+    const WIDGET_GEO_TTL_MS = 10 * 60 * 1000
+
+    /**
+     * 记住最近一次算好的卡片几何（sessionStorage，只活在本标签页）。
+     *
+     * 页面刷新 / 从统计页切回时组件会重建，若第一帧回落到默认位置、
+     * 等 80ms 后测量完成再跳到算好的位置，悬浮窗就会「闪动」一下。
+     * 把上次的 right / bottom / width / overlap 带回第一帧，首帧即是原位。
+     */
+    function readPersistedGeometry() {
+      try {
+        const raw = window.sessionStorage?.getItem(`${WIDGET_STORAGE_KEY}-geo`)
+        if (raw === null || raw === undefined || raw === '') return undefined
+        const parsed = JSON.parse(raw)
+        if (parsed === null || typeof parsed !== 'object') return undefined
+        const at = Number(parsed.at)
+        if (!Number.isFinite(at) || Date.now() - at > WIDGET_GEO_TTL_MS) return undefined
+        const right = Number(parsed.right)
+        const bottom = Number(parsed.bottom)
+        if (!Number.isFinite(right) || !Number.isFinite(bottom) || right < 0 || bottom < 0) return undefined
+        const width = Number(parsed.width)
+        return {
+          right,
+          bottom,
+          width: Number.isFinite(width) && width >= WIDGET_MIN_WIDTH && width <= WIDGET_WIDTH ? width : WIDGET_WIDTH,
+          overlap: parsed.overlap === true,
+        }
+      } catch {
+        return undefined
+      }
+    }
+
+    function persistGeometry(geometry) {
+      try {
+        window.sessionStorage?.setItem(
+          `${WIDGET_STORAGE_KEY}-geo`,
+          JSON.stringify({ ...geometry, at: Date.now() }),
+        )
+      } catch { /* 隐私模式下跳过，退回首帧从默认位置起 */ }
+    }
+
+    function saveWidgetSettings(settings) {
+      try {
+        window.localStorage?.setItem(WIDGET_STORAGE_KEY, JSON.stringify(settings))
+      } catch { /* 隐私模式下只在本次生效 */ }
+    }
+
+    function clampNumber(value, min, max) {
+      return Math.min(max, Math.max(min, value))
+    }
+
+    /** 货币符号：CNY 用 ¥，其余用代码前缀，避免把人民币余额标成美元。 */
+    function currencySymbol(currency) {
+      const code = String(currency ?? 'USD').toUpperCase()
+      if (code === 'CNY' || code === 'RMB') return '¥'
+      if (code === 'USD') return '$'
+      return `${code} `
+    }
+
+    function WidgetIcon({ name, size = 14 }) {
+      const common = {
+        viewBox: '0 0 24 24',
+        width: size,
+        height: size,
+        fill: 'none',
+        stroke: 'currentColor',
+        'stroke-width': 1.8,
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+        'aria-hidden': true,
+        style: { display: 'block' },
+      }
+      if (name === 'refresh') {
+        return h('svg', common,
+          h('path', { d: 'M20 11a8 8 0 1 0-2.3 5.7' }),
+          h('path', { d: 'M20 5v6h-6' }))
+      }
+      if (name === 'collapse') return h('svg', common, h('path', { d: 'm6 15 6-6 6 6' }))
+      if (name === 'expand') return h('svg', common, h('path', { d: 'm6 9 6 6 6-6' }))
+      // 齿轮（cog）：外圈是轮齿轮廓，内圈是轴孔。之前误用了「太阳」形状
+      // （圆点 + 八向光芒），看起来像亮度/主题切换，不像设置。
+      return h('svg', common,
+        h('path', { d: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z' }),
+        h('circle', { cx: 12, cy: 12, r: 3 }))
+    }
+
+    /** 把若干段文本用圆点分隔，空段自动省略。 */
+    function widgetParts(parts) {
+      const list = []
+      for (const part of parts) {
+        if (part === null || part === undefined || part === '') continue
+        if (list.length > 0) list.push(h('span', { key: `dot-${list.length}`, className: 'tu-float-dot' }))
+        list.push(part)
+      }
+      return list
+    }
+
+    /**
+     * 悬浮用量窗。
+     *
+     * 注册在 `shell.overlay`，跨页面常驻。三个数字：所选供应商的今日
+     * token / 花费，以及每个站点的余额或订阅主窗口剩余。
+     *
+     * 位置不是写死的右下角：每次布局变化都会测一次正文列右边缘，空隙
+     * 不够时用 `translate` 把正文列往左挪一点（列宽不变，长代码块不会
+     * 换行），而不是盖在内容上。只有窄屏 / 全宽页面才退化为覆盖模式。
+     */
+    function FloatingUsageWidget(props) {
+      const t = typeof props?.t === 'function' ? props.t : (key) => key
+      const openPanel = typeof props?.openPanel === 'function' ? props.openPanel : () => {}
+      const localeId = useLocaleId(props?.locale)
+
+      const [settings, setSettings] = useState(readWidgetSettings)
+      const [settingsOpen, setSettingsOpen] = useState(false)
+      const [probing, setProbing] = useState(false)
+      const [hiddenForPanel, setHiddenForPanel] = useState(false)
+      const [geometry, setGeometry] = useState(() => readPersistedGeometry()
+        ?? {
+          right: WIDGET_DEFAULTS.right,
+          bottom: WIDGET_DEFAULTS.bottom,
+          width: WIDGET_WIDTH,
+          overlap: false,
+        })
+      const rootRef = useRef(null)
+      const shiftRef = useRef({ el: null, mode: '', base: '', shift: 0 })
+      const geometryRef = useRef(geometry)
+      geometryRef.current = geometry
+
+      /**
+       * 写一次几何：与当前值差 1px 内视为没变（500ms 轮询下大部分是重复
+       * 测量），变了才落盘并更新状态。落盘让下次刷新页面时第一帧就在原位。
+       */
+      const commitGeometry = useCallback((next) => {
+        const current = geometryRef.current
+        if (current !== undefined
+          && Math.abs(current.right - next.right) < 1
+          && Math.abs(current.bottom - next.bottom) < 1
+          && current.width === next.width
+          && current.overlap === next.overlap) return
+        geometryRef.current = next
+        persistGeometry(next)
+        setGeometry(next)
+      }, [])
+
+      const refreshMs = useMemo(() => {
+        try {
+          const saved = Number(window.localStorage?.getItem(REFRESH_STORAGE_KEY))
+          if (Number.isFinite(saved) && saved >= 0) return saved
+        } catch { /* 读取失败用默认值 */ }
+        return DEFAULT_REFRESH_MS
+      }, [])
+
+      const { status, data, error, refreshing, refresh } = useSummary(refreshMs)
+
+      const updateSettings = useCallback((patch) => {
+        setSettings((previous) => {
+          const next = { ...previous, ...patch }
+          saveWidgetSettings(next)
+          return next
+        })
+      }, [])
+
+      const allSites = Array.isArray(data?.balance?.sites) ? data.balance.sites : []
+      const selectedIds = settings.sites === null ? allSites.map((site) => site.id) : settings.sites
+      const selectedSites = selectedIds
+        .map((id) => allSites.find((site) => site.id === id))
+        .filter(Boolean)
+
+      const today = data?.today
+      const todayModels = (today !== undefined && data?.byDayModel?.[today]) || {}
+      const todayCostModels = data?.cost?.todayByModel ?? {}
+      const todayCostProviders = data?.cost?.todayByProvider ?? {}
+      const fx = Number(data?.cost?.fx?.usdCny)
+      const useCny = settings.currency === 'cny' && Number.isFinite(fx) && fx > 0
+      const costSymbol = useCny ? '¥' : '$'
+      const convertUsd = (usd) => (useCny ? usd * fx : usd)
+      const money = (usd) => `${costSymbol}${formatMoneyText(convertUsd(Number(usd) || 0))}`
+
+      /**
+       * 把用量里的 provider 键归到「模型接入」站点。
+       *
+       * DSH 的 provider 路由名不一定等于站点的 id：实测 DeepSeek 的站点 id
+       * 是 `deepseek`，用量键却是 `deepseek-account`。只做全等匹配会让余额
+       * 显示正常、今日用量却永远是 0。这里按「全等 > 前缀」打分，并让每个
+       * provider 只归一个站点，避免两个相似站点重复计数。
+       */
+      const providerOwners = (() => {
+        const owners = new Map()
+        const providers = new Set()
+        for (const key of Object.keys(todayModels)) {
+          const slash = key.indexOf('/')
+          providers.add((slash === -1 ? key : key.slice(0, slash)).toLowerCase())
+        }
+        for (const key of Object.keys(todayCostProviders)) providers.add(String(key).toLowerCase())
+        for (const provider of providers) {
+          let best
+          for (const site of selectedSites) {
+            const bases = [site.id, site.provider]
+              .filter((value) => typeof value === 'string' && value !== '')
+              .map((value) => value.toLowerCase())
+            let score = 0
+            for (const base of bases) {
+              if (provider === base) score = Math.max(score, 1000 + base.length)
+              else if (provider.startsWith(`${base}-`) || provider.startsWith(`${base}_`)) {
+                score = Math.max(score, 100 + base.length)
+              } else if (base.startsWith(`${provider}-`) || base.startsWith(`${provider}_`)) {
+                score = Math.max(score, 90 + provider.length)
+              }
+            }
+            if (score > 0 && (best === undefined || score > best.score)) best = { id: site.id, score }
+          }
+          if (best !== undefined) owners.set(provider, best.id)
+        }
+        return owners
+      })()
+
+      const isQuotaSite = (site) => {
+        const quotas = site?.lastBalance?.quotas
+        return (Array.isArray(quotas) && quotas.length > 0)
+          || site?.noPlan === true
+          || WIDGET_QUOTA_PLATFORMS.has(site?.provider)
+      }
+
+      const usageOf = (site) => {
+        let tokens = 0
+        let calls = 0
+        let usd = 0
+        let priced = false
+        let unpriced = false
+        for (const [key, counters] of Object.entries(todayModels)) {
+          const slash = key.indexOf('/')
+          const provider = (slash === -1 ? key : key.slice(0, slash)).toLowerCase()
+          if (providerOwners.get(provider) !== site.id) continue
+          tokens += Number(counters?.totalTokens) || 0
+          calls += Number(counters?.calls) || 0
+          const cost = todayCostModels[key]
+          if (cost === undefined) continue
+          usd += Number(cost.usd) || 0
+          if (cost.priced === true) priced = true
+          else unpriced = true
+        }
+        // 兜底：Host 的 provider 聚合键与 usage 键大小写不一致时也能取到。
+        if (usd === 0 && tokens > 0) {
+          for (const [provider, entry] of Object.entries(todayCostProviders)) {
+            if (providerOwners.get(String(provider).toLowerCase()) !== site.id) continue
+            usd += Number(entry?.usd) || 0
+            if (entry?.priced === true) priced = true
+            break
+          }
+        }
+        return { tokens, calls, usd, priced, unpriced, quota: isQuotaSite(site) }
+      }
+
+      const usageBySite = new Map()
+      for (const site of selectedSites) usageBySite.set(site.id, usageOf(site))
+
+      let heroTokens = 0
+      let heroCalls = 0
+      let heroUsd = 0
+      let heroUnpriced = false
+      let heroReady = false
+      if (settings.scope === 'all' && data !== undefined) {
+        heroReady = true
+        heroTokens = Number(data?.totals?.today?.totalTokens) || 0
+        heroCalls = Number(data?.totals?.today?.calls) || 0
+        heroUsd = Number(data?.cost?.byDay?.[today]) || 0
+        // 「未定价」只看今天实际用到的模型：Host 的 cost.unpriced 是全量
+        // 累计（历史补过的价格也在里面），拿它判断会让今天照常显示「+」。
+        // todayByModel 覆盖了今天的每个键，未定价的键 priced 为 false。
+        heroUnpriced = Object.values(todayCostModels).some((entry) => entry?.priced === false)
+      } else if (selectedSites.length > 0 && data !== undefined) {
+        heroReady = true
+        for (const site of selectedSites) {
+          const usage = usageBySite.get(site.id)
+          heroTokens += usage.tokens
+          heroCalls += usage.calls
+          // 订阅制不按 token 扣钱：把估算金额排除在「今日花费」之外，
+          // 行内仍显示「订阅内」，避免把预付费当成今天又花了一笔。
+          heroUsd += usage.quota ? 0 : usage.usd
+          heroUnpriced = heroUnpriced || (!usage.quota && usage.unpriced)
+        }
+      }
+
+      const latestChecked = Math.max(
+        0,
+        ...selectedSites.map((site) => Number(site.lastCheckedAt) || 0),
+        Number(data?.generatedAt) || 0,
+      )
+      const clock = (() => {
+        if (latestChecked <= 0) return '—'
+        try {
+          return new Date(latestChecked).toLocaleTimeString(localeId === 'en' ? 'en-US' : 'zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        } catch {
+          return new Date(latestChecked).toISOString().slice(11, 16)
+        }
+      })()
+
+      const pickMainQuota = (quotas) => quotas.find((entry) => String(entry?.label ?? '') === '5-hour')
+        ?? quotas[0]
+
+      const describeSite = (site) => {
+        const usage = usageBySite.get(site.id) ?? { tokens: 0, calls: 0, usd: 0, priced: false, unpriced: false, quota: false }
+        const tokensText = `${t('widget.todayShort')} ${formatCompact(usage.tokens)}`
+        const costText = usage.tokens > 0
+          ? (usage.quota
+            ? t('widget.subscription')
+            : (usage.priced || usage.usd > 0
+              ? money(usage.usd)
+              : (usage.unpriced ? t('widget.unpriced') : t('widget.subscription'))))
+          : null
+
+        const balance = site.lastBalance
+        const quotas = Array.isArray(balance?.quotas) ? balance.quotas : []
+        if (quotas.length > 0) {
+          const main = pickMainQuota(quotas)
+          const used = Number(main?.used)
+          const limit = Number(main?.limit)
+          const ratio = Number.isFinite(used) && Number.isFinite(limit) && limit > 0 ? used / limit : undefined
+          const left = ratio === undefined ? undefined : Math.round(clampNumber(1 - ratio, 0, 1) * 100)
+          return {
+            tagKind: 'quota',
+            tagLabel: t('widget.quota'),
+            value: left === undefined ? '—' : `${left}%`,
+            dim: left === undefined,
+            level: left !== undefined && left <= 20 ? 'warn' : undefined,
+            parts: widgetParts([main?.label, tokensText, costText].filter(Boolean)),
+            bar: left,
+            barLevel: left === undefined ? undefined : left <= 5 ? 'danger' : left <= 20 ? 'warn' : undefined,
+          }
+        }
+
+        const native = (() => {
+          if (typeof balance?.usd === 'number' && Number.isFinite(balance.usd)) {
+            return { amount: balance.usd, currency: balance.currency ?? 'USD' }
+          }
+          if (typeof balance?.raw === 'number' && Number.isFinite(balance.raw)
+            && typeof balance.currency === 'string' && balance.currency.trim() !== '') {
+            return { amount: balance.raw, currency: balance.currency.trim() }
+          }
+          return undefined
+        })()
+        if (native !== undefined) {
+          return {
+            tagKind: 'balance',
+            tagLabel: t('widget.balance'),
+            value: `${currencySymbol(native.currency)}${formatMoneyText(native.amount)}`,
+            level: native.amount <= 0 ? 'warn' : undefined,
+            parts: widgetParts([tokensText, costText].filter(Boolean)),
+          }
+        }
+        if (site.noPlan === true) {
+          return {
+            tagKind: 'quota',
+            tagLabel: t('widget.quota'),
+            value: t('widget.noPlan'),
+            dim: true,
+            parts: widgetParts([tokensText, costText].filter(Boolean)),
+          }
+        }
+        if (typeof site.error === 'string' && site.error !== '') {
+          return {
+            tagKind: null,
+            tagLabel: null,
+            value: t('widget.error'),
+            dim: true,
+            level: 'error',
+            title: site.error,
+            parts: widgetParts([tokensText].filter(Boolean)),
+          }
+        }
+        return {
+          tagKind: null,
+          tagLabel: null,
+          value: '—',
+          dim: true,
+          parts: widgetParts([tokensText].filter(Boolean)),
+        }
+      }
+
+      const toggleSite = (siteId) => {
+        const current = settings.sites === null ? allSites.map((site) => site.id) : settings.sites
+        const next = current.includes(siteId)
+          ? current.filter((id) => id !== siteId)
+          : [...current, siteId]
+        updateSettings({ sites: next })
+      }
+
+      const doRefresh = async () => {
+        if (probing) return
+        setProbing(true)
+        try {
+          // 只探已经过期的站点，避免每次点刷新都对所有平台发请求。
+          const targets = selectedSites
+            .filter((site) => Date.now() - (Number(site.lastCheckedAt) || 0) > 30_000)
+            .slice(0, 4)
+          await Promise.all(targets.map(async (site) => {
+            try {
+              await fetch(BALANCE_PROBE_ROUTE, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ id: site.id }),
+              })
+            } catch { /* 单个站点失败不影响其余 */ }
+          }))
+        } finally {
+          await refresh()
+          setProbing(false)
+        }
+      }
+
+      // —— 让位：测正文列右边缘，空间不够就把列往左挪 ——
+      useEffect(() => {
+        if (typeof document === 'undefined') return undefined
+        const clearShift = () => {
+          const ref = shiftRef.current
+          if (ref.el === null) return
+          ref.el.style.translate = ref.base
+          ref.el.style.transition = ''
+          shiftRef.current = { el: null, mode: '', base: '', shift: 0 }
+        }
+        /** 限宽列：整体左移。列宽不变，长代码块不会重新换行。 */
+        const applyShift = (target, shift) => {
+          if (target === null || target === undefined) return
+          const ref = shiftRef.current
+          if (ref.el !== target) {
+            if (ref.el !== null) clearShift()
+            ref.el = target
+            ref.base = target.style.translate ?? ''
+          }
+          ref.shift = shift
+          ref.el.style.translate = shift > 0.5 ? `-${shift}px 0` : ref.base
+          ref.el.style.transition = 'translate 160ms ease'
+        }
+
+        if (settings.pinned) {
+          clearShift()
+          commitGeometry({
+            right: clampNumber(settings.right, 8, Math.max(8, window.innerWidth - WIDGET_MIN_WIDTH - 8)),
+            bottom: clampNumber(settings.bottom, 8, Math.max(8, window.innerHeight - 120)),
+            width: WIDGET_WIDTH,
+            overlap: false,
+          })
+          return () => clearShift()
+        }
+
+        let disposed = false
+        /** 沿 DOM 找第一个有宽高的后代：槽位常是 display: contents。 */
+        const firstMeasured = (node) => {
+          if (node === null || node === undefined) return undefined
+          const own = node.getBoundingClientRect()
+          if (own.width > 0 && own.height > 0) return node
+          for (const child of node.querySelectorAll('*')) {
+            const rect = child.getBoundingClientRect()
+            if (rect.width > 0 && rect.height > 0) return child
+          }
+          return undefined
+        }
+
+        const run = () => {
+          if (disposed) return
+          // 统计页本身就把这些数字全列出来了，再盖一层悬浮窗只会挡图表。
+          // 切到统计页时隐藏，回到会话 / 其它页面自动出现。
+          const statsPanelActive = typeof document !== 'undefined'
+            && document.querySelector('[data-slot="main"] .tu-root') !== null
+          setHiddenForPanel((previous) => (previous === statsPanelActive ? previous : statsPanelActive))
+          if (statsPanelActive) {
+            clearShift()
+            return
+          }
+          const root = rootRef.current
+          const overlay = root?.closest?.('[data-shell-overlay]') ?? root?.parentElement
+          if (root === null || root === undefined || overlay === null || overlay === undefined) return
+          const overlayRect = overlay.getBoundingClientRect()
+          const main = document.querySelector('[data-slot="main"]')
+          const center = main?.parentElement
+          const boundary = center ?? overlay
+          const boundaryRect = boundary.getBoundingClientRect()
+          // 右边界不一定是 center 的右边：统计页的 center 比视口窄一截，
+          // 右侧有空白却被算成「没有空间」。有右栏时停在右栏左边，否则
+          // 一直贴到 frame 右边缘。
+          const rightbar = document.querySelector('[data-rightbar-col]')
+          const rightbarRect = rightbar?.getBoundingClientRect()
+          const rightbarOpen = rightbarRect !== null && rightbarRect !== undefined
+            && rightbarRect.width > 0 && rightbarRect.left > boundaryRect.left + 100
+          const rightEdge = rightbarOpen ? rightbarRect.left : overlayRect.right
+
+          // 正文列：conversation.chat.flow 的父级才是限宽列；缺失时退到
+          // 第一个有盒子的内容节点（统计页 / 首屏 hero 等）。
+          const flowSlot = document.querySelector('[data-slot="conversation.chat.flow"]')
+          const flowColumn = flowSlot?.parentElement
+          const columnMeasured = flowColumn !== null && flowColumn !== undefined
+            && flowColumn.getBoundingClientRect().width > 0
+            ? flowColumn
+            : undefined
+          const anchor = columnMeasured ?? firstMeasured(main) ?? firstMeasured(center) ?? overlay
+          const expanded = settings.collapsed !== true
+          const desired = WIDGET_WIDTH + WIDGET_GAP
+
+          if (shiftRef.current.el !== null && shiftRef.current.el !== anchor) clearShift()
+          const anchorRect = anchor === overlay ? boundaryRect : anchor.getBoundingClientRect()
+          const currentShift = shiftRef.current.el === anchor ? shiftRef.current.shift : 0
+          // 已经左移过的列，left 不能直接拿来算余量——要加回位移，
+          // 否则每轮 maxShift 越来越小，列会被一点点推回右边。
+          const leftGutter = Math.max(0, anchorRect.left - boundaryRect.left + currentShift)
+          // 全宽页面没有可挪动的余量：直接覆盖，至少不破坏布局。
+          const fullWidth = anchorRect.width >= (rightEdge - boundaryRect.left) - 40
+          let free = rightEdge - anchorRect.right
+          let shift = 0
+
+          if (expanded && settings.autoAvoid) {
+            // 已经挪过的量要从当前空隙里扣掉，才能判断「原始空隙」够不够。
+            // 否则下一轮会把刚腾出的空隙当成天然空隙，清除位移后再挪——
+            // 列会每 500ms 来回抖一次。
+            const baseFree = free - (currentShift > 0 ? currentShift : 0)
+            const want = Math.max(0, desired - baseFree)
+            if (!fullWidth) {
+              // 限宽列：最多推到左边距还剩 8px；再窄就只能覆盖了。
+              shift = Math.min(want, Math.max(0, leftGutter - 8))
+              if (shift > 1) {
+                applyShift(anchor, shift)
+                const moved = anchor.getBoundingClientRect()
+                free = rightEdge - moved.right
+              } else {
+                clearShift()
+                free = baseFree
+              }
+            } else {
+              // 全宽页面没有可挪动的余量。hero 首屏改用右上角停靠（见下方
+              // bottom 计算），其它页面保持覆盖，至少不破坏原有布局。
+              clearShift()
+            }
+          } else {
+            clearShift()
+          }
+
+          // 首屏 hero 的输入框贴着底部，右下角一定会压到它；这一屏改停右上，
+          // 那里是空白区。进入会话后自动回到右下角。
+          const heroPhase = anchor?.getAttribute?.('data-phase') === 'hero'
+          const overlap = expanded && !heroPhase && free < WIDGET_MIN_WIDTH + WIDGET_GAP
+          const width = heroPhase
+            ? WIDGET_WIDTH
+            : overlap
+              ? WIDGET_WIDTH
+              : Math.max(WIDGET_MIN_WIDTH, Math.min(WIDGET_WIDTH, free - WIDGET_GAP))
+          const right = Math.max(8, overlayRect.right - rightEdge + 14)
+          const toastHost = document.querySelector('.tu-toasts')
+          const toastHeight = toastHost === null ? 0 : toastHost.getBoundingClientRect().height
+          const cardHeight = root.getBoundingClientRect().height || 272
+          const bottom = heroPhase
+            ? Math.max(96, overlayRect.height - 96 - cardHeight)
+            : Math.max(96, 18 + toastHeight + 12)
+          commitGeometry({ right, bottom, width, overlap })
+        }
+
+        let timer = 0
+        // 不用 requestAnimationFrame：无头/后台标签页里 rAF 会被节流甚至暂停，
+        // 布局一旦在首帧之后变化（首屏 hero → 会话），就再也不会重新测量。
+        const schedule = () => {
+          clearTimeout(timer)
+          timer = setTimeout(run, 80)
+        }
+
+        run()
+        window.addEventListener('resize', schedule)
+        let observer
+        if (typeof ResizeObserver !== 'undefined') {
+          observer = new ResizeObserver(schedule)
+          const overlay = rootRef.current?.parentElement
+          if (overlay !== null && overlay !== undefined) observer.observe(overlay)
+          const main = document.querySelector('[data-slot="main"]')
+          if (main !== null && main !== undefined) observer.observe(main)
+        }
+        const pollTimer = setInterval(schedule, 500)
+        return () => {
+          disposed = true
+          clearTimeout(timer)
+          window.removeEventListener('resize', schedule)
+          if (observer !== undefined) observer.disconnect()
+          clearInterval(pollTimer)
+          clearShift()
+        }
+      }, [
+        settings.collapsed,
+        settings.pinned,
+        settings.autoAvoid,
+        settings.right,
+        settings.bottom,
+        selectedSites.length,
+        today,
+        settingsOpen,
+      ])
+
+      // 点设置外面 / Esc：关闭气泡。
+      useEffect(() => {
+        if (!settingsOpen) return undefined
+        const onDown = (event) => {
+          const root = rootRef.current
+          if (root !== null && root !== undefined && typeof root.contains === 'function' && root.contains(event.target)) return
+          setSettingsOpen(false)
+        }
+        const onKey = (event) => {
+          if (event?.key === 'Escape') setSettingsOpen(false)
+        }
+        document.addEventListener('mousedown', onDown)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('mousedown', onDown)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [settingsOpen])
+
+      const onHeadPointerDown = (event) => {
+        if (event.button !== 0) return
+        const button = event.target?.closest?.('button')
+        if (button !== null && button !== undefined) return
+        const root = rootRef.current
+        const overlay = root?.closest?.('[data-shell-overlay]') ?? root?.parentElement
+        if (root === null || root === undefined || overlay === null || overlay === undefined) return
+        const overlayRect = overlay.getBoundingClientRect()
+        const start = {
+          x: event.clientX,
+          y: event.clientY,
+          right: geometry.right,
+          bottom: geometry.bottom,
+          width: geometry.width,
+          moved: false,
+        }
+        root.dataset.dragging = 'true'
+        // 捕获指针：拖出浏览器窗口后松手，pointerup 仍会发到捕获元素，
+        // 否则「dragging」态和三个监听器会一直残留。
+        try {
+          event.currentTarget?.setPointerCapture?.(event.pointerId)
+        } catch { /* 不支持捕获时退回 window 监听，跟旧行为一致 */ }
+        const onMove = (moveEvent) => {
+          const dx = moveEvent.clientX - start.x
+          const dy = moveEvent.clientY - start.y
+          if (!start.moved && Math.abs(dx) + Math.abs(dy) < 4) return
+          start.moved = true
+          const right = clampNumber(start.right - dx, 8, Math.max(8, overlayRect.width - start.width - 8))
+          const bottom = clampNumber(start.bottom - dy, 8, Math.max(8, overlayRect.height - 90))
+          geometryRef.current = { ...geometryRef.current, right, bottom }
+          setGeometry((previous) => ({ ...previous, right, bottom }))
+        }
+        const onUp = (upEvent) => {
+          try {
+            event.currentTarget?.releasePointerCapture?.(upEvent?.pointerId ?? event.pointerId)
+          } catch { /* 没有捕获时就不用释放 */ }
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          window.removeEventListener('pointercancel', onUp)
+          delete root.dataset.dragging
+          if (start.moved) {
+            persistGeometry(geometryRef.current)
+            const latest = geometryRef.current
+            const stored = { ...settings, pinned: true, right: latest.right, bottom: latest.bottom }
+            saveWidgetSettings(stored)
+            setSettings(stored)
+          }
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        window.addEventListener('pointercancel', onUp)
+      }
+
+      const resetPosition = () => {
+        const next = { ...settings, pinned: false, autoAvoid: true, right: WIDGET_DEFAULTS.right, bottom: WIDGET_DEFAULTS.bottom }
+        saveWidgetSettings(next)
+        setSettings(next)
+      }
+
+      const toggleCollapsed = () => updateSettings({ collapsed: !settings.collapsed })
+      const openSite = () => openPanel('suppliers')
+      const openStats = () => openPanel('stats')
+
+      const busy = refreshing || probing
+      const offline = data !== undefined && typeof error === 'string' && error !== ''
+      const heroTokensText = heroReady ? formatCompact(heroTokens) : '—'
+      const heroCostNumber = heroReady
+        ? `${formatMoneyText(convertUsd(heroUsd))}${heroUnpriced ? '+' : ''}`
+        : null
+      const heroCostText = heroCostNumber === null ? '—' : `${costSymbol}${heroCostNumber}`
+      const secondaryCostText = (() => {
+        if (!heroReady || heroUsd <= 0) return null
+        if (useCny) return `≈ $${formatMoneyText(heroUsd)}`
+        if (Number.isFinite(fx) && fx > 0) return `≈ ¥${formatMoneyText(heroUsd * fx)}`
+        return null
+      })()
+
+      if (hiddenForPanel) return null
+
+      const head = h('div', {
+        className: 'tu-float-head',
+        onPointerDown: onHeadPointerDown,
+        onDoubleClick: resetPosition,
+        title: t('widget.dragHint'),
+      },
+      h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
+      h('span', { className: 'tu-float-title' }, t('widget.title')),
+      h('span', { className: 'tu-float-live' }, offline ? t('widget.offline') : t('widget.live')),
+      h('div', { className: 'tu-float-actions' },
+        h('button', {
+          type: 'button',
+          className: 'tu-float-btn',
+          title: t('widget.refresh'),
+          'aria-label': t('widget.refresh'),
+          'data-busy': busy ? 'true' : undefined,
+          onClick: () => { void doRefresh() },
+        }, h(WidgetIcon, { name: 'refresh' })),
+        h('button', {
+          type: 'button',
+          className: 'tu-float-btn',
+          title: t('widget.collapse'),
+          'aria-label': t('widget.collapse'),
+          onClick: toggleCollapsed,
+        }, h(WidgetIcon, { name: 'collapse' })),
+        h('button', {
+          type: 'button',
+          className: 'tu-float-btn',
+          title: t('widget.settings'),
+          'aria-label': t('widget.settings'),
+          onClick: () => setSettingsOpen((open) => !open),
+        }, h(WidgetIcon, { name: 'gear' }))))
+
+      const hero = h('div', { className: 'tu-float-hero' },
+        h('div', { className: 'tu-float-stat' },
+          h('div', { className: 'tu-float-label' }, t('widget.todayTokens')),
+          h('div', { className: 'tu-float-value' }, heroTokensText),
+          h('div', { className: 'tu-float-sub' }, heroReady ? `${heroCalls} ${t('widget.calls')}` : '—')),
+        h('div', { className: 'tu-float-stat' },
+          h('div', { className: 'tu-float-label' }, t('widget.todayCost')),
+          h('div', { className: 'tu-float-value' },
+            heroCostNumber === null ? '—' : h('span', { className: 'tu-float-cur' }, costSymbol),
+            heroCostNumber === null ? null : heroCostNumber),
+          h('div', { className: 'tu-float-sub' },
+            secondaryCostText ?? (heroUnpriced ? t('widget.unpriced') : '—'))))
+
+      const rows = selectedSites.length === 0
+        ? h('div', { className: 'tu-float-empty' },
+          h('strong', null, t('widget.empty')),
+          h('div', null, t('widget.emptyHint')),
+          h('button', {
+            type: 'button',
+            className: 'tu-float-link',
+            style: { marginTop: '6px' },
+            onClick: openSite,
+          }, `${t('widget.openPanel')} →`))
+        : h('div', { className: 'tu-float-rows' },
+          ...selectedSites.map((site) => {
+            const info = describeSite(site)
+            return h('div', {
+              key: site.id,
+              className: 'tu-float-row',
+              role: 'button',
+              tabIndex: 0,
+              title: info.title,
+              onClick: openSite,
+              onKeyDown: (event) => {
+                if (event?.key === 'Enter' || event?.key === ' ') openSite()
+              },
+            },
+            h('div', { className: 'tu-float-rowtop' },
+              h('span', { className: 'tu-float-name' },
+                site.label || site.id,
+                info.tagLabel === null || info.tagLabel === undefined
+                  ? null
+                  : h('span', { className: 'tu-float-tag', 'data-kind': info.tagKind }, info.tagLabel)),
+              h('span', {
+                className: 'tu-float-amount',
+                'data-dim': info.dim ? 'true' : undefined,
+                'data-level': info.level,
+              }, info.value)),
+            h('div', { className: 'tu-float-rowsub' }, ...info.parts),
+            info.bar === undefined
+              ? null
+              : h('div', { className: 'tu-float-bar' },
+                h('div', {
+                  className: 'tu-float-barfill',
+                  'data-level': info.barLevel,
+                  style: { width: `${info.bar}%` },
+                })))
+          }))
+
+      const foot = h('div', { className: 'tu-float-foot' },
+        h('span', null, `${t('widget.updated')} ${clock}`),
+        h('button', { type: 'button', className: 'tu-float-link', onClick: openStats },
+          `${t('widget.detail')} →`))
+
+      const card = h('div', { className: 'tu-float-card' },
+        head,
+        hero,
+        rows,
+        foot)
+
+      const pill = h('div', {
+        className: 'tu-float-pill',
+        role: 'button',
+        tabIndex: 0,
+        onClick: () => updateSettings({ collapsed: false }),
+        onKeyDown: (event) => {
+          if (event?.key === 'Enter' || event?.key === ' ') updateSettings({ collapsed: false })
+        },
+        title: t('widget.expand'),
+      },
+      h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
+      h('span', null, `${t('widget.todayShort')} `, h('b', null, heroCostText)),
+      h('span', { className: 'tu-float-pillsep' }),
+      h('span', { className: 'tu-float-pillsub' }, heroTokensText),
+      h('span', { className: 'tu-float-chev' }, '⌃'))
+
+      const settingsPanel = settingsOpen
+        ? h('div', { className: 'tu-float-settings' },
+          h('div', { className: 'tu-float-sethead' },
+            t('widget.settings'),
+            h('button', {
+              type: 'button',
+              className: 'tu-float-btn',
+              style: { marginLeft: 'auto' },
+              title: t('widget.closeSettings'),
+              onClick: () => setSettingsOpen(false),
+            }, '✕')),
+          h('div', { className: 'tu-float-sethint' }, t('widget.autoHint')),
+          h('div', { className: 'tu-float-setlabel' }, t('widget.sites')),
+          allSites.length === 0
+            ? h('div', { className: 'tu-float-sethint', style: { marginTop: '4px' } }, t('widget.emptyHint'))
+            : h('div', null, ...allSites.map((site) => {
+              const configured = (site.lastBalance !== null && site.lastBalance !== undefined)
+                || site.noPlan === true
+                || (typeof site.error === 'string' && site.error !== '')
+              const info = describeSite(site)
+              const checked = selectedIds.includes(site.id)
+              return h('label', {
+                key: site.id,
+                className: 'tu-float-check',
+                'data-disabled': configured ? undefined : 'true',
+              },
+              h('input', {
+                type: 'checkbox',
+                checked,
+                disabled: !configured,
+                onChange: () => toggleSite(site.id),
+              }),
+              h('span', null, site.label || site.id),
+              h('span', { className: 'tu-float-checkval' }, info.value))
+            })),
+          h('div', { className: 'tu-float-setlabel' }, t('widget.scope')),
+          h('div', { className: 'tu-float-seg' },
+            h('button', {
+              type: 'button',
+              className: 'tu-float-segbtn',
+              'data-on': settings.scope === 'selected' ? 'true' : undefined,
+              onClick: () => updateSettings({ scope: 'selected' }),
+            }, t('widget.scopeSelected')),
+            h('button', {
+              type: 'button',
+              className: 'tu-float-segbtn',
+              'data-on': settings.scope === 'all' ? 'true' : undefined,
+              onClick: () => updateSettings({ scope: 'all' }),
+            }, t('widget.scopeAll'))),
+          h('div', { className: 'tu-float-setlabel' }, t('widget.currency')),
+          h('div', { className: 'tu-float-seg' },
+            h('button', {
+              type: 'button',
+              className: 'tu-float-segbtn',
+              'data-on': settings.currency === 'cny' ? 'true' : undefined,
+              onClick: () => updateSettings({ currency: 'cny' }),
+            }, t('widget.cny')),
+            h('button', {
+              type: 'button',
+              className: 'tu-float-segbtn',
+              'data-on': settings.currency === 'usd' ? 'true' : undefined,
+              onClick: () => updateSettings({ currency: 'usd' }),
+            }, t('widget.usd'))),
+          h('label', { className: 'tu-float-check', style: { marginTop: '8px' } },
+            h('input', {
+              type: 'checkbox',
+              checked: settings.autoAvoid,
+              onChange: (event) => updateSettings({ autoAvoid: event.target.checked, pinned: false }),
+            }),
+            h('span', null, t('widget.auto'))),
+          h('div', { className: 'tu-float-setrow' },
+            h('div', { className: 'tu-float-setlabel' }, settings.pinned ? t('widget.pinned') : ''),
+            h('button', {
+              type: 'button',
+              className: 'tu-float-btn',
+              style: { width: 'auto', padding: '0 7px', fontSize: '10.5px' },
+              onClick: resetPosition,
+            }, t('widget.reset'))))
+        : null
+
+      const showSkeleton = status === 'loading' && data === undefined
+      return h('div', {
+        ref: rootRef,
+        className: 'tu-float',
+        'data-mode': settings.collapsed ? 'pill' : 'card',
+        'data-overlap': geometry.overlap ? 'true' : undefined,
+        style: {
+          right: `${geometry.right}px`,
+          bottom: `${geometry.bottom}px`,
+          '--tu-float-w': `${geometry.width}px`,
+        },
+      },
+      showSkeleton
+        ? h('div', { className: 'tu-float-card' },
+          h('div', { className: 'tu-float-head' },
+            h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
+            h('span', { className: 'tu-float-title' }, t('widget.title')),
+            h('span', { className: 'tu-float-live' }, t('widget.loading'))),
+          h('div', { className: 'tu-float-hero' },
+            h('div', { className: 'tu-float-stat' },
+              h('div', { className: 'tu-float-skeleton', 'data-w': '50' }),
+              h('div', { className: 'tu-float-skeleton', 'data-w': '70' })),
+            h('div', { className: 'tu-float-stat' },
+              h('div', { className: 'tu-float-skeleton', 'data-w': '50' }),
+              h('div', { className: 'tu-float-skeleton', 'data-w': '70' }))),
+          h('div', { className: 'tu-float-rows' },
+            h('div', { className: 'tu-float-row' },
+              h('div', { className: 'tu-float-skeleton', 'data-w': '70' }),
+              h('div', { className: 'tu-float-skeleton', 'data-w': '50' }))))
+        : settings.collapsed ? pill : card,
+      settingsOpen ? settingsPanel : null)
+    }
+
+    //#endregion
+
     function TokenUsagePanel(props) {
       // 刷新间隔：从 localStorage 恢复用户上次的选择，读不到就用默认值。
       const [refreshMs, setRefreshMs] = useState(() => {
@@ -4831,6 +6385,41 @@ function formatMoneyText(value) {
       const [aliasForm, setAliasForm] = useState(null)
       // 顶层视图：统计 / 供应商。供应商是完整页面，不是明细里的标签。
       const [topView, setTopView] = useState('stats')
+      /**
+       * 悬浮窗打开的面板页签。
+       *
+       * 面板可能还没挂载（用户停在会话页），所以除了监听事件，还要读一次
+       * 模块级槽位——只发事件会在挂载前丢掉。
+       */
+      useEffect(() => {
+        const applyView = (view) => {
+          if (view === 'suppliers') setTopView('suppliers')
+          else if (view === 'stats') setTopView('stats')
+        }
+        const takePendingView = () => {
+          const pending = MODULE_VIEW_REQUEST.current
+          MODULE_VIEW_REQUEST.current = null
+          if (pending === null || pending === undefined) return null
+          // 过期请求直接丢：那是一次没兑现的打开尝试，不该影响下次打开。
+          if (Date.now() - pending.at > MODULE_VIEW_REQUEST_TTL_MS) return null
+          return typeof pending.view === 'string' ? pending.view : null
+        }
+        const pending = takePendingView()
+        if (pending !== null) {
+          applyView(pending)
+        }
+        const onView = (event) => {
+          const view = event?.detail?.view
+          if (typeof view !== 'string') return
+          if (MODULE_VIEW_REQUEST.current?.view === view) MODULE_VIEW_REQUEST.current = null
+          applyView(view)
+        }
+        const canListen = typeof window !== 'undefined' && typeof window.addEventListener === 'function'
+        if (canListen) window.addEventListener(WIDGET_VIEW_EVENT, onView)
+        return () => {
+          if (canListen) window.removeEventListener(WIDGET_VIEW_EVENT, onView)
+        }
+      }, [])
       // 供应商编辑表单：null 表示关闭
       const [supplierForm, setSupplierForm] = useState(null)
       /**
@@ -8778,6 +10367,33 @@ function formatMoneyText(value) {
         }, TokenUsageIcon))
       } catch (error) {
         console.error('[dsh-token-metrics] 侧边栏入口注册失败：', error)
+      }
+
+      // 悬浮窗：挂到 shell.overlay，跨页面常驻。
+      try {
+        let layoutService
+        try {
+          layoutService = typeof ctx.get === 'function' ? ctx.get('layout') : ctx.layout
+        } catch { /* 布局服务不可用时只发事件，至少不会让页面崩 */ }
+        const openPanel = (view) => {
+          MODULE_VIEW_REQUEST.current = typeof view === 'string' ? { view, at: Date.now() } : null
+          try {
+            if (typeof window !== 'undefined' && typeof window.CustomEvent === 'function') {
+              window.dispatchEvent(new window.CustomEvent(WIDGET_VIEW_EVENT, { detail: { view } }))
+            }
+          } catch { /* 事件失败不影响下面切面板 */ }
+          try {
+            layoutService?.selectPanel?.(PANEL_ID)
+          } catch { /* 面板尚未注册时忽略，请求已写进槽位 */ }
+        }
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: `${PANEL_ID}-widget`,
+          order: 40,
+          inject: () => ({ t, locale: currentLocale(), openPanel }),
+        }, FloatingUsageWidget))
+      } catch (error) {
+        console.error('[dsh-token-metrics] 悬浮窗注册失败：', error)
       }
     }
 
