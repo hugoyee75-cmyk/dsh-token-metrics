@@ -374,10 +374,11 @@ const ctx = {
 
 exportsValue.apply(ctx)
 
-check('注册了 2 个 slot', registrations.length === 2, `实际 ${registrations.length}`)
+check('注册了 3 个 slot', registrations.length === 3, `实际 ${registrations.length}`)
 
 const panel = registrations.find((r) => r.options.name === 'main')
 const sidebar = registrations.find((r) => r.options.name === 'sidebar.panellist')
+const overlay = registrations.find((r) => r.options.name === 'shell.overlay')
 check('统计页注册到 main', panel !== undefined)
 check('统计页 key 正确', panel?.options.key === 'token-metrics', panel?.options.key)
 check('侧边栏入口注册', sidebar !== undefined)
@@ -385,6 +386,9 @@ check('侧边栏 id 与面板 key 一致', sidebar?.options.id === panel?.option
   `${sidebar?.options.id} vs ${panel?.options.key}`)
 check('侧边栏有 order', typeof sidebar?.options.order === 'number')
 check('侧边栏 label 是函数', typeof sidebar?.options.label === 'function')
+check('悬浮窗注册到 shell.overlay', overlay !== undefined)
+check('悬浮窗 id 唯一', overlay?.options.id === 'token-metrics-widget', overlay?.options.id)
+check('悬浮窗注入 openPanel', typeof overlay?.options.inject?.().openPanel, 'function')
 
 check('注册了 locale 文案', localeRegistrations.length === 1)
 check('文案含中英双语', localeRegistrations[0]?.dicts?.zh !== undefined && localeRegistrations[0]?.dicts?.en !== undefined)
