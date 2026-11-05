@@ -69,6 +69,9 @@ window.__ModuleLoader__.load({
   const BALANCE_REMOVE_ROUTE = '/api/dsh-token-metrics/balance/remove'
   const BALANCE_PROBE_ROUTE = '/api/dsh-token-metrics/balance/probe'
   const PRICING_ALIAS_ROUTE = '/api/dsh-token-metrics/pricing/alias'
+  const QUOTA_ROUTE = '/api/dsh-token-metrics/quota/summary'
+  const QUOTA_PLAN_ROUTE = '/api/dsh-token-metrics/quota/plan'
+  const QUOTA_PROBE_ROUTE = '/api/dsh-token-metrics/quota/probe'
 
     /** 悬浮窗设置存 localStorage：位置、勾选的站点、币种都按用户记忆。 */
     const WIDGET_STORAGE_KEY = 'dsh-token-metrics:widget'
@@ -237,7 +240,61 @@ window.__ModuleLoader__.load({
       'balance.title': '供应商余额',
       'view.stats': '统计',
       'view.suppliers': '模型接入',
+      'view.quota': '订阅额度',
       'view.budget': '预算',
+      // —— 订阅额度页（OpenCode Go）——
+      'quota.title': '订阅额度',
+      'quota.subtitle': '按 5h / 周 / 月窗口把 token 折算成额度：哪个模型吃了多少、还剩多少',
+      'quota.plan': '档位',
+      'quota.refresh': '刷新额度',
+      'quota.refreshing': '查询中…',
+      'quota.calibrate': '校准额度',
+      'quota.calibrating': '校准中…',
+      'quota.calibrateHint': '对每个模型发一条 2-token 请求，读回官方额度系数；约 $0.0001/模型',
+      'quota.calibrated': '已校准',
+      'quota.calibratedUnit': '个模型',
+      'quota.empty': '还没有可归因的订阅站点',
+      'quota.emptyHint': '先到「模型接入」添加 OpenCode Go，再回来这里',
+      'quota.window.rolling': '5 小时',
+      'quota.window.weekly': '本周',
+      'quota.window.monthly': '本月',
+      'quota.perPct': '每 1%',
+      'quota.remaining': '剩余',
+      'quota.model': '模型',
+      'quota.tokens': 'Token',
+      'quota.allowance': '额度',
+      'quota.share': '占比',
+      'quota.points': '点',
+      'quota.monthlyCap': '占月额度',
+      'quota.granularity': '10 分钟粒度 · 本地会话记录 · 按官方价目折算',
+      'quota.partial': '账本还没覆盖窗口起点，数字可能偏小（历史回扫中）',
+      'quota.uncalibrated': '该档位还没有额度系数，先点「校准额度」再折算',
+      'quota.planHint': '非 Go 档位的每模型月额度官方未给全表，需要校准后才能精确折算',
+      'quota.backfilling': '正在用历史会话补额度账本…',
+      'quota.stale': '额度数据已过期，点「刷新额度」',
+      'quota.noModels': '这个窗口还没有调用',
+      'quota.tokensTip': '输入 {input} · 输出 {output} · 缓存读 {cache}',
+      'quota.samples': '采样',
+      'quota.samplesUnit': '条',
+      'quota.footnote': '额度列与 OpenCode 的 allowance 同口径（list_cost × 60 / 月额度）；「占月额度」按官方每月美元上限计算。',
+      'quota.capacityTitle': '单模型额度换算',
+      'quota.capacityHint': '假设只用这一个模型：窗口额度能换多少 token。实际取决于输入 / 输出 / 缓存读的比例',
+      'quota.capacityMonthly': '月额度',
+      'quota.capacityFactor': '额度系数',
+      'quota.capacityWindow': '窗口',
+      'quota.capacityBudget': '窗口额度',
+      'quota.capacityInput': '纯输入',
+      'quota.capacityOutput': '纯输出',
+      'quota.capacityCache': '纯缓存读',
+      'quota.capacityMixed': '按你的结构',
+      'quota.capacityComposition': '你的历史构成',
+      'quota.capacityNoComposition': '没有这个模型的历史调用，先看三种极端值；跑几次后这里会按你的缓存命中率折算',
+      'quota.capacityPeak': 'DeepSeek 峰时（UTC 01–04 / 06–10）表中 token 数减半',
+      'quota.capacityTier': 'prompt 超过该模型的长上下文档位时单价翻倍，表中按低档价',
+      'quota.capacityCalls': '次调用',
+      'quota.failed': '个失败',
+      'quota.capacityRemaining': '剩',
+
       'supplier.title': '模型接入',
       'supplier.subtitle': '接入第三方中转站与官方平台：余额、可用模型，并同步到 DSH 模型配置',
       'supplier.add': '添加供应商',
@@ -716,7 +773,61 @@ window.__ModuleLoader__.load({
       'balance.title': 'Provider balance',
       'view.stats': 'Stats',
       'view.suppliers': 'Model Access',
+      'view.quota': 'Plan Usage',
       'view.budget': 'Budget',
+      // —— Subscription quota page (OpenCode Go) ——
+      'quota.title': 'Plan usage',
+      'quota.subtitle': 'Turn tokens into allowance for 5h / weekly / monthly windows: who ate it, and what is left',
+      'quota.plan': 'Plan',
+      'quota.refresh': 'Refresh usage',
+      'quota.refreshing': 'Checking…',
+      'quota.calibrate': 'Calibrate',
+      'quota.calibrating': 'Calibrating…',
+      'quota.calibrateHint': 'Sends one 2-token request per model to read the official allowance factor (~$0.0001 each)',
+      'quota.calibrated': 'Calibrated',
+      'quota.calibratedUnit': 'models',
+      'quota.empty': 'No subscription site to attribute yet',
+      'quota.emptyHint': 'Add OpenCode Go in Model Access first',
+      'quota.window.rolling': '5 hours',
+      'quota.window.weekly': 'This week',
+      'quota.window.monthly': 'This month',
+      'quota.perPct': 'per 1%',
+      'quota.remaining': 'left',
+      'quota.model': 'Model',
+      'quota.tokens': 'Tokens',
+      'quota.allowance': 'Allowance',
+      'quota.share': 'Share',
+      'quota.points': 'pts',
+      'quota.monthlyCap': 'Monthly cap',
+      'quota.granularity': '10-minute buckets · local session logs · official list prices',
+      'quota.partial': 'Ledger does not cover the window start yet; numbers may be low while history is scanned',
+      'quota.uncalibrated': 'No factors for this plan yet — run Calibrate before trusting the split',
+      'quota.planHint': 'Per-model caps for non-Go plans are not published; calibrate to derive them',
+      'quota.backfilling': 'Backfilling the quota ledger from history…',
+      'quota.stale': 'Usage data is stale — refresh',
+      'quota.noModels': 'No calls in this window yet',
+      'quota.tokensTip': 'Input {input} · Output {output} · Cache read {cache}',
+      'quota.samples': 'Samples',
+      'quota.samplesUnit': '',
+      'quota.footnote': 'Allowance matches OpenCode\'s allowance (list_cost × 60 / monthly cap); "Monthly cap" uses the official per-model USD limit.',
+      'quota.capacityTitle': 'Single-model capacity',
+      'quota.capacityHint': 'If you only used this model: how many tokens each window buys. Depends on input / output / cache-read mix',
+      'quota.capacityMonthly': 'Monthly cap',
+      'quota.capacityFactor': 'Factor',
+      'quota.capacityWindow': 'Window',
+      'quota.capacityBudget': 'Window budget',
+      'quota.capacityInput': 'All input',
+      'quota.capacityOutput': 'All output',
+      'quota.capacityCache': 'All cache read',
+      'quota.capacityMixed': 'Your mix',
+      'quota.capacityComposition': 'Your composition',
+      'quota.capacityNoComposition': 'No history for this model yet — the three extremes are shown; once you use it, this column follows your cache-hit ratio',
+      'quota.capacityPeak': 'DeepSeek peak hours (UTC 01–04 / 06–10) halve these token counts',
+      'quota.capacityTier': 'Above the long-context tier price doubles; this table uses the low tier',
+      'quota.capacityCalls': 'calls',
+      'quota.failed': 'failed',
+      'quota.capacityRemaining': 'left',
+
       'supplier.title': 'Model Access',
       'supplier.subtitle': 'Add relay stations and official platforms: balances, models, and DSH config sync',
       'supplier.add': 'Add supplier',
@@ -1557,6 +1668,223 @@ body[data-ds-dark-theme] .tu-toasts,
   color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
+
+/* —— 订阅额度页（OpenCode Go）—— */
+.tu-quota-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 32px;
+}
+.tu-quota-headbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.tu-quota-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--dsw-alias-label-primary);
+}
+.tu-quota-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-quota-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tu-quota-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-quota-plan .tu-select { min-width: 170px; }
+.tu-quota-meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-quota-notice,
+.tu-quota-warn {
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tu-quota-notice {
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-quota-warn {
+  background: color-mix(in oklab, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  color: var(--dsw-alias-state-warn-primary);
+}
+.tu-quota-grid {
+  display: grid;
+  /* 固定两列：三列时表头和「51% · 20.6 点」会被挤到换行。
+     窄屏退成一列。 */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 760px) {
+  .tu-quota-grid { grid-template-columns: 1fr; }
+}
+.tu-qcard {
+  display: flex;
+  /* 三个窗口排成两列时，最后一张（本月）横跨整行，避免右下留空。 */
+  grid-column: auto;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 15px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.tu-qcard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tu-qcard-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--dsw-alias-label-primary);
+}
+.tu-qcard-reset {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.tu-qcard-main {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tu-qcard-pct {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+.tu-qcard-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.tu-qcard-rate { color: var(--dsw-alias-label-primary); }
+.tu-qbar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+}
+.tu-qbar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 240ms ease;
+}
+.tu-qbar-fill[data-level='ok'] { background: var(--dsw-alias-state-success-primary); }
+.tu-qbar-fill[data-level='warn'] { background: var(--dsw-alias-state-warn-primary); }
+.tu-qbar-fill[data-level='danger'] { background: var(--dsw-alias-state-error-primary); }
+.tu-qcard:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.tu-qtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.tu-qtable th {
+  padding: 4px 6px;
+  text-align: right;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-qtable th:first-child,
+.tu-qtable td:first-child { text-align: left; }
+.tu-qtable td {
+  padding: 5px 6px;
+  text-align: right;
+  color: var(--dsw-alias-label-primary);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.tu-qtable tr:last-child td { border-bottom: 0; }
+.tu-qtable-model {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tu-qtable-dim { color: var(--dsw-alias-label-secondary); }
+.tu-qempty {
+  padding: 10px 0;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-qnote {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 单模型额度换算 */
+.tu-qcap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 15px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.tu-qcap-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tu-qcap-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--dsw-alias-label-primary);
+}
+.tu-qcap-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-qcap-select { min-width: 200px; }
+.tu-qcap-meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.tu-qcap-note {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+.tu-qcap-mixed { font-weight: 650; }
+
+
 .tu-serviceinfo {
   display: flex;
   align-items: center;
@@ -6314,6 +6642,235 @@ function formatMoneyText(value) {
 
     //#endregion
 
+    /**
+     * 订阅额度页的展示层。
+     *
+     * 纯组件：数据、忙碌标记与动作都由父组件注入。这样页面状态挂在面板
+     * 组件上（与模型接入页一致），不必再引入第二套数据订阅。
+     *
+     * 百分比永远以服务器为准；本页只做「按本地额度消耗占比拆分」和
+     * 「反推 1% 的当量」，不自己重算百分比。
+     */
+    function QuotaPage({
+      t, locale, data, error, busy, notice, onPlan, onRefresh, onCalibrate,
+      selectedModel, onPickModel,
+    }) {
+      const site = data?.site
+      const factors = data?.factors ?? {}
+      const needsCalibration = data !== undefined && data.plan !== 'go' && Object.keys(factors).length === 0
+
+      const resetLabel = (resetsAt) => {
+        const stamp = Number(resetsAt)
+        if (!Number.isFinite(stamp) || stamp <= 0) return ''
+        const remain = stamp - Date.now()
+        if (remain <= 0) return t('quota.stale')
+        const days = Math.floor(remain / 86_400_000)
+        const hours = Math.floor((remain % 86_400_000) / 3_600_000)
+        const minutes = Math.floor((remain % 3_600_000) / 60_000)
+        let relative
+        if (days > 0) relative = `${days}${t('unit.day')} ${hours}${t('unit.hour')}`
+        else if (hours > 0) relative = `${hours}${t('unit.hour')} ${minutes}${t('unit.minute')}`
+        else relative = `${minutes}${t('unit.minute')}`
+        return `${relative} ${t('quota.resetsIn')}`
+      }
+
+      const card = (window) => {
+        const percent = Number(window.percent)
+        const hasPercent = Number.isFinite(percent)
+        const level = !hasPercent ? 'ok' : percent >= 95 ? 'danger' : percent >= 75 ? 'warn' : 'ok'
+        const rate = []
+        if (window.perPct?.usd !== undefined) rate.push(`$${formatMoneyText(window.perPct.usd)}`)
+        if (window.perPct?.tokens !== undefined) rate.push(`${formatCompact(window.perPct.tokens)} token`)
+        return h('section', { className: 'tu-qcard', key: window.key },
+          h('div', { className: 'tu-qcard-head' },
+            h('span', { className: 'tu-qcard-title' }, t(`quota.window.${window.key}`)),
+            h('span', { className: 'tu-qcard-reset' }, resetLabel(window.resetsAt)),
+          ),
+          h('div', { className: 'tu-qcard-main' },
+            h('span', { className: 'tu-qcard-pct' }, hasPercent ? `${Math.round(percent)}%` : '—'),
+            h('div', { className: 'tu-qcard-side' },
+              hasPercent
+                ? h('span', null, `${t('quota.remaining')} ${Math.max(0, Math.round(100 - percent))}%`)
+                : null,
+              rate.length > 0
+                ? h('span', { className: 'tu-qcard-rate' }, `${t('quota.perPct')} ≈ ${rate.join(' ≈ ')}`)
+                : null,
+            ),
+          ),
+          h('div', { className: 'tu-qbar' },
+            h('div', {
+              className: 'tu-qbar-fill',
+              'data-level': level,
+              style: { width: `${hasPercent ? Math.max(0, Math.min(100, percent)) : 0}%` },
+            }),
+          ),
+          window.models.length === 0
+            ? h('div', { className: 'tu-qempty' }, t('quota.noModels'))
+            : h('table', { className: 'tu-qtable' },
+              h('thead', null, h('tr', null,
+                h('th', null, t('quota.model')),
+                h('th', null, t('quota.tokens')),
+                h('th', null, t('quota.allowance')),
+                h('th', null, t('quota.share')),
+                h('th', null, t('quota.monthlyCap')),
+              )),
+              h('tbody', null, window.models.map((row) => h('tr', { key: row.model },
+                h('td', { className: 'tu-qtable-model', title: row.model }, row.model),
+                h('td', {
+                  title: locale === 'en'
+                    ? `Input ${formatCompact(row.inputTokens ?? 0)} · Output ${formatCompact(row.outputTokens ?? 0)} · Cache read ${formatCompact(row.cacheReadTokens ?? 0)}`
+                    : `输入 ${formatCompact(row.inputTokens ?? 0)} · 输出 ${formatCompact(row.outputTokens ?? 0)} · 缓存读 ${formatCompact(row.cacheReadTokens ?? 0)}`,
+                }, formatCompact(row.tokens)),
+                h('td', null, `$${formatMoneyText(row.allowance)}`),
+                h('td', null,
+                  `${Math.round((row.share ?? 0) * 100)}%`,
+                  Number.isFinite(row.points)
+                    ? h('span', { className: 'tu-qtable-dim' }, ` · ${row.points.toFixed(1)}${t('quota.points')}`)
+                    : null,
+                ),
+                h('td', null, Number.isFinite(row.monthlyUsedPct) ? `${row.monthlyUsedPct.toFixed(1)}%` : '—'),
+              ))),
+            ),
+          window.partial === true
+            ? h('div', { className: 'tu-qnote' }, t('quota.partial'))
+            : null,
+        )
+      }
+
+      /**
+       * 单模型额度换算：把窗口额度按三种极端构成和「你的实际构成」折算成 token。
+       * 选中模型默认取本周消耗最多的那个——通常是用户最关心的。
+       */
+      const capacitySection = () => {
+        const catalog = data?.catalog ?? []
+        if (catalog.length === 0) return null
+        const weeklyTop = (data.windows ?? []).find((item) => item.key === 'weekly')?.models?.[0]?.model
+        const selected = catalog.some((item) => item.model === selectedModel)
+          ? selectedModel
+          : (weeklyTop ?? catalog[0].model)
+        const capacity = data.modelCapacity?.[selected]
+        if (capacity === undefined) return null
+        const comp = capacity.composition
+        const compositionText = comp === null || comp === undefined
+          ? t('quota.capacityNoComposition')
+          : `${t('quota.capacityComposition')}：${t('quota.capacityInput')} ${Math.round((comp.inputTokens / comp.tokens) * 100)}% · ${t('quota.capacityOutput')} ${Math.round((comp.outputTokens / comp.tokens) * 100)}% · ${t('quota.capacityCache')} ${Math.round((comp.cacheReadTokens / comp.tokens) * 100)}%`
+            + (comp.cacheWriteTokens > 0 ? ` · ${Math.round((comp.cacheWriteTokens / comp.tokens) * 100)}% write` : '')
+            + `（${comp.calls} ${t('quota.capacityCalls')}）`
+        const cell = (value) => (Number.isFinite(value) ? formatCompact(value) : '—')
+        return h('section', { className: 'tu-qcap' },
+          h('div', { className: 'tu-qcap-head' },
+            h('div', null,
+              h('h3', { className: 'tu-qcap-title' }, t('quota.capacityTitle')),
+              h('div', { className: 'tu-qcap-sub' }, t('quota.capacityHint')),
+            ),
+            h('select', {
+              className: 'tu-input tu-select tu-qcap-select',
+              value: selected,
+              onChange: (event) => onPickModel?.(event.target.value),
+              'aria-label': t('quota.capacityTitle'),
+            }, catalog.map((item) => h('option', {
+              key: item.model, value: item.model,
+            }, `${item.model} · $${formatMoneyText(item.cap)}`))),
+          ),
+          h('div', { className: 'tu-qcap-meta' },
+            `${t('quota.capacityMonthly')} $${formatMoneyText(capacity.cap)} · ${t('quota.capacityFactor')} ${capacity.factor.toFixed(2)}×`,
+            capacity.peak ? ` · ${t('quota.capacityPeak')}` : null,
+          ),
+          h('table', { className: 'tu-qtable' },
+            h('thead', null, h('tr', null,
+              h('th', null, t('quota.capacityWindow')),
+              h('th', null, t('quota.capacityBudget')),
+              h('th', null, t('quota.capacityInput')),
+              h('th', null, t('quota.capacityOutput')),
+              h('th', null, t('quota.capacityCache')),
+              h('th', null, t('quota.capacityMixed')),
+            )),
+            h('tbody', null, capacity.windows.map((window) => h('tr', { key: window.key },
+              h('td', null, t(`quota.window.${window.key}`)),
+              h('td', null, `$${formatMoneyText(window.budget)}`),
+              h('td', null, cell(window.tokens.input)),
+              h('td', null, cell(window.tokens.output)),
+              h('td', null, cell(window.tokens.cacheRead)),
+              h('td', {
+                className: 'tu-qcap-mixed',
+                title: window.remaining?.tokens === undefined
+                  ? undefined
+                  : `${t('quota.capacityRemaining')} ${window.remaining.percent}% ≈ ${formatCompact(window.remaining.tokens)} token`,
+              }, cell(window.tokens.mixed)),
+            ))),
+          ),
+          h('div', { className: 'tu-qcap-note' }, compositionText),
+          capacity.tiered ? h('div', { className: 'tu-qcap-note' }, t('quota.capacityTier')) : null,
+        )
+      }
+
+      const header = h('div', { className: 'tu-quota-headbar' },
+        h('div', null,
+          h('h2', { className: 'tu-quota-title' }, t('quota.title')),
+          h('div', { className: 'tu-quota-sub' }, t('quota.subtitle')),
+        ),
+      )
+
+      if (data === undefined) {
+        return h('div', { className: 'tu-quota-page' }, header,
+          error === undefined
+            ? h('div', { className: 'tu-empty' }, h('span', { className: 'tu-spinner' }), t('loading'))
+            : h('div', { className: 'tu-error' },
+              `${t('error')}：${error}`,
+              h('button', { type: 'button', className: 'tu-button', onClick: onRefresh }, t('retry'))),
+        )
+      }
+      if (site === null || site === undefined) {
+        return h('div', { className: 'tu-quota-page' }, header,
+          h('div', { className: 'tu-empty' },
+            h('div', null, t('quota.empty')),
+            h('div', { className: 'tu-empty-hint' }, t('quota.emptyHint')),
+          ))
+      }
+
+      const notes = []
+      if (notice !== '' && notice !== undefined) notes.push(h('div', { className: 'tu-quota-notice', key: 'notice' }, notice))
+      if (needsCalibration) {
+        notes.push(h('div', { className: 'tu-quota-warn', key: 'calibrate' },
+          `${t('quota.uncalibrated')}（${t('quota.planHint')}）`))
+      }
+      if (data.backfilling) notes.push(h('div', { className: 'tu-quota-notice', key: 'scan' }, t('quota.backfilling')))
+
+      return h('div', { className: 'tu-quota-page' },
+        header,
+        h('div', { className: 'tu-quota-toolbar' },
+          h('label', { className: 'tu-quota-plan' },
+            h('span', null, t('quota.plan')),
+            h('select', {
+              className: 'tu-input tu-select',
+              value: data.plan,
+              disabled: busy !== '' && busy !== undefined,
+              onChange: onPlan,
+            }, (data.plans ?? []).map((plan) => h('option', {
+              key: plan.id, value: plan.id,
+            }, `${plan.label} · $${plan.priceUsd}/mo`))),
+          ),
+          h('button', {
+            type: 'button', className: 'tu-button', disabled: busy !== '' && busy !== undefined, onClick: onRefresh,
+          }, busy === 'refresh' ? t('quota.refreshing') : t('quota.refresh')),
+          h('button', {
+            type: 'button',
+            className: 'tu-button tu-button-primary',
+            disabled: busy !== '' && busy !== undefined,
+            onClick: onCalibrate,
+            title: t('quota.calibrateHint'),
+          }, busy === 'probe' ? t('quota.calibrating') : t('quota.calibrate')),
+        ),
+        h('div', { className: 'tu-quota-meta' },
+          `${site.label} · ${t('quota.granularity')}`,
+        ),
+        notes,
+        h('div', { className: 'tu-quota-grid' }, (data.windows ?? []).map(card)),
+        capacitySection(),
+        h('div', { className: 'tu-qnote' }, t('quota.footnote')),
+      )
+    }
+
     function TokenUsagePanel(props) {
       // 刷新间隔：从 localStorage 恢复用户上次的选择，读不到就用默认值。
       const [refreshMs, setRefreshMs] = useState(() => {
@@ -6395,6 +6952,7 @@ function formatMoneyText(value) {
         const applyView = (view) => {
           if (view === 'suppliers') setTopView('suppliers')
           else if (view === 'stats') setTopView('stats')
+          else if (view === 'quota') setTopView('quota')
         }
         const takePendingView = () => {
           const pending = MODULE_VIEW_REQUEST.current
@@ -6754,6 +7312,115 @@ function formatMoneyText(value) {
       // 语言时本页立刻跟随，不需要重开页面。
       const t = props?.t ?? ((key) => zh[key] ?? key)
       const locale = useLocaleId(props?.locale)
+
+      /**
+       * 订阅额度页的状态与动作。
+       *
+       * 与模型接入页同一套做法：数据挂在面板组件上，进入页签才拉取并轮询；
+       * 展示层 QuotaPage 是纯组件，方便单独断言渲染结果。
+       */
+      const [quotaState, setQuotaState] = useState({
+        data: undefined, error: undefined, busy: '', notice: '',
+      })
+      const [quotaModel, setQuotaModel] = useState('')
+      const quotaSeq = useRef(0)
+      const loadQuota = useCallback(async (refresh) => {
+        const id = ++quotaSeq.current
+        try {
+          const suffix = refresh === true ? '?refresh=1' : ''
+          const response = await fetch(`${QUOTA_ROUTE}${suffix}`, {
+            headers: { accept: 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+          })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const data = await response.json()
+          if (id !== quotaSeq.current) return
+          setQuotaState((previous) => ({
+            ...previous, data, error: undefined,
+          }))
+        } catch (error) {
+          if (id !== quotaSeq.current) return
+          setQuotaState((previous) => ({
+            ...previous,
+            error: error instanceof Error ? error.message : String(error),
+          }))
+        }
+      }, [])
+
+      useEffect(() => {
+        if (topView !== 'quota') return undefined
+        void loadQuota(true)
+        const timer = setInterval(() => {
+          // 页面隐藏时不轮询：百分比变化很慢，后台空转没有意义。
+          if (typeof document !== 'undefined' && document.hidden === true) return
+          void loadQuota(false)
+        }, 30_000)
+        // 测试/Node 环境里不让定时器拖住进程；浏览器没有 unref。
+        timer?.unref?.()
+        return () => clearInterval(timer)
+      }, [topView, loadQuota])
+
+      const postQuota = useCallback(async (route, body) => {
+        const response = await fetch(route, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(body ?? {}),
+        })
+        const json = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(json?.error ?? `HTTP ${response.status}`)
+        return json
+      }, [])
+
+      const changeQuotaPlan = useCallback(async (event) => {
+        const plan = event.target.value
+        setQuotaState((previous) => ({ ...previous, busy: 'plan', notice: '' }))
+        try {
+          const data = await postQuota(QUOTA_PLAN_ROUTE, { plan })
+          setQuotaState((previous) => ({
+            ...previous, data, busy: '', error: undefined,
+          }))
+        } catch (error) {
+          setQuotaState((previous) => ({
+            ...previous, busy: '', notice: error instanceof Error ? error.message : String(error),
+          }))
+        }
+      }, [postQuota])
+
+      const refreshQuota = useCallback(async () => {
+        setQuotaState((previous) => ({ ...previous, busy: 'refresh', notice: '' }))
+        await loadQuota(true)
+        setQuotaState((previous) => ({ ...previous, busy: '' }))
+      }, [loadQuota])
+
+      const calibrateQuota = useCallback(async () => {
+        const site = quotaState.data?.site
+        if (site === undefined || site === null) return
+        setQuotaState((previous) => ({ ...previous, busy: 'probe', notice: '' }))
+        try {
+          const data = await postQuota(QUOTA_PROBE_ROUTE, { id: site.id })
+          const detail = data.details ?? []
+          const ok = detail.filter((item) => item.ok === true).length
+          const failed = detail.filter((item) => item.ok !== true).length
+          // 探针整体失败（没 key / 没 baseURL / 全部模型失败）时必须显示真实原因，
+          // 而不是一句「已校准 0 个模型」。
+          const notice = data.ok !== true
+            ? (typeof data.error === 'string' && data.error !== '' ? data.error : t('error'))
+            : `${t('quota.calibrated')} ${ok} ${t('quota.calibratedUnit')}`
+              + (failed > 0 ? ` · ${failed} ${t('quota.failed')}` : '')
+          setQuotaState((previous) => ({
+            ...previous,
+            data,
+            busy: '',
+            notice,
+          }))
+        } catch (error) {
+          setQuotaState((previous) => ({
+            ...previous, busy: '', notice: error instanceof Error ? error.message : String(error),
+          }))
+        }
+      }, [postQuota, quotaState.data, t])
 
       /**
        * 指标区数据。
@@ -7802,6 +8469,11 @@ function formatMoneyText(value) {
             void loadBalance()
           },
         }, t('view.suppliers')),
+        h('button', {
+          type: 'button', className: 'tu-viewtab',
+          'data-active': topView === 'quota' ? 'true' : 'false',
+          onClick: () => setTopView('quota'),
+        }, t('view.quota')),
         h('button', {
           type: 'button', className: 'tu-viewtab',
           'data-active': topView === 'budget' ? 'true' : 'false',
@@ -10095,15 +10767,36 @@ function formatMoneyText(value) {
       )
 
       /**
-       * 非统计页：模型接入与预算都是完整页面，不叠在统计内容下面。
+       * 非统计页：模型接入、订阅额度与预算都是完整页面，不叠在统计内容下面。
        *
-       * 注意这里必须把**两个页面都纳入判断**。早先只在 topView === 'suppliers'
-       * 时进入这个分支，导致点「预算」仍落到统计页——页签高亮了但内容没换。
+       * 注意这里必须把**所有完整页面都纳入判断**。早先只在
+       * topView === 'suppliers' 时进入这个分支，导致点「预算」仍落到统计页
+       * —— 页签高亮了但内容没换。
        */
-      if (topView === 'suppliers' || topView === 'budget') {
+      // 非统计页只保留页签，不带「未定价 / 管理别名 / 刷新价目表」这些
+      // 属于统计视图的辅助操作。
+      const viewBar = h('div', { className: 'tu-toolbar' }, viewTabs)
+
+      if (topView === 'suppliers' || topView === 'budget' || topView === 'quota') {
         return h('div', { className: 'tu-root' },
-          head, toolbar,
-          topView === 'budget' ? budgetPage : supplierPage,
+          head, viewBar,
+          topView === 'budget'
+            ? budgetPage
+            : topView === 'quota'
+              ? h(QuotaPage, {
+                t,
+                locale,
+                data: quotaState.data,
+                error: quotaState.error,
+                busy: quotaState.busy,
+                notice: quotaState.notice,
+                onPlan: changeQuotaPlan,
+                onRefresh: refreshQuota,
+                onCalibrate: calibrateQuota,
+                selectedModel: quotaModel,
+                onPickModel: setQuotaModel,
+              })
+              : supplierPage,
           supplierModal, modelsModal, versionModal)
       }
 

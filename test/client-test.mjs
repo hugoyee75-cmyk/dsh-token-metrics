@@ -124,6 +124,82 @@ globalThis.document = documentStub
  * 才能覆盖「CNY 余额站点」「配额站点」这类真实返回形态。
  */
 let balanceResponse = { sites: [], discovered: [] }
+/**
+ * 订阅额度页的返回形态。
+ *
+ * 数值取自真实 OpenCode Go 窗口（5h 11%，DeepSeek 与 GLM 各半），
+ * 这样断言能同时覆盖「金额 / token / 份额 / 折算点」四类文案。
+ */
+const quotaResponse = {
+  ok: true,
+  site: { id: 'opencode-go', label: 'OpenCode Go', provider: 'opencode-go', lastCheckedAt: Date.now() },
+  plan: 'go',
+  plans: [
+    { id: 'go', label: 'Go', priceUsd: 10 },
+    { id: 'plus', label: 'Go Plus', priceUsd: 40 },
+  ],
+  factors: {},
+  caps: {},
+  capacity: {},
+  samples: 3,
+  backfilledAt: Date.now(),
+  backfilling: false,
+  catalog: [
+    { model: 'deepseek-v4.1-flash', cap: 100, factor: 0.6 },
+    { model: 'grok-4.7', cap: 15, factor: 4 },
+  ],
+  modelCapacity: {
+    'deepseek-v4.1-flash': {
+      model: 'deepseek-v4.1-flash', cap: 100, factor: 0.6, peak: true, tiered: false,
+      composition: {
+        calls: 488, tokens: 79_500_000, inputTokens: 1_350_000, outputTokens: 450_000,
+        cacheReadTokens: 77_600_000, cacheWriteTokens: 0,
+      },
+      windows: [
+        { key: 'rolling', share: 0.2, budget: 20, tokens: { input: 133_333_333, output: 33_333_333, cacheRead: 6_666_666_667, mixed: 1_500_000_000 }, remaining: { percent: 99, tokens: 1_485_000_000 } },
+        { key: 'weekly', share: 0.5, budget: 50, tokens: { input: 333_333_333, output: 83_333_333, cacheRead: 16_666_666_667, mixed: 3_750_000_000 }, remaining: { percent: 59, tokens: 2_212_500_000 } },
+        { key: 'monthly', share: 1, budget: 100, tokens: { input: 666_666_667, output: 166_666_667, cacheRead: 33_333_333_333, mixed: 7_500_000_000 }, remaining: { percent: 54, tokens: 4_050_000_000 } },
+      ],
+    },
+    'grok-4.7': {
+      model: 'grok-4.7', cap: 15, factor: 4, peak: false, tiered: true,
+      composition: {
+        calls: 13, tokens: 969_746, inputTokens: 128_214, outputTokens: 47_676,
+        cacheReadTokens: 793_856, cacheWriteTokens: 0,
+      },
+      windows: [
+        { key: 'rolling', share: 0.2, budget: 3, tokens: { input: 1_500_000, output: 500_000, cacheRead: 6_000_000, mixed: 3_100_000 }, remaining: { percent: 99, tokens: 3_069_000 } },
+        { key: 'weekly', share: 0.5, budget: 7.5, tokens: { input: 3_750_000, output: 1_250_000, cacheRead: 15_000_000, mixed: 7_750_000 }, remaining: { percent: 59, tokens: 4_572_500 } },
+        { key: 'monthly', share: 1, budget: 15, tokens: { input: 7_500_000, output: 2_500_000, cacheRead: 30_000_000, mixed: 15_500_000 }, remaining: { percent: 54, tokens: 8_370_000 } },
+      ],
+    },
+  },
+  windows: [
+    {
+      key: 'rolling', label: '5-hour', share: 0.2, percent: 11,
+      resetsAt: Date.now() + 23 * 60 * 1000, startAt: Date.now() - 4 * 3600 * 1000,
+      totals: { calls: 745, tokens: 99_900_000, listCost: 1.9, allowance: 1.42 },
+      models: [
+        {
+          model: 'deepseek-v4.1-flash', calls: 488, tokens: 79_500_000,
+          inputTokens: 1_350_000, outputTokens: 450_000, cacheReadTokens: 77_600_000, cacheWriteTokens: 0,
+          listCost: 1.18, allowance: 0.71, share: 0.5, points: 5.5,
+          factor: 0.6, monthlyCap: 100, monthlyUsedPct: 1.18,
+        },
+        {
+          model: 'glm-5.3-flash', calls: 258, tokens: 20_400_000,
+          inputTokens: 490_000, outputTokens: 92_000, cacheReadTokens: 19_800_000, cacheWriteTokens: 0,
+          listCost: 0.71, allowance: 0.71, share: 0.5, points: 5.5,
+          factor: 1, monthlyCap: 60, monthlyUsedPct: 1.18,
+        },
+      ],
+      perPct: { tokens: 9_081_818, usd: 0.129 },
+      remaining: { percent: 89, tokens: 808_000_000, usd: 11.5 },
+      monthlyPoints: 2.2,
+      partial: false,
+    },
+  ],
+}
 const summaryResponse = () => ({
   ok: true,
   status: 200,
@@ -270,6 +346,9 @@ globalThis.fetch = async (url) => {
     && !target.includes('/probe')) {
     return { ok: true, status: 200, async json() { return balanceResponse } }
   }
+  if (target.includes('/api/dsh-token-metrics/quota/summary')) {
+    return { ok: true, status: 200, async json() { return quotaResponse } }
+  }
   return summaryResponse()
 }
 
@@ -283,6 +362,8 @@ runInNewContext(clientSource, {
   console,
   setTimeout,
   clearTimeout,
+  setInterval,
+  clearInterval,
   Date,
   Math,
   JSON,
@@ -2100,6 +2181,43 @@ const discoveredEntry = () => ({
   formTree = panel.component({ t: panelInject.t, locale: panelInject.locale })
   check('换服务后保存提示密钥必填',
     textsOf(formTree).includes('请填写 API 密钥'), true)
+}
+
+// —— 订阅额度页：窗口百分比、模型拆分与档位 ——
+{
+  resetHooks()
+  let tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  let clicked = false
+  walkTree(tree, (node) => {
+    if (node?.type !== 'button' || !Array.isArray(node.children)) return
+    if (node.children.some((child) => child === '订阅额度')) {
+      node.props?.onClick?.()
+      clicked = true
+    }
+  })
+  // 点完页签先渲染一帧：effect 在这一帧里才发请求；等它返回后再渲染，
+  // 否则读到的是首帧的 loading。
+  resetHooks()
+  panel.component({ t: panelInject.t, locale: panelInject.locale })
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  resetHooks()
+  tree = panel.component({ t: panelInject.t, locale: panelInject.locale })
+  const flat = textsOf(tree)
+  check('能切到订阅额度页', clicked)
+  check('显示 5 小时窗口', flat.includes('5 小时'), true)
+  check('显示窗口百分比', flat.includes('11%'), true)
+  check('显示模型名', flat.includes('deepseek-v4.1-flash'), true)
+  check('显示每 1% 当量', flat.includes('每 1%'), true)
+  check('显示额度金额', flat.includes('$0.71'), true)
+  check('显示档位选择', flat.includes('Go · $10/mo'), true)
+  check('显示校准按钮', flat.includes('校准额度'), true)
+  check('显示粒度说明', flat.includes('10 分钟粒度'), true)
+  check('显示单模型换算', flat.includes('单模型额度换算'), true)
+  check('显示纯缓存列', flat.includes('纯缓存读'), true)
+  check('显示按实际结构列', flat.includes('按你的结构'), true)
+  check('显示历史构成', flat.includes('你的历史构成'), true)
+  // 切回统计页，避免影响后续断言
+  renderWithTab('统计')
 }
 
 if (failures.length > 0) {

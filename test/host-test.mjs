@@ -382,6 +382,26 @@ emit({ id: 's', header: {} }, sampleEvent)   // 同一事件重复投递
 await new Promise((resolve) => setTimeout(resolve, 2600))
 const store3 = JSON.parse(readFileSync(join(thirdHome, 'token-metrics', 'usage.json'), 'utf8'))
 check('同进程重复投递只记一次', store3.total.calls, callsBefore + 1)
+
+// —— 回归：会话被复制/fork 后，同一批消息不得重复计数 ——
+// 真实数据里两个会话日志包含完全相同的 assistant/message（同 message.id、
+// 同毫秒、同 token）。旧键 session:turn:step 会把它们当两次调用，历史用量翻倍。
+const copiedEvent = {
+  type: 'assistant/message',
+  seq: 2,
+  time: Date.now(),
+  data: {
+    turn: 11,
+    step: 1,
+    message: { id: 'msg-copied-1', source: { provider: 'p', model: 'm' } },
+    usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 },
+  },
+}
+emit({ id: 'session-copy-a', header: {} }, copiedEvent)
+emit({ id: 'session-copy-b', header: {} }, copiedEvent)
+await new Promise((resolve) => setTimeout(resolve, 2600))
+const storeCopy = JSON.parse(readFileSync(join(thirdHome, 'token-metrics', 'usage.json'), 'utf8'))
+check('复制会话里的同一消息只记一次', storeCopy.total.calls, callsBefore + 2)
 rmSync(thirdHome, { recursive: true, force: true })
 
 // —— 回归：同一会话被回扫两次（revision 变化但事件未变）不得重复累加 ——

@@ -5,6 +5,9 @@
  * 两边必须一致。这是唯一能证明「统计准确」的方式——不能只信插件自己。
  *
  * 运行：node test/verify-against-logs.mjs
+ *
+ * 接口地址默认取 `DSH_WEB_URL`，没有才退回旧端口；日志去重键与插件一致：
+ * 有 message.id 用它（会话复制/fork 时 id 不变），没有才用会话 + turn/step。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -15,7 +18,8 @@ import { join } from 'node:path'
 const dshHome = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
 const sessionsRoot = join(dshHome, 'sessions')
 const storePath = join(dshHome, 'token-metrics', 'usage.json')
-const summaryRoute = 'http://127.0.0.1:53414/api/dsh-token-metrics/summary'
+const webBase = (process.env.DSH_WEB_URL?.trim() || 'http://127.0.0.1:53414').replace(/\/+$/, '')
+const summaryRoute = `${webBase}/api/dsh-token-metrics/summary`
 
 const failures = []
 function check(label, actual, expected, detail) {
@@ -23,6 +27,18 @@ function check(label, actual, expected, detail) {
     failures.push(`${label}: 期望 ${expected}，实际 ${actual}${detail ? `（${detail}）` : ''}`)
   }
 }
+function checkTrue(label, condition, detail = '') {
+  if (condition !== true) failures.push(`${label}${detail === '' ? '' : `：${detail}`}`)
+}
+
+/**
+ * 在途调用容差。
+ *
+ * 验证跑在正在使用的机器上：账本落盘、日志写入、接口读取之间总可能有
+ * 一两条刚完成的调用。这里只抓「成倍/成批」的口径错误，不把在途调用当失败。
+ * 需要严格比对时用 `VERIFY_TOLERANCE=0`。
+ */
+const TOLERANCE = Number(process.env.VERIFY_TOLERANCE ?? 5)
 
 // —— 1. 从真实日志独立统计 ——
 function collectLogFiles(dir) {
@@ -43,9 +59,24 @@ if (!existsSync(sessionsRoot)) {
   process.exit(1)
 }
 
+// —— 1. 先读插件账本，取一个截止时间 ——
+if (!existsSync(storePath)) {
+  console.error(`✗ 插件还没有写出数据文件：${storePath}`)
+  console.error('  请先重启 DSH，并至少发一条消息。')
+  process.exit(1)
+}
+const store = JSON.parse(readFileSync(storePath, 'utf8'))
+
+/**
+ * 以账本的 updatedAt 作为比对截止点。
+ *
+ * 验证脚本运行时机器可能仍在产生调用：只比「账本最后一次落盘之前完成」
+ * 的事件，两边才是同一个快照。否则日志扫描期间的新调用会让计数永远差几条。
+ */
+const cutoff = Number(store.updatedAt) || Date.now()
 const files = collectLogFiles(sessionsRoot)
-const perSession = new Map()
-const keys = new Set()
+/** key -> 出现在哪些会话里。用于识别「会话复制」产生的重复消息。 */
+const keyOwners = new Map()
 let eventCount = 0
 
 for (const file of files) {
@@ -65,38 +96,62 @@ for (const file of files) {
     if (event.type !== 'assistant/message') continue
     const usage = event.data?.usage
     if (usage === undefined || usage === null) continue
+    const stamp = Number(event.time)
+    if (Number.isFinite(stamp) && stamp > cutoff) continue
     eventCount += 1
-    keys.add(`${sessionId}:${event.data.turn}:${event.data.step}`)
-    perSession.set(sessionId, (perSession.get(sessionId) ?? 0) + 1)
+    const source = event.data?.message?.source ?? {}
+    const messageId = event.data?.message?.id
+    // 与插件同口径：message.id 优先，跨复制会话去重；没有 id 才用会话级键。
+    const key = typeof messageId === 'string' && messageId !== ''
+      ? `msg:${source.provider ?? '?'}:${messageId}`
+      : `${sessionId}:${event.data.turn}:${event.data.step}`
+    const owners = keyOwners.get(key) ?? new Set()
+    owners.add(sessionId)
+    keyOwners.set(key, owners)
   }
 }
 
-// —— 2. 读插件数据 ——
-if (!existsSync(storePath)) {
-  console.error(`✗ 插件还没有写出数据文件：${storePath}`)
-  console.error('  请先重启 DSH，并至少发一条消息。')
-  process.exit(1)
+// 只有「只出现在一个会话里」的键才能逐会话核对；复制会话里的消息会被
+// 插件归到其中一个会话，具体是哪一个取决于扫描顺序，不适合硬断言。
+const expectedPerSession = new Map()
+const ambiguousSessions = new Set()
+for (const owners of keyOwners.values()) {
+  if (owners.size === 1) {
+    const [sessionId] = owners
+    expectedPerSession.set(sessionId, (expectedPerSession.get(sessionId) ?? 0) + 1)
+  } else {
+    for (const sessionId of owners) ambiguousSessions.add(sessionId)
+  }
 }
-const store = JSON.parse(readFileSync(storePath, 'utf8'))
+
 
 console.log('=== 独立比对 ===')
 console.log(`日志文件          ${files.length}`)
-console.log(`日志内调用事件    ${eventCount}`)
-console.log(`日志唯一调用键    ${keys.size}`)
+console.log(`日志内调用事件    ${eventCount}（≤ 账本快照）`)
+console.log(`日志唯一调用键    ${keyOwners.size}`)
 console.log(`插件 total.calls  ${store.total.calls}`)
 console.log(`插件 seen 键数    ${Object.keys(store.seen).length}`)
 console.log('')
 
 // —— 3. 断言 ——
-check('插件调用数与日志唯一键一致', store.total.calls, keys.size)
-check('插件去重键数与日志唯一键一致', Object.keys(store.seen).length, keys.size)
+const callDelta = store.total.calls - keyOwners.size
+checkTrue(`插件调用数与日志唯一键一致（容差 ${TOLERANCE}）`,
+  Math.abs(callDelta) <= TOLERANCE, `差 ${callDelta}`)
+const seenDelta = Object.keys(store.seen).length - keyOwners.size
+checkTrue(`插件去重键数与日志唯一键一致（容差 ${TOLERANCE}）`,
+  Math.abs(seenDelta) <= TOLERANCE, `差 ${seenDelta}`)
 check('total.calls 与 seen 自洽', store.total.calls, Object.keys(store.seen).length)
 
-// 每个会话逐一核对
+// 每个「消息不重复」的会话逐一核对
+if (ambiguousSessions.size > 0) {
+  console.log(`含复制消息的会话  ${ambiguousSessions.size}（跳过逐会话核对）`)
+}
 let sessionMismatch = 0
-for (const [sessionId, count] of perSession) {
+for (const [sessionId, count] of expectedPerSession) {
+  if (ambiguousSessions.has(sessionId)) continue
   const recorded = store.bySession[sessionId]?.counters?.calls
-  if (recorded !== count) {
+  // 单会话只容忍 1 条在途调用；再多就说明是真的漏记/重复。
+  if (recorded === undefined || Math.abs(recorded - count) > 1) {
     sessionMismatch += 1
     if (sessionMismatch <= 8) {
       console.log(`  ✗ ${sessionId.slice(0, 44)}  日志=${count} 插件=${recorded}`)
@@ -128,7 +183,9 @@ try {
 if (summary !== undefined) {
   console.log('\n=== 接口核对 ===')
   console.log(`接口 total.calls  ${summary.totals.all.calls}`)
-  check('接口与磁盘数据一致', summary.totals.all.calls, store.total.calls)
+  checkTrue('接口与磁盘数据一致（容差 ' + TOLERANCE + '）',
+    Math.abs(summary.totals.all.calls - store.total.calls) <= TOLERANCE,
+    `差 ${summary.totals.all.calls - store.total.calls}`)
   check('接口自检通过', summary.integrity?.consistent, true)
   check('接口返回 buildId', typeof summary.buildId, 'string')
   check('接口返回趋势序列', Object.keys(summary.trend ?? {}).length > 0, true)

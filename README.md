@@ -28,6 +28,15 @@ Token 用量统计页，顺带管好成本与供应商余额。
 - 匹配不到价格的模型明确列出「未定价」并提供补价入口，不静默算成 0
 - **预算**：设日 / 月预算，全局或按模型分组（一组可含多个模型），实时看已用百分比
 
+**订阅额度（OpenCode Go）**
+
+- 独立「订阅额度」页签：5h / 周 / 月窗口按模型拆 token、额度消耗与份额，
+  并给出「每 1% ≈ 多少 token」；档位可切 Go / Plus / Teams
+- **单模型额度换算**：只看一个模型时，各窗口能跑多少 token（三种极端 +
+  按最近 30 天实际构成）
+- 账本是独立的 10 分钟桶文件，不影响 `usage.json` 落盘；额度是**美元配额**
+  而非 token 配额，缓存读与输出能差两个数量级，页面按模型/构成折算
+
 **模型接入**
 
 - 35 个服务预设，国内优先排序，选中即填好地址与协议
@@ -39,7 +48,7 @@ Token 用量统计页，顺带管好成本与供应商余额。
 
 - 余额不足、配额将尽、配额即将重置、查询失败、插件更新，以及**峰谷切换前提醒**、**预算将尽**，八类告警推送到右下角
 
-数据来自 DSH 自己的会话日志，不额外发请求、不上传任何东西。
+数据来自 DSH 自己的会话日志；只有订阅额度查询会向**你配置的订阅站点**发请求（可用 `quotaSampleMs: 0` 关闭自动采样），不上传任何数据。
 
 ## 安装
 
@@ -160,6 +169,7 @@ plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics#v0.3.2
 | `snapshotCacheMs` | `3000` | 0–60000 | 聚合快照缓存时长（毫秒）。`0` 表示每次重算 |
 | `retentionDays` | `400` | 0–3650 | 按天分桶保留天数。`0` 表示不裁剪 |
 | `maxSessions` | `500` | 0–5000 | 统计页返回的会话明细上限 |
+| `quotaSampleMs` | `600000` | 0–3600000 | 订阅额度采样间隔（毫秒）。只在最近 15 分钟有额度类调用时才查；`0` 关闭自动采样 |
 | `maxTrendSeries` | `6` | 1–20 | 趋势图最多画几条模型曲线，多出的聚合成「其他」 |
 | `maxSeenEntries` | `200000` | 1000–2000000 | 去重表上限 |
 | `showSessions` | `false` | — | 是否展示「按会话」明细 |
@@ -185,6 +195,10 @@ plugin_manager install_bundle github:hugoyee75-cmyk/dsh-token-metrics#v0.3.2
 | `POST` | `/api/dsh-token-metrics/update/apply` | 安装新版本并热重载 |
 | `POST` | `/api/dsh-token-metrics/reload` | 只热重载当前磁盘代码 |
 | `POST` | `/api/dsh-token-metrics/rebuild` | 从会话日志重算全部统计 |
+| `GET` | `/api/dsh-token-metrics/quota/summary` | 订阅额度归因快照 |
+| `POST` | `/api/dsh-token-metrics/quota/plan` | 切换档位（go / plus / teams） |
+| `POST` | `/api/dsh-token-metrics/quota/probe` | 探针校准额度系数 |
+| `POST` | `/api/dsh-token-metrics/quota/rebuild` | 只重建额度账本 |
 
 手动重算：
 
