@@ -1931,17 +1931,59 @@ function collectSessionFiles(root) {
 function readSessionLog(file) {
   const raw = readFileSync(file)
   if (typeof zstdDecompressSync === 'function') {
-    try {
-      return zstdDecompressSync(raw).toString('utf8')
-    } catch {
-      // 不是 zstd（或损坏），继续尝试按纯文本读。
-    }
+    const text = decompressZstdFrames(raw)
+    if (text !== undefined) return text
   }
   try {
     return raw.toString('utf8')
   } catch {
     return ''
   }
+}
+
+/**
+ * 解压**多帧** zstd 数据。
+ *
+ * 会话日志 `session.v4.jsonl.zstd` 是逐段追加写的：DSH 每产生一批事件就压成
+ * 一个独立帧，追加到同一个文件末尾。`zstdDecompressSync(raw)` 只解第一帧，
+ * 通常就是一百多字节的 session header，后面所有 `assistant/message` 都读不到
+ * ——表现是磁盘回扫几乎补不到历史用量、当天用量显示为 0。
+ *
+ * 这里用 `info: true` 让解压引擎回报本帧实际消耗的字节数
+ * （`engine.bytesWritten`），据此把游标推进到下一帧，逐帧解完整个文件。
+ * 比按魔数切分可靠：帧边界由解压器自己给出，不依赖对压缩数据的内容猜测。
+ *
+ * 单帧损坏时只跳过该帧并继续；全部帧都失败才返回 undefined，交给调用方
+ * 按纯文本兜底。
+ *
+ * @param raw 整个文件的 buffer。
+ * @returns 拼接后的文本；一帧都没解出来时返回 undefined。
+ */
+function decompressZstdFrames(raw) {
+  const parts = []
+  let rest = raw
+  // 防御：每帧至少消耗一个字节，理论上不会转这么多圈；防止异常输入死循环。
+  const maxFrames = 1_000_000
+  for (let index = 0; index < maxFrames && rest.length > 0; index += 1) {
+    let result
+    try {
+      result = zstdDecompressSync(rest, { info: true })
+    } catch {
+      // 当前帧损坏：丢掉它，从下一个字节起继续尝试解出后续帧。
+      if (parts.length === 0) {
+        // 第一帧就解不了 —— 很可能根本不是 zstd，交给调用方兜底。
+        return undefined
+      }
+      // 已经在多帧路径里：跳过该帧剩余部分已无从得知，直接结束，
+      // 已解出的部分仍然有价值。
+      break
+    }
+    parts.push(result.buffer.toString('utf8'))
+    const consumed = result.engine?.bytesWritten ?? 0
+    if (!(consumed > 0)) break
+    rest = rest.subarray(consumed)
+  }
+  return parts.length > 0 ? parts.join('') : undefined
 }
 
 /** 把日志文本解析成 header + 事件列表。 */
