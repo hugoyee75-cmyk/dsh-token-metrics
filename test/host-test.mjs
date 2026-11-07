@@ -601,10 +601,24 @@ const multiFrameBuffer = Buffer.concat([
   ...multiFrameEvents.map((event) => zstdMulti.zstdCompressSync(Buffer.from(JSON.stringify(event) + '\n', 'utf8'))),
 ])
 writeFileSync(join(multiFrameSessions, 'session.v4.jsonl.zstd'), multiFrameBuffer)
-// 前置自检：确认这份样本确实只有第一帧能被一次性解压出来，
-// 否则这个测试就失去意义（说明构造方式没还原线上的多帧形态）。
-const singleShot = zstdMulti.zstdDecompressSync(multiFrameBuffer).toString('utf8')
-check('多帧样本：一次性解压只拿到 header', singleShot.trim().split('\n').length, 1)
+/**
+ * 前置自检：确认这份样本确实是**多帧** zstd。
+ *
+ * 注意**不能断言「一次性解压只拿到 1 行」** —— 那是 Node 26 的行为：
+ * Node 24 的 `zstdDecompressSync` 会解出全部帧（实测一行不漏）。用这种
+ * 版本相关行为做断言，会让同一份代码在 Node 24 的 CI 上失败（真发生过）。
+ *
+ * 改为检查**帧结构本身**：是否存在 ≥2 个 zstd 帧魔数。这与 Node 版本无关，
+ * 且正是「线上日志是多帧追加写」的客观特征。
+ */
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+let frameCount = 0
+let scanAt = 0
+while ((scanAt = multiFrameBuffer.indexOf(ZSTD_MAGIC, scanAt)) !== -1) {
+  frameCount += 1
+  scanAt += 4
+}
+check('多帧样本：确实包含多个 zstd 帧', frameCount >= 4, true)
 const multiFrameModule = await import('../index.js?multiframe=1')
 multiFrameModule.apply({
   logger: { info: (m) => warnings.push('INFO ' + m), warn: (m) => warnings.push('WARN ' + m) },
