@@ -33,6 +33,16 @@ provider-balance management.
 - **Budget**: set a daily / monthly budget globally or per model group (a group
   can cover several models), with a live used-percentage bar
 
+**Plan usage (OpenCode Go)**
+
+- Dedicated **Plan usage** tab: 5-hour / weekly / monthly windows split by model
+  into tokens, allowance spend and share, plus a "what does 1% mean in tokens"
+  estimate; switchable Go / Go Plus / Go Teams
+- **Single-model capacity**: if you only used one model, how many tokens each
+  window buys (three extremes + your last-30-day mix)
+- The ledger is a separate 10-minute-bucket file, so `usage.json` writes do not
+  grow; allowance is a **dollar quota**, not a token quota
+
 **Model access**
 
 - 35 service presets, China-first, filling in URL and protocol on selection
@@ -48,7 +58,7 @@ provider-balance management.
   resetting soon, query failed, plugin update, a **peak/off-peak switch warning**
   and **budget running low**
 
-The data comes from DSH's own session logs. The plugin sends no extra requests and uploads nothing.
+Data comes from DSH's own session logs. Only quota checks talk to the subscription sites you configured (disable with `quotaSampleMs: 0`); nothing is uploaded.
 
 ## Install
 
@@ -171,6 +181,7 @@ Note that an override with the same id **replaces the whole `config`** rather th
 | `snapshotCacheMs` | `3000` | 0–60000 | How long to cache the aggregate snapshot. `0` recomputes every time |
 | `retentionDays` | `400` | 0–3650 | Days of per-day buckets to keep. `0` means never prune |
 | `maxSessions` | `500` | 0–5000 | Cap on session detail rows returned to the panel |
+| `quotaSampleMs` | `600000` | 0–3600000 | Subscription quota sampling interval (ms). Only polls when quota-provider calls happened in the last 15 minutes; `0` disables |
 | `maxTrendSeries` | `6` | 1–20 | Max model lines drawn in the trend chart; the rest fold into "other" |
 | `maxSeenEntries` | `200000` | 1000–2000000 | Cap on the dedupe table |
 | `showSessions` | `false` | — | Whether to show the per-session detail view |
@@ -192,6 +203,10 @@ The service runs inside the host process on the DSH port. The panel has buttons 
 | `POST` | `/api/dsh-token-metrics/update/apply` | Install a new version and hot-reload |
 | `POST` | `/api/dsh-token-metrics/reload` | Hot-reload the code currently on disk |
 | `POST` | `/api/dsh-token-metrics/rebuild` | Recompute all statistics from session logs |
+| `GET` | `/api/dsh-token-metrics/quota/summary` | Subscription quota attribution snapshot |
+| `POST` | `/api/dsh-token-metrics/quota/plan` | Switch plan (go / plus / teams) |
+| `POST` | `/api/dsh-token-metrics/quota/probe` | Calibrate allowance factors |
+| `POST` | `/api/dsh-token-metrics/quota/rebuild` | Rebuild the quota ledger only |
 
 Manual recompute:
 

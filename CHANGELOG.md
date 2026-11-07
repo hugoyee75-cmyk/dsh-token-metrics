@@ -3,6 +3,33 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-11-05
+
+### 新增
+
+- **订阅额度页**（OpenCode Go）：5h / 周 / 月窗口按模型拆分 token、额度消耗、
+  份额与折算百分点，回答「5h 用了 10%，是哪些模型的多少 token」；档位可切
+  Go / Plus / Teams，探针校准 `allowance = list_cost × 60 / 月额度`
+- **单模型额度换算**：选一个模型，看只用它时各窗口能跑多少 token（纯输入 /
+  纯输出 / 纯缓存读 + 按最近 30 天实际构成）；10 分钟桶账本独立存
+  `quota.json`，不拖慢 `usage.json`
+- 新增接口 `GET /quota/summary`、`POST /quota/plan|probe|rebuild`
+
+### 修复
+
+- **会话复制导致用量翻倍**：改按 `message.id` 去重（无 id 退回会话级），
+  `SCHEMA_VERSION` 升到 3 自动重建；重建前自动备份 `usage.json.pre-rebuild-*`
+- **多帧 zstd 日志只解第一帧**：按帧魔数切分逐帧解压，并用「解到切点 vs
+  解到文件尾」的长度+内容比对，排除帧内伪 magic
+- 手动重建先等额度回扫；回扫按代次守卫共享 Promise，并定期让出事件循环
+- 额度探针优先用服务器 `list_cost`；识别不出的平台不再硬兜底；校准失败
+  显示真实原因
+
+### 说明
+
+- 百分比以服务器为准，插件只按本地额度消耗拆分、反推 1% 当量
+- 有其它客户端/机器共用同一 key 时，本地未归因差额会偏大
+
 ## [Unreleased]
 
 ### 新增

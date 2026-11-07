@@ -41,6 +41,8 @@ import { isReloading, selfReload, watchPackage } from './src/reload.js'
 import { PriceBook, costOf, resolvePrice, isOffPeak } from './src/pricing.js'
 import { BalanceBook, probeBalance, normalizeBaseUrl, discoverModels } from './src/balance.js'
 import { syncProviderToDsh, removeProviderFromDsh, diffProviders, defaultKeyEnvName } from './src/sync.js'
+import { QuotaLedger, QUOTA_PROVIDERS, LEDGER_RETENTION_DAYS, probeFactors } from './src/quota.js'
+import { decompressZstdFrames } from './src/zstd.js'
 import { probeOfficial, detectProvider, loadModelCatalog, catalogStatus,
   loadCatalogEndpoints, collectProviderEndpoints, credentialConfigured } from './src/providers.js'
 import { createPushHub, evaluateAlerts, evaluateBudgetAlerts, evaluatePeakAlerts, diffAlerts } from './src/push.js'
@@ -59,7 +61,7 @@ export const name = 'dsh-token-metrics'
  * selfReload 在激活前会拿它和「期望版本」比对，确保替换上去的确实是新代码，
  * 而不是缓存里的旧对象。因此这个值必须跟着 package.json 一起更新。
  */
-export const version = '0.3.9'
+export const version = '0.4.0'
 
 /** 本包目录（file:// URL，带尾斜杠），热重载与自更新用它定位文件。 */
 const PACKAGE_URL = new URL('./', import.meta.url).href
@@ -110,11 +112,11 @@ const STORE_VERSION = 1
  * 数据结构版本号。
  *
  * 每新增一类分桶（byDayModel / byModelFacets / byDayFacets / byDayPeak …）
- * 就递增。回扫成功补齐后写入 store，之后不再重复判断——靠「桶是否为空」
- * 猜测会把「刚重建完但该时段没有此类调用」误判成「还没迁移」，
- * 每次启动都白跑一次全量回扫。
+ * 或改变去重键语义（v3：会话复制时按 message.id 去重）就递增。
+ * 回扫成功补齐后写入 store，之后不再重复判断——靠「桶是否为空」猜测会把
+ * 「刚重建完但该时段没有此类调用」误判成「还没迁移」，每次启动都白跑一次。
  */
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 const DEFAULTS = {
   /** 落盘防抖（毫秒）。模型调用本身很轻，磁盘写入才是开销。 */
@@ -125,6 +127,14 @@ const DEFAULTS = {
   retentionDays: 400,
   /** 统计页返回的会话明细上限。 */
   maxSessions: 500,
+  /**
+   * 订阅额度自动采样间隔（毫秒）。
+   *
+   * 额度百分比只有整数，且 OpenCode 不提供历史曲线；要靠定期采样把
+   * 「额度百分比」和「本地 token 账本」对上，才能校准每 1% 的 token 当量。
+   * 只在最近 15 分钟确实有额度类调用时才发请求；设为 0 可关闭。
+   */
+  quotaSampleMs: 600_000,
   /**
    * 告警阈值。
    *
@@ -261,6 +271,7 @@ function resolveConfig(raw) {
     snapshotCacheMs: number(source.snapshotCacheMs, DEFAULTS.snapshotCacheMs, 0, 60_000),
     retentionDays: number(source.retentionDays, DEFAULTS.retentionDays, 0, 3650),
     maxSessions: number(source.maxSessions, DEFAULTS.maxSessions, 0, 5000),
+    quotaSampleMs: number(source.quotaSampleMs, DEFAULTS.quotaSampleMs, 0, 3_600_000),
     maxTrendSeries: number(source.maxTrendSeries, DEFAULTS.maxTrendSeries, 1, 20),
     // 只接受字符串到字符串的映射，其余忽略
     modelAliases: (() => {
@@ -911,6 +922,17 @@ class TokenUsageTracker {
       dataDir: dataDir(this.home),
       log: (message) => logger?.info?.(message),
     }).loadFrom(join(dataDir(this.home), 'balance.json'))
+    /**
+     * 订阅额度账本：10 分钟桶 + 配额采样 + 额度系数。
+     *
+     * 与 usage.json 分开存：用量快照每 2 秒全量重写，额度桶再塞进去会
+     * 让每次落盘都变大；独立文件、独立节流，互不拖累。
+     */
+    this.quota = new QuotaLedger({
+      path: join(dataDir(this.home), 'quota.json'),
+      log: (message) => logger?.info?.(message),
+      providers: QUOTA_PROVIDERS,
+    })
     // 让落盘文件也带上 buildId，便于排查「哪一版代码写的数据」。
     this.store = loadStore(logger, this.home)
     this.store.buildId = buildId
@@ -993,17 +1015,23 @@ class TokenUsageTracker {
   }
 
   record({
-    sessionId, provider, model, turn, step, usage, time, purpose, parentSession,
+    sessionId, messageId, provider, model, turn, step, usage, time, purpose, parentSession,
     cwd, origin, delegationDepth, accountId, timing,
   }) {
     if (usage === undefined || usage === null) return false
     const stamp = typeof time === 'number' && Number.isFinite(time) ? time : Date.now()
-    const key = this.dedupeKey({ sessionId, turn, step, time: stamp, purpose })
+    const key = this.dedupeKey({ sessionId, messageId, turn, step, time: stamp, purpose, provider })
     // seen 的值是写入时间戳（数字），所以只能用「键是否存在」判断。
     // 早先写成 `=== true` 会让跨进程的去重完全失效，历史回扫因此重复累加。
     if (this.liveSeen.has(key) || Object.hasOwn(this.store.seen, key)) return false
     this.liveSeen.add(key)
     this.store.seen[key] = stamp
+
+    // 订阅额度账本：按 10 分钟桶单独记一份，供 5h / 本周 / 本月窗口归因。
+    // 去重已在上面完成，这里只记真正计入统计的调用。
+    if (this.quota?.accepts(provider)) {
+      this.quota.record({ time: stamp, provider, model, usage })
+    }
 
     addUsage(this.store.total, usage)
 
@@ -1176,8 +1204,23 @@ class TokenUsageTracker {
    * - 日志事件带 turn/step：`session:turn:step`，实时与回扫完全一致。
    * - 补充通路的内部调用：`session:purpose:秒级时间片`。
    */
-  dedupeKey({ sessionId, turn, step, time, purpose }) {
-    // 主通路：日志事件天然带 turn/step，实时与回扫完全一致。
+  dedupeKey({ sessionId, messageId, turn, step, time, purpose, provider }) {
+    /**
+     * 主通路：优先用**消息 id**，没有才退回会话 + turn/step。
+     *
+     * 会话被复制 / fork 时，同一批 `assistant/message` 会完整出现在两个
+     * 会话日志里（实测同一毫秒、同 turn/step、同 token 计数，但 message.id
+     * 相同）。用 `session:turn:step` 会把它们当成两次真实调用，历史用量
+     * 直接翻倍；message.id 由 DSH 生成、复制时会保留，正好是天然的
+     * 「同一次调用」标识。
+     *
+     * 没有 message.id 时不能拿内容哈希硬合并：两个并行子代理完全可能在同一
+     * 毫秒上报相同 turn/step 与相同 token。这种情况下退回会话级去重，宁可
+     * 漏合也不误合。
+     */
+    if (typeof messageId === 'string' && messageId !== '') {
+      return `msg:${provider ?? '?'}:${messageId}`
+    }
     if (sessionId && Number.isInteger(turn) && Number.isInteger(step)) {
       return `${sessionId}:${turn}:${step}`
     }
@@ -1285,6 +1328,8 @@ class TokenUsageTracker {
       pruneStore(this.store, this.config.retentionDays, this.config.maxSeenEntries)
     }
     saveStore(this.store, this.logger, this.home)
+    // 额度账本独立文件，跟主账本同一次触发落盘，避免两套定时器。
+    this.quota?.flush()
   }
 
   /**
@@ -1964,13 +2009,31 @@ function collectSessionFiles(root) {
 /**
  * 读取并解压一个会话日志。
  *
- * 优先用 Node 内置 zstd；不可用时退回系统 `zstd` 命令。
+ * 优先用 Node 内置 zstd；不可用时退回纯文本读。
  */
 function readSessionLog(file) {
   const raw = readFileSync(file)
   if (typeof zstdDecompressSync === 'function') {
-    const text = decompressZstdFrames(raw)
-    if (text !== undefined) return text
+    /**
+     * 采用 src/zstd.js 的实现在**多帧**日志上解压。
+     *
+     * 为什么不用 zstdDecompressSync(raw) 一次解完：会话日志是多帧追加写的，
+     * 该 API 只解第一帧（一百多字节的 session header），后续帧全丢 ——
+     * 实测一份真实文件：一次解压 285 字符 / 0 条 assistant/message，
+     * 逐帧解压 424,886 字符 / 25 条。
+     *
+     * 为什么不用「按 engine.bytesWritten 推进」的简单写法：Node 对**截断帧
+     * 不抛错**，而是静默返回 0 字节且 bytesWritten 非零。遇到中间帧损坏时
+     * 那种写法会无声停止，后续所有帧都读不到。src/zstd.js 用「解到文件尾
+     * 得完整结果，再用候选切点做长度+内容比对」来鉴别真帧边界，损坏帧也能
+     * 保住其后的帧。
+     */
+    try {
+      const text = decompressZstdFrames(raw).toString('utf8')
+      if (text !== '') return text
+    } catch {
+      // 不是 zstd（或损坏），继续尝试按纯文本读。
+    }
   }
   try {
     return raw.toString('utf8')
@@ -1979,50 +2042,6 @@ function readSessionLog(file) {
   }
 }
 
-/**
- * 解压**多帧** zstd 数据。
- *
- * 会话日志 `session.v4.jsonl.zstd` 是逐段追加写的：DSH 每产生一批事件就压成
- * 一个独立帧，追加到同一个文件末尾。`zstdDecompressSync(raw)` 只解第一帧，
- * 通常就是一百多字节的 session header，后面所有 `assistant/message` 都读不到
- * ——表现是磁盘回扫几乎补不到历史用量、当天用量显示为 0。
- *
- * 这里用 `info: true` 让解压引擎回报本帧实际消耗的字节数
- * （`engine.bytesWritten`），据此把游标推进到下一帧，逐帧解完整个文件。
- * 比按魔数切分可靠：帧边界由解压器自己给出，不依赖对压缩数据的内容猜测。
- *
- * 单帧损坏时只跳过该帧并继续；全部帧都失败才返回 undefined，交给调用方
- * 按纯文本兜底。
- *
- * @param raw 整个文件的 buffer。
- * @returns 拼接后的文本；一帧都没解出来时返回 undefined。
- */
-function decompressZstdFrames(raw) {
-  const parts = []
-  let rest = raw
-  // 防御：每帧至少消耗一个字节，理论上不会转这么多圈；防止异常输入死循环。
-  const maxFrames = 1_000_000
-  for (let index = 0; index < maxFrames && rest.length > 0; index += 1) {
-    let result
-    try {
-      result = zstdDecompressSync(rest, { info: true })
-    } catch {
-      // 当前帧损坏：丢掉它，从下一个字节起继续尝试解出后续帧。
-      if (parts.length === 0) {
-        // 第一帧就解不了 —— 很可能根本不是 zstd，交给调用方兜底。
-        return undefined
-      }
-      // 已经在多帧路径里：跳过该帧剩余部分已无从得知，直接结束，
-      // 已解出的部分仍然有价值。
-      break
-    }
-    parts.push(result.buffer.toString('utf8'))
-    const consumed = result.engine?.bytesWritten ?? 0
-    if (!(consumed > 0)) break
-    rest = rest.subarray(consumed)
-  }
-  return parts.length > 0 ? parts.join('') : undefined
-}
 
 /** 把日志文本解析成 header + 事件列表。 */
 function parseSessionLog(text) {
@@ -2068,11 +2087,34 @@ function parseSessionLog(text) {
  *
  * @returns {object|undefined} 备份的 store，供失败时回滚
  */
+/**
+ * 重建前留一份落盘副本。
+ *
+ * 全量重算只依赖「现存的会话日志」：日志被删除/归档后，旧账本里那部分
+ * 用量就再也扫不回来。留档让用户至少能手工核对或恢复，而不是被一次
+ * 迁移永久覆盖。只在真的重建时发生，不会天天堆文件。
+ */
+function backupStoreBeforeRebuild(tracker, logger) {
+  try {
+    const source = storePath(tracker.home)
+    if (!existsSync(source)) return
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const target = `${source}.pre-rebuild-${stamp}`
+    copyFileSync(source, target)
+    logger?.info?.(`token-metrics: 重建前已备份到 ${target}`)
+  } catch (error) {
+    logger?.warn?.(`token-metrics: 重建前备份失败（${error?.message ?? error}）`)
+  }
+}
+
 function prepareFullRebuild(tracker, logger) {
   if (tracker.store.needsRebuild !== true) return undefined
   const backup = tracker.store
+  backupStoreBeforeRebuild(tracker, logger)
   logger?.info?.('token-metrics: 执行全量重算（清空派生聚合后重扫）')
   tracker.reset()
+  // 注意：不在这里重置额度账本。它是独立数据源（10 分钟桶），用量重建
+  // 不会改变它；顺手清掉反而会与启动时的额度回扫抢跑，出现「刚补完又被清空」。
   return backup
 }
 
@@ -2133,6 +2175,7 @@ async function backfillFromLogs(ctx, tracker, logger, persistence) {
           const source = data.message?.source ?? {}
           if (tracker.record({
             sessionId: id,
+            messageId: data.message?.id,
             provider: source.provider,
             model: source.model,
             turn: data.turn,
@@ -2183,6 +2226,101 @@ async function backfillFromLogs(ctx, tracker, logger, persistence) {
   )
   // 返回会话数，供编排层判断 persistence 通路是否为空、要不要走磁盘兜底。
   return scanned
+}
+
+/**
+ * 用会话日志补额度账本（10 分钟桶）。
+ *
+ * 额度账本是新文件，第一次启用时是空的；5h 窗口只看今天，但「本周 / 本月」
+ * 需要过去几周的桶，所以启动时扫一次会话日志补上。只跑一次，结果记在
+ * `backfilledAt` 里。
+ *
+ * 与实时写入的边界：插件加载之后产生的调用由 `record()` 实时进账本，
+ * 回扫跳过最近 1 分钟的事件，避免同一批调用被记两遍。1 分钟的误差可以
+ * 接受——它只影响总量里极小的一段，远好过重复计数。
+ */
+async function backfillQuota(tracker, logger) {
+  const ledger = tracker.quota
+  if (ledger === undefined) return
+  // 并发保护：启动回扫与「手动重建」可能同时进来，重复扫会把同一批事件
+  // 写两遍（bucket 是累加，不是覆盖）。
+  if (ledger.backfillPromise !== undefined) return ledger.backfillPromise
+  if (ledger.state.backfilledAt > 0 || ledger.backfilling === true) return
+  const root = sessionsDir()
+  const startedAt = Date.now()
+  const generation = (ledger.backfillGeneration ?? 0) + 1
+  ledger.backfillGeneration = generation
+  ledger.backfilling = true
+  ledger.backfillPromise = (async () => {
+    try {
+      if (!existsSync(root)) {
+        ledger.state.backfilledAt = startedAt
+        ledger.markDirty()
+        return
+      }
+      const cutoff = startedAt - LEDGER_RETENTION_DAYS * 86400 * 1000
+      const seen = new Set()
+      let files = 0
+      let recorded = 0
+      for (const file of collectSessionFiles(root)) {
+        let info
+        try {
+          info = statSync(file)
+        } catch {
+          continue
+        }
+        if (info.mtimeMs < cutoff) continue
+        const { header, events } = parseSessionLog(readSessionLog(file))
+        const sessionKey = String(header?.id ?? file)
+        files += 1
+        // 每 25 个文件让出一次事件循环：整轮回扫要读几百个 zstd 文件，
+        // 全同步会把宿主卡住数秒，也会让「重建」与「回扫」的竞态更难处理。
+        if (files % 25 === 0) await new Promise((resolve) => setImmediate(resolve))
+        for (const event of events) {
+          if (event?.type !== 'assistant/message') continue
+          const stamp = Number(event.time)
+          // 太旧（超出账本保留期）或太新（实时通路已记）都跳过。
+          if (!(stamp >= cutoff) || stamp >= startedAt - 60_000) continue
+          const data = event.data ?? {}
+          const source = data.message?.source ?? {}
+          if (!ledger.accepts(source.provider)) continue
+          /**
+           * 跨会话去重：复制/fork 出来的会话日志里，message.id 会原样保留，
+           * 用它作键最准确。
+           *
+           * 没有 id 的旧日志**不**做跨会话内容合并：两个并行子代理完全可能
+           * 在同一毫秒上报相同 turn/step 与相同 token，内容哈希会误合。这里
+           * 与会话级 record() 保持同一原则——宁可对 fork 的旧日志多算一次，
+           * 也不把两次真实调用合成一次。
+           */
+          const messageId = data.message?.id
+          const key = typeof messageId === 'string' && messageId !== ''
+            ? `msg:${source.provider}:${messageId}`
+            : `${sessionKey}:${source.model}:${stamp}:${data.turn}:${data.step}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          if (ledger.record({
+            time: stamp,
+            provider: source.provider,
+            model: source.model,
+            usage: data.usage,
+          })) recorded += 1
+        }
+      }
+      ledger.state.backfilledAt = Date.now()
+      ledger.markDirty()
+      ledger.flush()
+      logger?.info?.(`token-metrics: 额度账本回扫完成（${files} 个会话，补录 ${recorded} 次调用）`)
+    } catch (error) {
+      logger?.warn?.(`token-metrics: 额度账本回扫失败（${error?.message ?? error}）`)
+    } finally {
+      ledger.backfilling = false
+      // 只有「当前这一代」才能清空共享 Promise；否则会把下一轮刚写入的
+      // Promise 抹成 undefined，破坏并发共享语义。
+      if (ledger.backfillGeneration === generation) ledger.backfillPromise = undefined
+    }
+  })()
+  return ledger.backfillPromise
 }
 
 /**
@@ -2314,6 +2452,12 @@ export function apply(ctx, rawConfig) {
   const config = resolveConfig(rawConfig)
   const { tracker, fresh } = acquireTracker(logger, BUILD_ID, config)
 
+  // —— 订阅额度：首次启用时用会话日志补 10 分钟桶 ——
+  // 不阻塞激活：扫描在后台跑，页面先显示已补到的部分。
+  void backfillQuota(tracker, logger).catch((error) => {
+    logger?.warn?.(`token-metrics: 额度账本回扫异常（${error?.message ?? error}）`)
+  })
+
   // —— 主通路：会话日志增量 ——
   // 覆盖所有 agent loop 调用，包括子代理 / teammate / workflow 子会话。
   ctx.on('session/event', (session, event) => {
@@ -2325,6 +2469,7 @@ export function apply(ctx, rawConfig) {
         const source = data.message?.source ?? {}
         tracker.record({
           sessionId,
+          messageId: data.message?.id,
           provider: source.provider,
           model: source.model,
           turn: data.turn,
@@ -2962,6 +3107,72 @@ export function apply(ctx, rawConfig) {
     return () => clearInterval(timer)
   }, 'token-metrics: 周期告警')
 
+  /**
+   * 主动查询一次订阅额度，并把结果记进采样表。
+   *
+   * 参数是两个来源共用的：页面点「刷新额度」、后台定时采样。统一放在这里，
+   * 避免两条路径对「何时算新鲜」「结果怎么写回」有不同理解。
+   *
+   * @param {object} site 站点配置
+   * @param {{ force?: boolean }} [options] force 为 false 时 30 秒内不重复查
+   */
+  const probeQuotaSite = async (site, options = {}) => {
+    if (site === undefined) return undefined
+    const freshEnough = Date.now() - (Number(site.lastCheckedAt) || 0) < 30_000
+    if (options.force !== true && freshEnough) return site
+    // 只处理本插件明确支持的额度平台。识别不出 / 别家平台时不要硬兜底成
+    // opencode-go —— 否则会把错误的 provider 写回站点配置，后续查询全错。
+    const platform = detectProvider(site.baseUrl)
+    if (platform === undefined || !tracker.quota?.accepts(platform)) {
+      logger?.debug?.(`token-metrics: 跳过无法识别的额度站点（${site.baseUrl ?? ''}）`)
+      return site
+    }
+    const apiKey = await resolveSiteKey(ctx, site)
+    if (typeof apiKey !== 'string' || apiKey === '') throw new Error('该站点没有可用的密钥')
+    const result = await probeOfficial({
+      baseUrl: site.baseUrl,
+      apiKey,
+      fetchImpl: globalThis.fetch,
+      provider: platform,
+    })
+    tracker.balanceBook.recordResult(site.id, result)
+    tracker.balanceBook.upsertSite({ ...site, provider: platform })
+    tracker.balanceBook.saveTo(join(dataDir(tracker.home), 'balance.json'))
+    tracker.quota?.recordSample({ ...site, provider: platform }, result)
+    tracker.quota?.flush()
+    // 额度变了可能刚跌破告警阈值。
+    try {
+      publishAlerts()
+    } catch { /* 告警失败不影响额度查询 */ }
+    return tracker.balanceBook.sites.find((entry) => entry.id === site.id) ?? site
+  }
+
+  /**
+   * 额度采样定时器。
+   *
+   * 百分比是整数，不采样就没法把「服务器百分比」和「本地 token」对齐。
+   * 只在最近 15 分钟确实发生过额度类调用时才查，空闲时不发任何请求。
+   */
+  ctx.effect(() => {
+    const interval = config.quotaSampleMs
+    if (!(interval > 0)) return undefined
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          if (tracker.quota?.hasRecentUsage(15 * 60 * 1000) !== true) return
+          const site = tracker.balanceBook.sites
+            .find((entry) => tracker.quota.accepts(entry.provider ?? entry.id))
+          if (site === undefined) return
+          await probeQuotaSite(site)
+        } catch (error) {
+          logger?.warn?.(`token-metrics: 额度采样失败（${error?.message ?? error}）`)
+        }
+      })()
+    }, interval)
+    timer?.unref?.()
+    return () => clearInterval(timer)
+  }, 'token-metrics: 订阅额度采样')
+
   ctx.inject(['webServer'], (webCtx) => {
     const server = webCtx.webServer
     // 同一个 (kind, path) 只能注册一次，重复注册会抛错。第二个模块实例
@@ -3448,6 +3659,9 @@ export function apply(ctx, rawConfig) {
                   })
                 }
                 tracker.balanceBook.recordResult(id, result)
+                // 顺手记一条额度采样：页面上的「刷新额度」与后台采样共用同一份历史。
+                tracker.quota?.recordSample({ ...site, provider: platform ?? site.provider }, result)
+                tracker.quota?.flush()
                 // 把识别出的平台存回站点：下次即使还没查询，
                 // 页面也能据此判断该站点是余额型还是订阅型。
                 if (platform !== undefined) {
@@ -3460,6 +3674,107 @@ export function apply(ctx, rawConfig) {
                   ok: result.ok,
                   result,
                   ...tracker.balanceBook.status(),
+                })
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            // —— 订阅额度归因（OpenCode Go）——
+            if (url.pathname === '/api/dsh-token-metrics/quota/summary') {
+              if (!isGet) {
+                sendJson(res, 405, { error: 'method not allowed' })
+                return
+              }
+              try {
+                let site = tracker.balanceBook.sites
+                  .find((entry) => tracker.quota.accepts(entry.provider ?? entry.id))
+                // 打开页面时顺手刷新一次百分比；30 秒内不重复查（轮询很密）。
+                if (url.searchParams.get('refresh') === '1' && site !== undefined) {
+                  try {
+                    site = await probeQuotaSite(site)
+                  } catch (error) {
+                    logger?.warn?.(`token-metrics: 刷新订阅额度失败（${error?.message ?? error}）`)
+                  }
+                }
+                sendJson(res, 200, tracker.quota.summary({
+                  site,
+                  quotas: site?.lastBalance?.quotas,
+                }))
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/quota/rebuild') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                // 先等可能正在跑的启动回扫结束，否则 reset 之后它还在写，
+                // 同一批事件会被累加两遍。
+                await tracker.quota.backfillPromise
+                tracker.quota.reset()
+                tracker.quota.flush()
+                await backfillQuota(tracker, logger)
+                const site = tracker.balanceBook.sites
+                  .find((entry) => tracker.quota.accepts(entry.provider ?? entry.id))
+                sendJson(res, 200, tracker.quota.summary({ site, quotas: site?.lastBalance?.quotas }))
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/quota/plan') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                tracker.quota.setPlan(String(body.plan ?? ''))
+                tracker.quota.flush()
+                const site = tracker.balanceBook.sites
+                  .find((entry) => tracker.quota.accepts(entry.provider ?? entry.id))
+                sendJson(res, 200, tracker.quota.summary({ site, quotas: site?.lastBalance?.quotas }))
+              } catch (error) {
+                sendJson(res, 400, { error: error?.message ?? String(error) })
+              }
+              return
+            }
+
+            if (url.pathname === '/api/dsh-token-metrics/quota/probe') {
+              if (req.method !== 'POST') {
+                sendJson(res, 405, { error: 'POST required' })
+                return
+              }
+              try {
+                const body = await readJsonBody(req)
+                const id = String(body.id ?? '')
+                const site = tracker.balanceBook.sites.find((entry) => entry.id === id)
+                if (site === undefined) {
+                  sendJson(res, 404, { error: '没有这个站点' })
+                  return
+                }
+                const apiKey = await resolveSiteKey(ctx, site)
+                if (typeof apiKey !== 'string' || apiKey === '') {
+                  sendJson(res, 400, { error: '该站点没有可用的密钥' })
+                  return
+                }
+                const result = await probeFactors({
+                  baseUrl: site.baseUrl,
+                  apiKey,
+                  models: Array.isArray(site.models) ? site.models : [],
+                })
+                tracker.quota.setFactors(result.factors ?? {})
+                tracker.quota.flush()
+                sendJson(res, 200, {
+                  ...result,
+                  ...tracker.quota.summary({ site, quotas: site.lastBalance?.quotas }),
                 })
               } catch (error) {
                 sendJson(res, 400, { error: error?.message ?? String(error) })
@@ -3540,10 +3855,17 @@ export function apply(ctx, rawConfig) {
                 sendJson(res, 405, { error: 'POST required' })
                 return
               }
+              // 先等可能正在跑的额度回扫结束：它会在 reset 之后继续写桶，
+              // 造成「前半段被清掉、backfilledAt 被旧扫覆盖」。
+              await tracker.quota?.backfillPromise
+              backupStoreBeforeRebuild(tracker, logger)
               tracker.reset()
+              tracker.quota?.reset()
               tracker.flush()
               const persistence = ctx.get('sessionPersistence')
               if (persistence !== undefined) await backfillFromLogs(ctx, tracker, logger, persistence)
+              // 额度账本走文件回扫（它需要 10 分钟桶，persistence 通路不提供）。
+              await backfillQuota(tracker, logger)
               tracker.flush()
               sendJson(res, 200, tracker.snapshot())
               return

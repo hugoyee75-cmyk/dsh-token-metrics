@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-metrics",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "private": false,
   "type": "module",
   "description": "统计所有经过 DeepSeek Harness 的模型调用：Token 用量、成本核算（含峰谷计价）、首字延迟与输出速度、供应商余额与配额、预算，并按模型/供应商/项目/来源/账号/日期拆分。",
@@ -36,13 +36,13 @@
     }
   },
   "scripts": {
-    "test": "node test/host-test.mjs && node test/timing-test.mjs && node test/security-test.mjs && node test/selfcheck-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/balance-test.mjs && node test/providers-test.mjs && node test/discovery-test.mjs && node test/sync-test.mjs && node test/push-test.mjs && node test/metadata-test.mjs",
+    "test": "node test/host-test.mjs && node test/timing-test.mjs && node test/security-test.mjs && node test/selfcheck-test.mjs && node test/client-test.mjs && node test/update-test.mjs && node test/pricing-test.mjs && node test/balance-test.mjs && node test/providers-test.mjs && node test/discovery-test.mjs && node test/sync-test.mjs && node test/push-test.mjs && node test/metadata-test.mjs && node test/quota-test.mjs && node test/zstd-test.mjs",
     "test:host": "node test/host-test.mjs",
     "test:client": "node test/client-test.mjs",
     "test:update": "node test/update-test.mjs",
     "test:metadata": "node test/metadata-test.mjs",
     "verify": "node test/verify-against-logs.mjs",
-    "check": "node --check index.js && node --check client.js && node --check src/reload.js && node --check src/updater.js && npm test",
+    "check": "node --check index.js && node --check client.js && node --check src/quota.js && node --check src/zstd.js && node --check src/reload.js && node --check src/updater.js && npm test",
     "prepack": "npm run check",
     "test:pricing": "node test/pricing-test.mjs",
     "test:balance": "node test/balance-test.mjs",
@@ -52,7 +52,9 @@
     "test:push": "node test/push-test.mjs",
     "test:timing": "node test/timing-test.mjs",
     "test:security": "node test/security-test.mjs",
-    "test:selfcheck": "node test/selfcheck-test.mjs"
+    "test:selfcheck": "node test/selfcheck-test.mjs",
+    "test:quota": "node test/quota-test.mjs",
+    "test:zstd": "node test/zstd-test.mjs"
   },
   "license": "MIT",
   "repository": {
