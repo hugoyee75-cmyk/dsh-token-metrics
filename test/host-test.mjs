@@ -1024,6 +1024,12 @@ const rateSnapshot = rateTracker.snapshot()
 check('命中率 = 缓存读 / (缓存读+新输入)', Math.round(rateSnapshot.totals.all.cacheHitRate * 100), 70)
 check('命中率附在 today 上', Math.round(rateSnapshot.totals.today.cacheHitRate * 100), 70)
 check('命中率附在 week 上', Math.round(rateSnapshot.totals.week.cacheHitRate * 100), 70)
+// 悬浮窗只读今天：成本快照必须带今日逐模型 / 逐供应商金额。
+check('今日逐模型成本存在', typeof rateSnapshot.cost.todayByModel, 'object')
+check('今日逐供应商成本存在', typeof rateSnapshot.cost.todayByProvider, 'object')
+check('今日逐模型成本含今天的调用', Object.keys(rateSnapshot.cost.todayByModel).includes('p/m'), true)
+check('今日逐供应商成本按 provider 聚合', Object.keys(rateSnapshot.cost.todayByProvider).includes('p'), true)
+check('今日逐供应商成本带 token 数', typeof rateSnapshot.cost.todayByProvider.p?.tokens, 'number')
 // 无缓存时命中率为 0，不是 NaN
 rateTracker.record({
   sessionId: 'r1', provider: 'p', model: 'm', turn: 1, step: 2,

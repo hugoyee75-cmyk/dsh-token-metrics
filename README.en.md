@@ -20,6 +20,7 @@ provider-balance management.
 - Token spend by project and by subagent
 - Time to first token and output speed — how fast, not just how much
 - An activity heatmap: which days you used the most across a year
+- **Floating usage widget**: always available on any page, showing today's tokens / cost and each selected provider's balance or main quota window; it reserves space instead of covering the page
 
 **Cost**
 

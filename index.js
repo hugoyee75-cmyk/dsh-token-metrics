@@ -1596,24 +1596,59 @@ class TokenUsageTracker {
         }
         // 按模型名合并（与占比图同一口径），供页面表格直接用
         const byModelNameCost = {}
+        /**
+         * 今日的按模型 / 按供应商成本。
+         *
+         * 悬浮窗只显示「今天」，但现有成本桶只有全量（byModel）和按天合计
+         * （byDay）。让它拿全量按比例折算会把峰谷价差抹平，所以这里在按天
+         * 循环里顺手把今天的逐模型金额留下来，payload 只多一个对象。
+         */
+        let todayByModel
+        const todayByProvider = {}
         for (const [day, byModel] of Object.entries(this.store.byDayModel ?? {})) {
           let dayUsd = 0
+          const dayModels = {}
           for (const [key, counters] of Object.entries(byModel)) {
             const slash = key.indexOf('/')
             const modelName = slash === -1 ? key : key.slice(slash + 1)
             const providerName = slash === -1 ? 'unknown' : key.slice(0, slash)
             const price = resolvePrice(modelName, book.table, book.overrides)
-            if (price === undefined) continue
+            if (price === undefined) {
+              // 未定价模型也要留一条，悬浮窗据此显示「—」而不是假 0。
+              dayModels[key] = { usd: 0, priced: false, tokens: counters.totalTokens ?? 0 }
+              continue
+            }
             // 该天该模型的峰谷桶（若有）
             const buckets = this.store.byDayPeak?.[day]?.[key]
+            let modelUsd
             if (buckets !== undefined) {
-              dayUsd += costOf(buckets.peak, price, book.multiplierOf(providerName))
+              modelUsd = costOf(buckets.peak, price, book.multiplierOf(providerName))
                 + costOf(buckets.off, price, book.multiplierOf(providerName), { offPeak: true })
             } else {
-              dayUsd += costOf(counters, price, book.multiplierOf(providerName))
+              modelUsd = costOf(counters, price, book.multiplierOf(providerName))
+            }
+            dayUsd += modelUsd
+            dayModels[key] = {
+              usd: modelUsd,
+              priced: true,
+              tokens: counters.totalTokens ?? 0,
             }
           }
           costByDay[day] = dayUsd
+          if (day === today) {
+            todayByModel = dayModels
+            for (const [key, entry] of Object.entries(dayModels)) {
+              const slash = key.indexOf('/')
+              const providerName = slash === -1 ? 'unknown' : key.slice(0, slash)
+              const target = todayByProvider[providerName] ?? { usd: 0, priced: false, tokens: 0 }
+              target.usd += entry.usd
+              target.tokens += entry.tokens
+              // 只要有一个模型能定价就算有金额；有未定价项时前端会把
+              // 数字标成估算值，而不是让用户以为这就是真实花费。
+              target.priced = target.priced || entry.priced === true
+              todayByProvider[providerName] = target
+            }
+          }
         }
 
         for (const [key, entry] of Object.entries(byModelCost)) {
@@ -1629,6 +1664,9 @@ class TokenUsageTracker {
           byDay: costByDay,
           byModel: byModelCost,
           byModelName: byModelNameCost,
+          // 悬浮窗用：今天逐模型 / 逐供应商金额。没有今天的调用时为空对象。
+          todayByModel: todayByModel ?? {},
+          todayByProvider,
           unpriced: unpriced.sort((a, b) => b.tokens - a.tokens),
           fx: {
             usdCny: book.usdCny,

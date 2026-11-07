@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-token-metrics · 悬浮用量窗预览</title>
+<style>
+  :root {
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", Inter, system-ui, sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  html[data-theme="dark"] {
+    --page: #0b0d11;
+    --page-2: #11141a;
+    --canvas: #151820;
+    --canvas-line: rgba(255, 255, 255, .055);
+    --panel: rgba(30, 34, 42, .92);
+    --panel-solid: #1e222a;
+    --panel-hover: rgba(255, 255, 255, .055);
+    --border: rgba(255, 255, 255, .10);
+    --border-soft: rgba(255, 255, 255, .06);
+    --text: #e9ecf1;
+    --text-2: #9aa3b2;
+    --text-3: #6c7583;
+    --brand: #6b86ff;
+    --brand-soft: rgba(107, 134, 255, .16);
+    --green: #48c774;
+    --warn: #e3b341;
+    --track: rgba(255, 255, 255, .08);
+    --shadow: 0 18px 44px rgba(0, 0, 0, .46);
+    --pill: rgba(35, 40, 50, .94);
+  }
+  html[data-theme="light"] {
+    --page: #eef0f4;
+    --page-2: #f6f7f9;
+    --canvas: #f2f3f6;
+    --canvas-line: rgba(0, 0, 0, .05);
+    --panel: rgba(255, 255, 255, .94);
+    --panel-solid: #ffffff;
+    --panel-hover: rgba(0, 0, 0, .04);
+    --border: rgba(0, 0, 0, .10);
+    --border-soft: rgba(0, 0, 0, .06);
+    --text: #1b1f26;
+    --text-2: #5d6674;
+    --text-3: #8a93a1;
+    --brand: #3f5ff0;
+    --brand-soft: rgba(63, 95, 240, .10);
+    --green: #1f9d55;
+    --warn: #b7791f;
+    --track: rgba(0, 0, 0, .08);
+    --shadow: 0 18px 44px rgba(20, 28, 45, .16);
+    --pill: rgba(255, 255, 255, .96);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(1200px 600px at 20% -10%, var(--page-2), var(--page));
+    color: var(--text);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 28px 24px 10px;
+  }
+  .topbar h1 { font-size: 15px; font-weight: 650; letter-spacing: .01em; margin: 0; }
+  .topbar p { margin: 0; font-size: 12.5px; color: var(--text-2); }
+  .topbar .spacer { flex: 1; }
+  .theme-btn, .ghost-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text-2);
+    border-radius: 9px;
+    padding: 6px 11px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .theme-btn:hover, .ghost-btn:hover { color: var(--text); background: var(--panel-hover); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 340px));
+    justify-content: center;
+    gap: 22px;
+    padding: 18px 24px 56px;
+  }
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 340px)); }
+  }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: minmax(0, 340px); }
+  }
+  .demo-head { padding: 0 4px 10px; }
+  .demo-head h2 { font-size: 13px; font-weight: 650; margin: 0 0 3px; }
+  .demo-head h2 .rec {
+    font-size: 10px; font-weight: 600; color: var(--brand);
+    background: var(--brand-soft); border-radius: 999px; padding: 2px 7px;
+    margin-left: 6px; vertical-align: 1px;
+  }
+  .demo-head p { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--text-3); }
+
+  /* —— 模拟应用背景 —— */
+  .canvas {
+    position: relative;
+    width: 340px;
+    height: 560px;
+    border-radius: 18px;
+    border: 1px solid var(--border-soft);
+    background: var(--canvas);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .fake-rail {
+    position: absolute; inset: 0 auto 0 0; width: 46px;
+    background: linear-gradient(180deg, rgba(127,127,127,.10), rgba(127,127,127,.03));
+    border-right: 1px solid var(--canvas-line);
+  }
+  .fake-rail i {
+    display: block; width: 20px; height: 20px; margin: 14px auto;
+    border-radius: 7px; background: var(--canvas-line);
+  }
+  .fake-rail i:first-child { margin-top: 18px; background: var(--brand-soft); }
+  .fake-main { position: absolute; inset: 0 0 0 46px; padding: 18px 18px; }
+  .fake-title { width: 96px; height: 10px; border-radius: 6px; background: var(--canvas-line); }
+  .fake-sub { width: 150px; height: 7px; border-radius: 6px; background: var(--canvas-line); margin-top: 9px; opacity: .8; }
+  .fake-card {
+    height: 58px; border-radius: 12px; margin-top: 18px;
+    background: linear-gradient(180deg, rgba(127,127,127,.075), rgba(127,127,127,.035));
+    border: 1px solid var(--canvas-line);
+  }
+  .fake-card.short { height: 42px; width: 82%; }
+  .fake-lines { margin-top: 22px; display: grid; gap: 10px; }
+  .fake-lines span { height: 7px; border-radius: 6px; background: var(--canvas-line); display: block; }
+  .fake-lines span:nth-child(1) { width: 76%; }
+  .fake-lines span:nth-child(2) { width: 92%; }
+  .fake-lines span:nth-child(3) { width: 64%; }
+  .fake-lines span:nth-child(4) { width: 84%; }
+  .fake-composer {
+    position: absolute; left: 16px; right: 16px; bottom: 16px; height: 54px;
+    border-radius: 13px; border: 1px solid var(--canvas-line);
+    background: rgba(127,127,127,.045);
+  }
+  .fake-composer::after {
+    content: ""; position: absolute; right: 10px; bottom: 10px;
+    width: 26px; height: 26px; border-radius: 9px; background: var(--brand-soft);
+  }
+
+  /* —— 悬浮卡片 —— */
+  .widget {
+    position: absolute;
+    right: 14px;
+    bottom: 88px;
+    width: 300px;
+    border-radius: 15px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    overflow: hidden;
+    transition: opacity .16s ease, transform .16s ease;
+    z-index: 5;
+  }
+  .widget.is-dragging { cursor: grabbing; }
+  .w-head {
+    display: flex; align-items: center; gap: 7px;
+    padding: 10px 11px 9px 13px;
+    cursor: grab;
+    user-select: none;
+  }
+  .w-head:active { cursor: grabbing; }
+  .pulse {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+  }
+  @keyframes breathe {
+    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--green) 6%, transparent); }
+  }
+  .pulse { animation: breathe 3.2s ease-in-out infinite; }
+  .w-title { font-size: 12.5px; font-weight: 650; letter-spacing: .01em; }
+  .w-live { font-size: 10px; color: var(--text-3); }
+  .w-actions { margin-left: auto; display: flex; gap: 1px; }
+  .w-actions button {
+    appearance: none; border: 0; background: transparent; color: var(--text-3);
+    width: 25px; height: 25px; border-radius: 7px;
+    display: grid; place-items: center; cursor: pointer; font-size: 13px;
+    line-height: 1;
+  }
+  .w-actions button:hover { background: var(--panel-hover); color: var(--text); }
+  .w-actions button svg { width: 14px; height: 14px; }
+
+  .hero {
+    display: grid; grid-template-columns: 1fr 1fr;
+    padding: 4px 0 12px;
+  }
+  .stat { padding: 0 13px; }
+  .stat + .stat { border-left: 1px solid var(--border-soft); }
+  .stat .label { font-size: 10.5px; color: var(--text-3); letter-spacing: .02em; }
+  .stat .value {
+    margin-top: 4px; font-size: 22px; line-height: 1.1; font-weight: 650;
+    letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  .stat .value small { font-size: 13px; font-weight: 600; color: var(--text-2); margin-left: 1px; }
+  .stat .value .cur { font-size: 15px; font-weight: 600; color: var(--text-2); margin-right: 1px; }
+  .stat .sub { margin-top: 3px; font-size: 10.5px; color: var(--text-3); }
+
+  .rows { border-top: 1px solid var(--border-soft); }
+  .site {
+    padding: 10px 13px 11px;
+    transition: background .13s ease;
+    cursor: pointer;
+  }
+  .site + .site { border-top: 1px solid var(--border-soft); }
+  .site:hover { background: var(--panel-hover); }
+  .site-top { display: flex; align-items: baseline; gap: 8px; }
+  .site-name {
+    font-size: 12px; font-weight: 600; color: var(--text);
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  }
+  .tag {
+    font-size: 9.5px; font-weight: 600; line-height: 1;
+    padding: 3px 5px; border-radius: 5px; letter-spacing: .02em;
+    color: var(--text-3); background: rgba(127,127,127,.12);
+    border: 1px solid var(--border-soft);
+  }
+  .tag.balance { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); border-color: transparent; }
+  .tag.quota { color: var(--brand); background: var(--brand-soft); border-color: transparent; }
+  .amount {
+    margin-left: auto; font-size: 14px; font-weight: 650;
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  }
+  .amount.dim { color: var(--text-2); font-size: 13px; }
+  .site-sub {
+    margin-top: 4px; font-size: 10.5px; color: var(--text-3);
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .dot-sep { width: 2px; height: 2px; border-radius: 50%; background: currentColor; opacity: .6; }
+  .bars { margin-top: 7px; display: grid; gap: 4px; }
+  .bar-row { display: grid; grid-template-columns: 10px 1fr 30px; align-items: center; gap: 6px; }
+  .bar-key { font-size: 9px; color: var(--text-3); font-family: var(--mono); }
+  .bar-track { display: block; height: 4px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--brand); }
+  .bar-fill.warn { background: var(--warn); }
+  .bar-val { font-size: 9px; color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
+
+  .w-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 13px 9px; border-top: 1px solid var(--border-soft);
+    font-size: 10.5px; color: var(--text-3);
+  }
+  .w-foot a { margin-left: auto; color: var(--brand); text-decoration: none; font-weight: 550; }
+  .w-foot a:hover { text-decoration: underline; }
+
+  /* —— 折叠胶囊 —— */
+  .pill {
+    position: absolute; right: 14px; bottom: 88px;
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 12px 7px 10px;
+    border-radius: 999px; border: 1px solid var(--border);
+    background: var(--pill); box-shadow: var(--shadow);
+    backdrop-filter: blur(16px);
+    font-size: 12px; cursor: pointer; z-index: 5;
+    transition: transform .13s ease;
+  }
+  .pill:hover { transform: translateY(-1px); }
+  .pill .pulse { width: 6px; height: 6px; }
+  .pill b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .pill .pill-sub { color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .pill .pill-sep { width: 1px; height: 11px; background: var(--border); }
+  .pill .chev { color: var(--text-3); font-size: 11px; margin-left: 1px; }
+
+  /* —— 设置气泡 —— */
+  .settings {
+    position: absolute; right: 14px; bottom: 142px; width: 268px;
+    border-radius: 14px; border: 1px solid var(--border);
+    background: var(--panel-solid); box-shadow: var(--shadow);
+    padding: 12px 13px 13px; z-index: 8;
+  }
+  .set-head { display: flex; align-items: center; font-size: 12px; font-weight: 650; margin-bottom: 10px; }
+  .set-head .x { margin-left: auto; border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 14px; }
+  .set-label { font-size: 10px; color: var(--text-3); letter-spacing: .04em; margin: 10px 0 5px; }
+  .check {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px; padding: 5px 0; color: var(--text); cursor: pointer;
+  }
+  .check input { accent-color: var(--brand); width: 13px; height: 13px; margin: 0; }
+  .check .right { margin-left: auto; color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .check.disabled { opacity: .42; cursor: default; }
+  .seg { display: flex; gap: 4px; }
+  .seg button {
+    appearance: none; flex: 1; border: 1px solid var(--border);
+    background: transparent; color: var(--text-2); border-radius: 7px;
+    font: inherit; font-size: 10.5px; padding: 5px 4px; cursor: pointer;
+  }
+  .seg button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+  /* —— 标注 —— */
+  .note {
+    position: absolute; left: 14px; top: 14px; max-width: 190px;
+    font-size: 10px; line-height: 1.5; color: var(--text-3);
+    background: rgba(127,127,127,.08); border: 1px solid var(--border-soft);
+    border-radius: 8px; padding: 6px 8px; pointer-events: none;
+  }
+
+  /* —— 极简方案 —— */
+  .widget.compact .hero { padding-top: 0; }
+  .widget.compact .site { padding-top: 11px; padding-bottom: 12px; }
+  .widget.compact .site-sub { margin-top: 3px; }
+
+  /* 折叠态：隐藏卡片，显示胶囊 */
+  .widget.is-collapsed { opacity: 0; transform: translateY(6px) scale(.98); pointer-events: none; }
+  .widget.is-collapsed + .pill { display: inline-flex !important; }
+  .pill[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <h1>dsh-token-metrics · 悬浮用量窗</h1>
+      <p>样式草案 v0.1 · 颜色全部跟随 DSH 主题 token</p>
+    </div>
+    <div class="spacer"></div>
+    <button class="theme-btn" id="themeBtn">☀︎ 亮色</button>
+  </div>
+
+  <main class="grid">
+    <!-- 1. 推荐：全局 + 站点拆分 -->
+    <section class="demo">
+      <div class="demo-head">
+        <h2>推荐方案 · 所选 + 拆分 <span class="rec">v1</span></h2>
+        <p>顶部是所选供应商的今日汇总；每行一个供应商，行内给该家的今日 token / 花费与余额。</p>
+      </div>
+      <div class="canvas">
+        <div class="fake-rail"><i></i><i></i><i></i><i></i></div>
+        <div class="fake-main">
+          <div class="fake-title"></div>
+          <div class="fake-sub"></div>
+          <div class="fake-card"></div>
+          <div class="fake-lines"><span></span><span></span><span></span><span></span></div>
+          <div class="fake-composer"></div>
+        </div>
+        <div class="note">拖拽标题可移动 · 松手吸附四角</div>
+
+        <div class="widget" id="widgetA">
+          <div class="w-head">
+            <span class="pulse"></span>
+            <span class="w-title">用量概览</span>
+            <span class="w-live">实时</span>
+            <div class="w-actions">
+              <button title="刷新" aria-label="刷新">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+              </button>
+              <button title="收起" data-collapse="widgetA" aria-label="收起">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <button title="设置" data-settings="settingsA" aria-label="设置">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.38.7.7.95.3.24.66.37 1.04.37H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="hero">
+            <div class="stat">
+              <div class="label">今日 Token</div>
+              <div class="value">1.24<small>M</small></div>
+              <div class="sub">12 次调用</div>
+            </div>
+            <div class="stat">
+              <div class="label">今日花费</div>
+              <div class="value"><span class="cur">¥</span>6.42</div>
+              <div class="sub">≈ $0.89 · 谷时计价</div>
+            </div>
+          </div>
+
+          <div class="rows">
+            <div class="site">
+              <div class="site-top">
+                <span class="site-name">DeepSeek <span class="tag balance">余额</span></span>
+                <span class="amount">¥128.40</span>
+              </div>
+              <div class="site-sub">
+                <span>今日 1.21M</span><span class="dot-sep"></span><span>¥6.42</span>
+                <span class="dot-sep"></span><span>10:49 更新</span>
+              </div>
+            </div>
+            <div class="site">
+              <div class="site-top">
+                <span class="site-name">OpenCode Go <span class="tag quota">订阅</span></span>
+                <span class="amount">62%</span>
+              </div>
+              <div class="site-sub">
+                <span>今日 32.0k</span><span class="dot-sep"></span><span>订阅内</span>
+              </div>
+              <div class="bars">
+                <div class="bar-row"><span class="bar-key">R</span><span class="bar-track"><span class="bar-fill" style="width:62%"></span></span><span class="bar-val">62%</span></div>
+                <div class="bar-row"><span class="bar-key">W</span><span class="bar-track"><span class="bar-fill" style="width:41%"></span></span><span class="bar-val">41%</span></div>
+                <div class="bar-row"><span class="bar-key">M</span><span class="bar-track"><span class="bar-fill warn" style="width:23%"></span></span><span class="bar-val">23%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="w-foot">
+            <span>10:49 更新 · 2 个供应商</span>
+            <a href="#">明细 →</a>
+          </div>
+        </div>
+
+        <div class="pill" hidden data-expand="widgetA">
+          <span class="pulse"></span>
+          <span>今日 <b>¥6.42</b></span>
+          <span class="pill-sep"></span>
+          <span class="pill-sub">1.24M</span>
+          <span class="chev">⌃</span>
+        </div>
+
+        <div class="settings" id="settingsA" hidden>
+          <div class="set-head">悬浮窗设置 <button class="x" data-close="settingsA">✕</button></div>
+          <div class="set-label">显示的供应商</div>
+          <label class="check"><input type="checkbox" checked /> DeepSeek <span class="right">¥128.40</span></label>
+          <label class="check"><input type="checkbox" checked /> OpenCode Go <span class="right">62%</span></label>
+          <label class="check disabled"><input type="checkbox" disabled /> Kimi <span class="right">未配置余额</span></label>
+          <div class="set-label">币种</div>
+          <div class="seg"><button class="on">跟随统计页</button><button>USD</button><button>CNY</button></div>
+          <div class="set-label">显示</div>
+          <label class="check"><input type="checkbox" checked /> 订阅配额条</label>
+          <label class="check"><input type="checkbox" checked /> 行内今日用量</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 极简 -->
+    <section class="demo">
+      <div class="demo-head">
+        <h2>极简方案 · 只显示余额</h2>
+        <p>今日两个数字仍按所选汇总；下面只列余额与配额，信息密度最低。</p>
+      </div>
+      <div class="canvas">
+        <div class="fake-rail"><i></i><i></i><i></i><i></i></div>
+        <div class="fake-main">
+          <div class="fake-title"></div>
+          <div class="fake-sub"></div>
+          <div class="fake-card"></div>
+          <div class="fake-lines"><span></span><span></span><span></span></div>
+          <div class="fake-composer"></div>
+        </div>
+
+        <div class="widget compact" id="widgetB">
+          <div class="w-head">
+            <span class="pulse"></span>
+            <span class="w-title">用量概览</span>
+            <div class="w-actions">
+              <button title="刷新" aria-label="刷新">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+              </button>
+              <button title="收起" data-collapse="widgetB" aria-label="收起">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <button title="设置" aria-label="设置">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.38.7.7.95.3.24.66.37 1.04.37H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="hero">
+            <div class="stat">
+              <div class="label">今日 Token</div>
+              <div class="value">1.24<small>M</small></div>
+              <div class="sub">12 次调用</div>
+            </div>
+            <div class="stat">
+              <div class="label">今日花费</div>
+              <div class="value"><span class="cur">¥</span>6.42</div>
+              <div class="sub">≈ $0.89</div>
+            </div>
+          </div>
+          <div class="rows">
+            <div class="site">
+              <div class="site-top">
+                <span class="site-name">DeepSeek <span class="tag balance">余额</span></span>
+                <span class="amount">¥128.40</span>
+              </div>
+              <div class="site-sub"><span>10:49 更新</span></div>
+            </div>
+            <div class="site">
+              <div class="site-top">
+                <span class="site-name">OpenCode Go <span class="tag quota">订阅</span></span>
+                <span class="amount">62%</span>
+              </div>
+              <div class="site-sub"><span>rolling · weekly 41% · monthly 23%</span></div>
+            </div>
+          </div>
+          <div class="w-foot"><span>2 个供应商 · 10:49 更新</span><a href="#">管理 →</a></div>
+        </div>
+
+        <div class="pill" hidden data-expand="widgetB">
+          <span class="pulse"></span>
+          <span>今日 <b>¥6.42</b></span>
+          <span class="pill-sep"></span>
+          <span class="pill-sub">1.24M</span>
+          <span class="chev">⌃</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 折叠 + 设置 -->
+    <section class="demo">
+      <div class="demo-head">
+        <h2>折叠态 & 设置</h2>
+        <p>收起后只留今日花费与总量；设置气泡里勾选站点、币种与显示项。</p>
+      </div>
+      <div class="canvas">
+        <div class="fake-rail"><i></i><i></i><i></i><i></i></div>
+        <div class="fake-main">
+          <div class="fake-title"></div>
+          <div class="fake-sub"></div>
+          <div class="fake-card"></div>
+          <div class="fake-lines"><span></span><span></span><span></span><span></span></div>
+          <div class="fake-composer"></div>
+        </div>
+
+        <div class="settings" id="settingsC">
+          <div class="set-head">悬浮窗设置 <button class="x" data-close="settingsC">✕</button></div>
+          <div class="set-label">显示的供应商</div>
+          <label class="check"><input type="checkbox" checked /> DeepSeek <span class="right">¥128.40</span></label>
+          <label class="check"><input type="checkbox" checked /> OpenCode Go <span class="right">62%</span></label>
+          <label class="check disabled"><input type="checkbox" disabled /> Kimi <span class="right">未配置余额</span></label>
+          <div class="set-label">币种</div>
+          <div class="seg"><button class="on">跟随统计页</button><button>USD</button><button>CNY</button></div>
+          <div class="set-label">显示</div>
+          <label class="check"><input type="checkbox" checked /> 订阅配额条</label>
+          <label class="check"><input type="checkbox" checked /> 行内今日用量</label>
+        </div>
+
+        <div class="pill" style="bottom: 88px;">
+          <span class="pulse"></span>
+          <span>今日 <b>¥6.42</b></span>
+          <span class="pill-sep"></span>
+          <span class="pill-sub">1.24M</span>
+          <span class="chev">⌃</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const themeBtn = document.getElementById('themeBtn')
+  themeBtn.addEventListener('click', () => {
+    const root = document.documentElement
+    const next = root.dataset.theme === 'dark' ? 'light' : 'dark'
+    root.dataset.theme = next
+    themeBtn.textContent = next === 'dark' ? '☀︎ 亮色' : '☾ 暗色'
+  })
+
+  document.querySelectorAll('[data-collapse]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation()
+      const widget = document.getElementById(btn.dataset.collapse)
+      widget.classList.toggle('is-collapsed')
+    })
+  })
+
+  document.querySelectorAll('[data-expand]').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      document.getElementById(pill.dataset.expand).classList.remove('is-collapsed')
+    })
+  })
+
+  document.querySelectorAll('[data-settings]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation()
+      const panel = document.getElementById(btn.dataset.settings)
+      const widget = btn.closest('.widget')
+      panel.hidden = !panel.hidden
+      if (widget) widget.style.opacity = panel.hidden ? '' : '.35'
+    })
+  })
+
+  document.querySelectorAll('[data-close]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.getElementById(btn.dataset.close).hidden = true
+      document.querySelectorAll('.widget').forEach((w) => { w.style.opacity = '' })
+    })
+  })
+
+  document.querySelectorAll('.seg').forEach((seg) => {
+    seg.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        seg.querySelectorAll('button').forEach((b) => b.classList.remove('on'))
+        btn.classList.add('on')
+      })
+    })
+  })
+</script>
+</body>
+</html>
