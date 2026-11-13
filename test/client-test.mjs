@@ -2248,6 +2248,28 @@ const discoveredEntry = () => ({
   }
 }
 
+// —— 悬浮窗拖拽：折叠态也要能拖 ——
+// 回归点：pill（折叠成小药丸）早先只绑了 onClick（展开），没有 onPointerDown，
+// 折叠后无法拖动 —— 想换位置得先展开、拖、再折叠。
+// 且指针事件后浏览器还会派发 click，若不区分，拖动药丸会被当成点击而展开。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+
+  // 折叠态绑定了拖拽
+  check('pill 绑定 onPointerDown', /const pill = h\('div', \{\s*className: 'tu-float-pill'[\s\S]{0,900}?onPointerDown: onHeadPointerDown/.test(src), true)
+
+  // 拖拽与点击可区分
+  check('有 dragMovedRef 标记', /const dragMovedRef = useRef\(false\)/.test(src), true)
+  check('移动时置位标记', /dragMovedRef\.current = true/.test(src), true)
+  check('点击时检查标记', /if \(dragMovedRef\.current\)/.test(src), true)
+
+  // 容器找不到时的兜底（早先直接 return，表现为完全拖不动）
+  check('overlay 有视口兜底', /overlayRect = \{\s*width: typeof window/.test(src), true)
+
+  // 折叠态光标
+  check('pill 有 grab 光标', /\.tu-float-pill \{[\s\S]{0,300}?cursor: grab/.test(src), true)
+}
+
 if (failures.length > 0) {
   if (componentErrors.length > 0) {
     console.error('组件抛错：')

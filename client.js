@@ -3956,6 +3956,9 @@ body[data-ds-dark-theme] .tu-toasts,
 .tu-float[data-dragging='true'] {
   transition: none;
 }
+.tu-float[data-dragging='true'] .tu-float-pill {
+  cursor: grabbing;
+}
 .tu-float-card {
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 15px;
@@ -4240,6 +4243,10 @@ body[data-ds-dark-theme] .tu-float-card,
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  /* 折叠态现在也支持拖动，光标与触屏行为要和展开态的标题栏一致 */
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
   padding: 7px 12px 7px 10px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 999px;
@@ -5885,6 +5892,14 @@ function formatMoneyText(value) {
         })
       const rootRef = useRef(null)
       const shiftRef = useRef({ el: null, mode: '', base: '', shift: 0 })
+      /**
+       * 最近一次拖拽是否真的移动过。
+       *
+       * 指针事件之后浏览器还会派发 click。折叠态药丸的 click 是「展开」，
+       * 若不区分，用户拖动药丸换个位置会被当成点击而展开 —— 想挪位置却
+       * 展开了，很意外。用这个标记把「拖过」的 click 吞掉。
+       */
+      const dragMovedRef = useRef(false)
       const geometryRef = useRef(geometry)
       geometryRef.current = geometry
 
@@ -6380,9 +6395,27 @@ function formatMoneyText(value) {
         const button = event.target?.closest?.('button')
         if (button !== null && button !== undefined) return
         const root = rootRef.current
-        const overlay = root?.closest?.('[data-shell-overlay]') ?? root?.parentElement
-        if (root === null || root === undefined || overlay === null || overlay === undefined) return
-        const overlayRect = overlay.getBoundingClientRect()
+        if (root === null || root === undefined) return
+        /**
+         * 找用来算边界与坐标系的容器。
+         *
+         * 早先只试 `[data-shell-overlay]` 与 `parentElement`，两者都拿不到
+         * 就直接 return —— 表现是「完全拖不动」，且没有任何提示。现在补上
+         * 两个更稳的兜底：直接用 root 自身尺寸，再不行退回视口。
+         * 边界算得宽一点好过完全不能拖。
+         */
+        const overlay = root.closest?.('[data-shell-overlay]')
+          ?? root.parentElement
+          ?? root
+        let overlayRect = overlay?.getBoundingClientRect?.()
+        if (overlayRect === undefined || overlayRect === null
+          || !(overlayRect.width > 0) || !(overlayRect.height > 0)) {
+          // 容器尚未布局（或尺寸为 0）：退回视口尺寸，至少能拖动
+          overlayRect = {
+            width: typeof window !== 'undefined' ? window.innerWidth : 1024,
+            height: typeof window !== 'undefined' ? window.innerHeight : 768,
+          }
+        }
         const start = {
           x: event.clientX,
           y: event.clientY,
@@ -6402,6 +6435,7 @@ function formatMoneyText(value) {
           const dy = moveEvent.clientY - start.y
           if (!start.moved && Math.abs(dx) + Math.abs(dy) < 4) return
           start.moved = true
+          dragMovedRef.current = true
           const right = clampNumber(start.right - dx, 8, Math.max(8, overlayRect.width - start.width - 8))
           const bottom = clampNumber(start.bottom - dy, 8, Math.max(8, overlayRect.height - 90))
           geometryRef.current = { ...geometryRef.current, right, bottom }
@@ -6565,11 +6599,29 @@ function formatMoneyText(value) {
         className: 'tu-float-pill',
         role: 'button',
         tabIndex: 0,
-        onClick: () => updateSettings({ collapsed: false }),
+        /**
+         * 折叠态也要能拖。
+         *
+         * 早先 pill 只绑了 onClick（展开），没法拖动 —— 折叠后想换个位置
+         * 必须先展开、拖过去、再折叠，很别扭。这里绑上同一套拖拽处理。
+         *
+         * 但 pill 的 onClick 是「展开」，与拖拽会冲突：拖完松手会触发 click，
+         * 于是「想挪个位置」变成「展开了」。用 onHeadPointerDown 里已有的
+         * moved 标记区分 —— 拖动过就不展开。
+         */
+        onPointerDown: onHeadPointerDown,
+        onClick: (event) => {
+          // 拖动结束时 click 仍会触发，用最近一次拖拽的移动量判断
+          if (dragMovedRef.current) {
+            dragMovedRef.current = false
+            return
+          }
+          updateSettings({ collapsed: false })
+        },
         onKeyDown: (event) => {
           if (event?.key === 'Enter' || event?.key === ' ') updateSettings({ collapsed: false })
         },
-        title: t('widget.expand'),
+        title: t('widget.dragHint'),
       },
       h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
       h('span', null, `${t('widget.todayShort')} `, h('b', null, heroCostText)),
