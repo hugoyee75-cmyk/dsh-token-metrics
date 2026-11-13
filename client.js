@@ -84,6 +84,14 @@ window.__ModuleLoader__.load({
     const WIDGET_QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo', 'opencode-go'])
     /** 打开统计页 / 模型接入页的跨组件事件。 */
     const WIDGET_VIEW_EVENT = 'dsh-token-metrics:view'
+    /**
+     * 悬浮窗显隐变更事件。
+     *
+     * 主面板与悬浮窗是两个独立的 slot 组件，各自持有 settings 状态。
+     * 主面板里切换开关后，悬浮窗必须立刻响应 —— 否则用户点了「显示」
+     * 却要刷新页面才看到，体验是断的。
+     */
+    const WIDGET_VISIBLE_EVENT = 'dsh-token-metrics:widget-visible'
   /**
    * 各家服务的预设连接信息。
    *
@@ -688,6 +696,13 @@ window.__ModuleLoader__.load({
       'widget.collapse': '收起',
       'widget.expand': '展开',
       'widget.closeSettings': '关闭设置',
+      'widget.hide': '隐藏悬浮窗',
+      'widget.hideHint': '隐藏后可从统计页头部的「悬浮窗」按钮重新打开',
+      'widget.hideTip': '点击隐藏悬浮窗',
+      'widget.showTip': '点击显示悬浮窗',
+      'widget.on': '悬浮窗 ✓',
+      'widget.off': '悬浮窗 ✕',
+
       'widget.left': '剩余',
       'widget.scope': '统计范围',
       'widget.scopeSelected': '所选供应商',
@@ -1221,6 +1236,13 @@ window.__ModuleLoader__.load({
       'widget.collapse': 'Collapse',
       'widget.expand': 'Expand',
       'widget.closeSettings': 'Close settings',
+      'widget.hide': 'Hide widget',
+      'widget.hideHint': 'Reopen it from the "Widget" button in the stats page header',
+      'widget.hideTip': 'Hide the floating widget',
+      'widget.showTip': 'Show the floating widget',
+      'widget.on': 'Widget ✓',
+      'widget.off': 'Widget ✕',
+
       'widget.left': 'left',
       'widget.scope': 'Scope',
       'widget.scopeSelected': 'Selected',
@@ -5680,6 +5702,14 @@ function formatMoneyText(value) {
 
     /** 悬浮窗设置的默认值。 */
     const WIDGET_DEFAULTS = {
+      /**
+       * 用户主动隐藏整个悬浮窗。
+       *
+       * 与 `collapsed` 不同：collapsed 是折叠成一条小药丸（仍常驻可见），
+       * 这个是把整块 UI 从 DOM 里移除。由 issue #10 提出 —— 有用户不需要
+       * 常驻占用屏幕角落。
+       */
+      visible: true,
       collapsed: false,
       /** null 表示「还没手动勾选过」，此时显示全部已配置站点。 */
       sites: null,
@@ -5699,6 +5729,8 @@ function formatMoneyText(value) {
         if (parsed === null || typeof parsed !== 'object') return { ...WIDGET_DEFAULTS }
         return {
           ...WIDGET_DEFAULTS,
+          // 默认**显示**：老用户升级后不该突然消失。只有明确存了 false 才隐藏。
+          visible: parsed.visible !== false,
           collapsed: parsed.collapsed === true,
           sites: Array.isArray(parsed.sites) ? parsed.sites.filter(Boolean).map((id) => String(id)) : null,
           scope: parsed.scope === 'all' ? 'all' : 'selected',
@@ -5828,6 +5860,20 @@ function formatMoneyText(value) {
 
       const [settings, setSettings] = useState(readWidgetSettings)
       const [settingsOpen, setSettingsOpen] = useState(false)
+      /**
+       * 监听主面板的显隐开关。
+       *
+       * 用事件而不是轮询：主面板点一下就变，没有延迟感，也不需要额外定时器。
+       */
+      useEffect(() => {
+        const onVisibleChange = () => setSettings(readWidgetSettings())
+        const canListen = typeof window !== 'undefined'
+          && typeof window.addEventListener === 'function'
+        if (canListen) window.addEventListener(WIDGET_VISIBLE_EVENT, onVisibleChange)
+        return () => {
+          if (canListen) window.removeEventListener(WIDGET_VISIBLE_EVENT, onVisibleChange)
+        }
+      }, [])
       const [probing, setProbing] = useState(false)
       const [hiddenForPanel, setHiddenForPanel] = useState(false)
       const [geometry, setGeometry] = useState(() => readPersistedGeometry()
@@ -6406,6 +6452,10 @@ function formatMoneyText(value) {
         return null
       })()
 
+      // 用户主动隐藏（issue #10）：整块 UI 不渲染。
+      // 重新打开走主面板头部的「悬浮窗」开关 —— 必须有那个入口，
+      // 否则隐藏后就没有地方能再打开它。
+      if (settings.visible === false) return null
       if (hiddenForPanel) return null
 
       const head = h('div', {
@@ -6604,7 +6654,25 @@ function formatMoneyText(value) {
               className: 'tu-float-btn',
               style: { width: 'auto', padding: '0 7px', fontSize: '10.5px' },
               onClick: resetPosition,
-            }, t('widget.reset'))))
+            }, t('widget.reset'))),
+          /**
+           * 隐藏整个悬浮窗（issue #10）。
+           *
+           * 放在设置面板里是因为这里就是「调整悬浮窗本身」的地方，
+           * 用户改完其它选项自然会看到它。隐藏后从主面板头部的
+           * 「悬浮窗」开关重新打开 —— 两个入口互为兜底。
+           */
+          h('div', { className: 'tu-float-setrow' },
+            h('button', {
+              type: 'button',
+              className: 'tu-float-btn',
+              style: { width: '100%', padding: '5px 7px', fontSize: '11px' },
+              title: t('widget.hideHint'),
+              onClick: () => {
+                updateSettings({ visible: false })
+                setSettingsOpen(false)
+              },
+            }, t('widget.hide'))))
         : null
 
       const showSkeleton = status === 'loading' && data === undefined
@@ -6979,6 +7047,25 @@ function formatMoneyText(value) {
         }
       }, [])
       // 供应商编辑表单：null 表示关闭
+      /**
+       * 悬浮窗显隐（issue #10）。
+       *
+       * 主面板是隐藏后唯一的唤回入口 —— 悬浮窗隐藏时它自己也看不见了。
+       * 初值从同一份 localStorage 读，与悬浮窗组件共用配置。
+       */
+      const [widgetVisible, setWidgetVisible] = useState(() => readWidgetSettings().visible !== false)
+      const toggleWidgetVisible = () => {
+        setWidgetVisible((current) => {
+          const next = current !== true
+          try {
+            const settings = readWidgetSettings()
+            saveWidgetSettings({ ...settings, visible: next })
+            // 通知悬浮窗组件立即响应，不必等页面刷新
+            window.dispatchEvent(new CustomEvent(WIDGET_VISIBLE_EVENT, { detail: { visible: next } }))
+          } catch { /* 隐私模式下只在本次生效 */ }
+          return next
+        })
+      }
       const [supplierForm, setSupplierForm] = useState(null)
       /**
        * 预算编辑表单。
@@ -8427,6 +8514,21 @@ function formatMoneyText(value) {
             onClick: refresh,
             disabled: refreshing,
           }, refreshing ? t('refreshing') : t('refresh')),
+          /**
+           * 悬浮窗开关（issue #10）。
+           *
+           * 必须有这个入口：悬浮窗隐藏后自身不可见，若只把「隐藏」按钮
+           * 放在悬浮窗的设置里，用户点完就再也找不回来了。
+           * 用 aria-pressed 表达开关语义，读屏能读出「已开/已关」。
+           */
+          h('button', {
+            type: 'button',
+            className: 'tu-button',
+            'aria-pressed': widgetVisible ? 'true' : 'false',
+            'data-active': widgetVisible ? 'true' : 'false',
+            title: widgetVisible ? t('widget.hideTip') : t('widget.showTip'),
+            onClick: toggleWidgetVisible,
+          }, widgetVisible ? t('widget.on') : t('widget.off')),
           headTools,
         ),
       )

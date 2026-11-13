@@ -2220,6 +2220,34 @@ const discoveredEntry = () => ({
   renderWithTab('统计')
 }
 
+// —— 悬浮窗可隐藏（issue #10）——
+// 用户要求「用量悬浮窗支持自定义显示/不显示」。
+// 关键设计点：隐藏后必须还有地方能重新打开，否则点一次就永远找不回来了。
+{
+  const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
+
+  // 默认显示：老用户升级后不该突然消失
+  check('默认配置 visible 为 true', /visible: true/.test(src), true)
+  check('读取时默认显示', /visible: parsed\.visible !== false/.test(src), true)
+
+  // 隐藏生效
+  check('渲染时判断 visible', /settings\.visible === false\) return null/.test(src), true)
+
+  // 两个入口：悬浮窗内隐藏 + 主面板开关（后者是唤回的唯一入口）
+  check('悬浮窗设置有隐藏按钮', /'widget\.hide'/.test(src), true)
+  check('主面板有显隐开关', /toggleWidgetVisible/.test(src), true)
+
+  // 跨组件同步：主面板切换后悬浮窗立即响应
+  check('有显隐同步事件', /WIDGET_VISIBLE_EVENT/.test(src), true)
+  check('悬浮窗监听该事件', /addEventListener\(WIDGET_VISIBLE_EVENT/.test(src), true)
+  check('主面板派发该事件', /dispatchEvent\(new CustomEvent\(WIDGET_VISIBLE_EVENT/.test(src), true)
+
+  // 中文文案齐全
+  for (const key of ['widget.hide', 'widget.hideHint', 'widget.on', 'widget.off']) {
+    check(`文案含 ${key}`, src.includes(`'${key}'`), true)
+  }
+}
+
 if (failures.length > 0) {
   if (componentErrors.length > 0) {
     console.error('组件抛错：')
