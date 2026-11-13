@@ -3,6 +3,32 @@
 本文件记录本项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.2] - 2026-11-13
+
+修复悬浮窗卡在视口外无法恢复，并让折叠态药丸支持拖拽。
+
+### 修复
+
+- **悬浮窗拖到视口外后无法恢复（用户实测卡死）**：边界钳制用了硬编码的
+  `innerHeight - 120`，而展开态卡片高约 400px —— 一旦该值存进 localStorage，
+  每次加载卡片顶部（含标题栏）都会顶出视口，既看不到标题栏（无法拖回），
+  也点不到设置里的「复位」，只能清 localStorage。现在三处一起修：
+  - 拖拽时按卡片**真实高度**钳制（bottom 上限 = 容器高 − 卡片高 − 8）
+  - 加载时自动纠正已存的越界位置；卡片比视口还高时退化为保证标题栏可及
+  - 新增救命快捷键 `Cmd/Ctrl + Shift + Backspace` 强制复位
+- **折叠态药丸无法拖拽**：此前 pill 只绑了 `onClick`（展开）。现在用独立的
+  `onPillPointerDown`（不复用标题栏那套，避免 `closest('button')` 误判与
+  状态纠缠），点一下展开、按住拖动换位置
+- **拖过一次后药丸再也点不开**：`dragJustEndedRef` 的消费逻辑写成「任一
+  标记为真就 return 并复位」，导致 `pillDraggingRef` 为真时也把标记清了。
+  现在只认 `dragJustEndedRef` 且无条件清掉，保证只吞一次 click
+
+### 说明
+
+- 折叠态气泡提示改为「点击展开；按住可拖动」，与新的交互一致
+
+[0.4.2]: https://github.com/hugoyee75-cmyk/dsh-token-metrics/releases/tag/v0.4.2
+
 ## [0.4.1] - 2026-11-13
 
 悬浮窗支持隐藏/显示，并修复折叠态无法拖动。

@@ -2266,6 +2266,25 @@ const discoveredEntry = () => ({
   check('pill 用独立 handler', /onPointerDown: onPillPointerDown/.test(src), true)
   check('有 dragJustEndedRef 标记', /const dragJustEndedRef = useRef\(false\)/.test(src), true)
   check('click 里消费标记', /dragJustEndedRef\.current = false/.test(src), true)
+
+  // 关键回归：标记必须**只吞一次** click。
+  // 早先写成「pillDraggingRef 或 dragJustEndedRef 任一为真就 return 并复位」，
+  // 导致拖过一次之后再也点不开（因为 pillDraggingRef 为真时也复位了标记）。
+  {
+    let dragJustEnded = false
+    let collapsed = false
+    const onClick = () => {
+      if (dragJustEnded) { dragJustEnded = false; return }
+      collapsed = true
+    }
+    dragJustEnded = true
+    onClick()
+    // 真值断言：否定条件要取反
+    check('拖后那次 click 被吞', collapsed === false, `实际 collapsed=${collapsed}`)
+    collapsed = false
+    onClick()
+    check('再次点击能正常展开', collapsed, true)
+  }
   check('药丸拖拽按自身尺寸钳制', /overlayRect\.height - start\.height - 8/.test(src), true)
 
   // 拖拽保持 0.4.0 的简单实现：不加额外监听器，避免残留导致卡死

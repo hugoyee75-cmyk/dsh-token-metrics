@@ -709,6 +709,7 @@ window.__ModuleLoader__.load({
       'widget.scopeAll': '全部',
       'widget.quotaMain': '主窗口',
       'widget.dragHint': '拖动标题可移动；双击恢复自动避让',
+      'widget.pillHint': '点击展开；按住可拖动',
       'widget.noSitesHint': '勾选后才会显示',
       'widget.loading': '读取中…',
       'widget.offline': '离线',
@@ -1249,6 +1250,7 @@ window.__ModuleLoader__.load({
       'widget.scopeAll': 'All',
       'widget.quotaMain': 'Main window',
       'widget.dragHint': 'Drag the header to move; double-click to restore auto-avoid',
+      'widget.pillHint': 'Click to expand; drag to move',
       'widget.noSitesHint': 'Check a provider to show it',
       'widget.loading': 'Loading…',
       'widget.offline': 'Offline',
@@ -6230,6 +6232,14 @@ function formatMoneyText(value) {
             ? Math.max(8, window.innerHeight - cardHeight - 8)
             : Math.max(8, window.innerHeight - minVisible)
           // 卡片高到放不下时（小窗口 + 展开态），至少保住标题栏位置
+          /**
+           * 卡片比视口还高时（小窗口 + 展开态），无法让整块可见。
+           * 此时 bottom 取最小值 8 —— 让卡片**顶部对齐视口顶部**，
+           * 保证标题栏（唯一拖拽入口）始终可及。底部超出部分看不到，
+           * 但用户可以折叠或拖到位置合适后再展开。
+           *
+           * 取 8 而不是 0：留一点边距，避免贴边时阴影被裁掉。
+           */
           const safeBottom = cardHeight >= window.innerHeight - minVisible - 8
             ? 8
             : maxBottom
@@ -6734,9 +6744,18 @@ function formatMoneyText(value) {
          * 没移动，当点击处理（展开）；移动过则不展开，只更新位置。
          */
         onPointerDown: onPillPointerDown,
-        onClick: (event) => {
-          // 拖动结束后的 click 不该触发展开
-          if (pillDraggingRef.current || dragJustEndedRef.current) {
+        onClick: () => {
+          /**
+           * 拖动结束后的那一次 click 不该触发展开。
+           *
+           * 但**必须只吞一次**：早先写成「pillDraggingRef 或 dragJustEndedRef
+           * 任一为真就 return 并复位」，问题是 pillDraggingRef 为真时也会复位
+           * 标记，于是下一次纯点击同样被吞 —— 表现是拖过一次之后，点药丸
+           * 再也展不开了（实测复现）。
+           *
+           * 现在只认 dragJustEndedRef，且无条件清掉它。
+           */
+          if (dragJustEndedRef.current) {
             dragJustEndedRef.current = false
             return
           }
@@ -6745,7 +6764,7 @@ function formatMoneyText(value) {
         onKeyDown: (event) => {
           if (event?.key === 'Enter' || event?.key === ' ') updateSettings({ collapsed: false })
         },
-        title: t('widget.expand'),
+        title: t('widget.pillHint'),
       },
       h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
       h('span', null, `${t('widget.todayShort')} `, h('b', null, heroCostText)),
