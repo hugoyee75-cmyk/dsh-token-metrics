@@ -2255,13 +2255,22 @@ const discoveredEntry = () => ({
 {
   const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
 
-  // 折叠态绑定了拖拽
-  check('pill 绑定 onPointerDown', /const pill = h\('div', \{\s*className: 'tu-float-pill'[\s\S]{0,900}?onPointerDown: onHeadPointerDown/.test(src), true)
+  // 折叠态保持「点击展开」（拖拽曾试过但用户反馈卡死，已回退）
+  check('pill 保持点击展开', /const pill = h\('div', \{\s*className: 'tu-float-pill'[\s\S]{0,1400}?onClick: \(\) => updateSettings\(\{ collapsed: false \}\)/.test(src), true)
+  // 折叠态不应再绑拖拽（避免重蹈卡死）
+  // 精确检查 pill 自身的属性键（截取到它的闭合处，避免扫到后续代码）
+  const pillStart = src.indexOf("const pill = h('div', {")
+  const pillBlock = pillStart === -1 ? '' : src.slice(pillStart, pillStart + 1400)
+  const pillProps = [...pillBlock.matchAll(/\n\s{6,10}(\w+):/g)].map((m) => m[1])
+  // 本文件的 check 是真值断言：否定条件要取反后再传，第三参只是失败说明
+  check('pill 未绑定 onPointerDown', !pillProps.includes('onPointerDown'),
+    `实际属性: ${pillProps.join(',')}`)
+  check('pill 有 onClick 展开', pillProps.includes('onClick'), true)
 
-  // 拖拽与点击可区分
-  check('有 dragMovedRef 标记', /const dragMovedRef = useRef\(false\)/.test(src), true)
-  check('移动时置位标记', /dragMovedRef\.current = true/.test(src), true)
-  check('点击时检查标记', /if \(dragMovedRef\.current\)/.test(src), true)
+  // 拖拽禁重入与兜底清理（防止监听器残留导致卡死）
+  check('有 draggingRef 禁重入', /const draggingRef = useRef\(false\)/.test(src), true)
+  check('入口检查禁重入', /if \(draggingRef\.current\) return/.test(src), true)
+  check('有 pointerup 兜底清理', /const safetyUp = /.test(src), true)
 
   // 容器找不到时的兜底（早先直接 return，表现为完全拖不动）
   check('overlay 有视口兜底', /overlayRect = \{\s*width: typeof window/.test(src), true)

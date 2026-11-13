@@ -5900,6 +5900,16 @@ function formatMoneyText(value) {
        * 展开了，很意外。用这个标记把「拖过」的 click 吞掉。
        */
       const dragMovedRef = useRef(false)
+      /**
+       * 是否已有一个拖拽会话在进行。
+       *
+       * pointerdown 可能重复触发（折叠态 pill 上尤其容易：mousedown 与
+       * pointerdown 混用、触屏长按等）。若不禁重入，会给 window 挂上多组
+       * pointermove 监听器 —— 之后每次移动鼠标都触发 N 次 setGeometry，
+       * 表现为面板卡死、跟着鼠标乱跳，且 pointerup 只清理最后一组，
+       * 残留的监听器会一直挂到刷新页面。
+       */
+      const draggingRef = useRef(false)
       const geometryRef = useRef(geometry)
       geometryRef.current = geometry
 
@@ -6392,6 +6402,8 @@ function formatMoneyText(value) {
 
       const onHeadPointerDown = (event) => {
         if (event.button !== 0) return
+        // 已有一个拖拽会话在进行：直接忽略，避免重复挂监听器
+        if (draggingRef.current) return
         const button = event.target?.closest?.('button')
         if (button !== null && button !== undefined) return
         const root = rootRef.current
@@ -6424,6 +6436,7 @@ function formatMoneyText(value) {
           width: geometry.width,
           moved: false,
         }
+        draggingRef.current = true
         root.dataset.dragging = 'true'
         // 捕获指针：拖出浏览器窗口后松手，pointerup 仍会发到捕获元素，
         // 否则「dragging」态和三个监听器会一直残留。
@@ -6448,6 +6461,7 @@ function formatMoneyText(value) {
           window.removeEventListener('pointermove', onMove)
           window.removeEventListener('pointerup', onUp)
           window.removeEventListener('pointercancel', onUp)
+          draggingRef.current = false
           delete root.dataset.dragging
           if (start.moved) {
             persistGeometry(geometryRef.current)
@@ -6460,6 +6474,22 @@ function formatMoneyText(value) {
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
         window.addEventListener('pointercancel', onUp)
+        /**
+         * 兜底清理：pointerup 可能收不到（指针在窗口外松开、浏览器丢事件、
+         * 或 setPointerCapture 在该元素上没生效）。
+         *
+         * 一旦收不到，window 上的监听器就永久残留 —— 之后每次移动鼠标都会
+         * 触发 onMove 改 geometry，表现为面板卡死或跟着鼠标乱动。
+         *
+         * 这里再挂一个 window 级的 pointerup（捕获阶段），确保任何情况下
+         * 松手都能清理掉。onUp 自身是幂等的（removeEventListener 重复调用
+         * 无害），所以两条路径都走到也没问题。
+         */
+        const safetyUp = () => {
+          window.removeEventListener('pointerup', safetyUp, true)
+          onUp({ pointerId: event.pointerId })
+        }
+        window.addEventListener('pointerup', safetyUp, true)
       }
 
       const resetPosition = () => {
@@ -6496,7 +6526,7 @@ function formatMoneyText(value) {
         className: 'tu-float-head',
         onPointerDown: onHeadPointerDown,
         onDoubleClick: resetPosition,
-        title: t('widget.dragHint'),
+        title: t('widget.expand'),
       },
       h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
       h('span', { className: 'tu-float-title' }, t('widget.title')),
@@ -6600,28 +6630,22 @@ function formatMoneyText(value) {
         role: 'button',
         tabIndex: 0,
         /**
-         * 折叠态也要能拖。
+         * 折叠态暂不绑定拖拽。
          *
-         * 早先 pill 只绑了 onClick（展开），没法拖动 —— 折叠后想换个位置
-         * 必须先展开、拖过去、再折叠，很别扭。这里绑上同一套拖拽处理。
+         * 曾尝试让 pill 复用 onHeadPointerDown，但有用户反馈「面板完全卡住
+         * 也不响应拖动」。虽然未能复现，pill 上挂指针拖拽确实多一层风险：
+         * 折叠态尺寸小、点击与拖动意图难区分，且它的 onClick 是「展开」，
+         * 与拖拽天然冲突。
          *
-         * 但 pill 的 onClick 是「展开」，与拖拽会冲突：拖完松手会触发 click，
-         * 于是「想挪个位置」变成「展开了」。用 onHeadPointerDown 里已有的
-         * moved 标记区分 —— 拖动过就不展开。
+         * 先回到「折叠态点击展开」这个稳定行为。想换位置：展开后拖标题栏，
+         * 位置会自动保存，再折叠时就停在新位置了 —— 功能不受影响，
+         * 只是多一步。
          */
-        onPointerDown: onHeadPointerDown,
-        onClick: (event) => {
-          // 拖动结束时 click 仍会触发，用最近一次拖拽的移动量判断
-          if (dragMovedRef.current) {
-            dragMovedRef.current = false
-            return
-          }
-          updateSettings({ collapsed: false })
-        },
+        onClick: () => updateSettings({ collapsed: false }),
         onKeyDown: (event) => {
           if (event?.key === 'Enter' || event?.key === ' ') updateSettings({ collapsed: false })
         },
-        title: t('widget.dragHint'),
+        title: t('widget.expand'),
       },
       h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
       h('span', null, `${t('widget.todayShort')} `, h('b', null, heroCostText)),
