@@ -2255,25 +2255,27 @@ const discoveredEntry = () => ({
 {
   const src = readFileSync(join(here, '..', 'client.js'), 'utf8')
 
-  // 折叠态保持「点击展开」（拖拽曾试过但用户反馈卡死，已回退）
-  check('pill 保持点击展开', /const pill = h\('div', \{\s*className: 'tu-float-pill'[\s\S]{0,1400}?onClick: \(\) => updateSettings\(\{ collapsed: false \}\)/.test(src), true)
-  // 折叠态不应再绑拖拽（避免重蹈卡死）
-  // 精确检查 pill 自身的属性键（截取到它的闭合处，避免扫到后续代码）
+  // 折叠态支持拖拽 + 点击展开（两者靠移动距离区分）
   const pillStart = src.indexOf("const pill = h('div', {")
   const pillBlock = pillStart === -1 ? '' : src.slice(pillStart, pillStart + 1400)
   const pillProps = [...pillBlock.matchAll(/\n\s{6,10}(\w+):/g)].map((m) => m[1])
-  // 本文件的 check 是真值断言：否定条件要取反后再传，第三参只是失败说明
-  check('pill 未绑定 onPointerDown', !pillProps.includes('onPointerDown'),
+  check('pill 绑定 onPointerDown', pillProps.includes('onPointerDown'),
     `实际属性: ${pillProps.join(',')}`)
   check('pill 有 onClick 展开', pillProps.includes('onClick'), true)
+  check('有独立的 onPillPointerDown', /const onPillPointerDown = /.test(src), true)
+  check('pill 用独立 handler', /onPointerDown: onPillPointerDown/.test(src), true)
+  check('有 dragJustEndedRef 标记', /const dragJustEndedRef = useRef\(false\)/.test(src), true)
+  check('click 里消费标记', /dragJustEndedRef\.current = false/.test(src), true)
+  check('药丸拖拽按自身尺寸钳制', /overlayRect\.height - start\.height - 8/.test(src), true)
 
-  // 拖拽禁重入与兜底清理（防止监听器残留导致卡死）
-  check('有 draggingRef 禁重入', /const draggingRef = useRef\(false\)/.test(src), true)
-  check('入口检查禁重入', /if \(draggingRef\.current\) return/.test(src), true)
-  check('有 pointerup 兜底清理', /const safetyUp = /.test(src), true)
+  // 拖拽保持 0.4.0 的简单实现：不加额外监听器，避免残留导致卡死
+  check('拖拽用 window 监听并成对移除',
+    /window\.addEventListener\('pointerup', onUp\)/.test(src)
+    && /window\.removeEventListener\('pointerup', onUp\)/.test(src), true)
+  check('无额外兜底监听器残留风险', !src.includes('const safetyUp'))
 
-  // 容器找不到时的兜底（早先直接 return，表现为完全拖不动）
-  check('overlay 有视口兜底', /overlayRect = \{\s*width: typeof window/.test(src), true)
+  // 回退到 0.4.0：不再自造 overlay 兜底，保持原有行为
+  check('拖拽用原始 overlay 查找', /const overlay = root\?\.closest\?\.\('\[data-shell-overlay\]'\)/.test(src), true)
 
   // 折叠态光标
   check('pill 有 grab 光标', /\.tu-float-pill \{[\s\S]{0,300}?cursor: grab/.test(src), true)

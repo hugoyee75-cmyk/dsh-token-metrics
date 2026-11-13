@@ -5892,24 +5892,6 @@ function formatMoneyText(value) {
         })
       const rootRef = useRef(null)
       const shiftRef = useRef({ el: null, mode: '', base: '', shift: 0 })
-      /**
-       * 最近一次拖拽是否真的移动过。
-       *
-       * 指针事件之后浏览器还会派发 click。折叠态药丸的 click 是「展开」，
-       * 若不区分，用户拖动药丸换个位置会被当成点击而展开 —— 想挪位置却
-       * 展开了，很意外。用这个标记把「拖过」的 click 吞掉。
-       */
-      const dragMovedRef = useRef(false)
-      /**
-       * 是否已有一个拖拽会话在进行。
-       *
-       * pointerdown 可能重复触发（折叠态 pill 上尤其容易：mousedown 与
-       * pointerdown 混用、触屏长按等）。若不禁重入，会给 window 挂上多组
-       * pointermove 监听器 —— 之后每次移动鼠标都触发 N 次 setGeometry，
-       * 表现为面板卡死、跟着鼠标乱跳，且 pointerup 只清理最后一组，
-       * 残留的监听器会一直挂到刷新页面。
-       */
-      const draggingRef = useRef(false)
       const geometryRef = useRef(geometry)
       geometryRef.current = geometry
 
@@ -6225,9 +6207,35 @@ function formatMoneyText(value) {
 
         if (settings.pinned) {
           clearShift()
+          /**
+           * 修正已保存的越界位置。
+           *
+           * 早先 bottom 的上限是硬编码的 `innerHeight - 120`，那个 120 只够
+           * 露出卡片底部一小截。卡片展开时高约 400px，一旦这个值被存下来，
+           * 每次加载卡片顶部（含标题栏）都会顶出视口 —— 用户看到的是
+           * 「卡在右上角，拖不动也关不掉」，只能清 localStorage。
+           *
+           * 现在按卡片**真实高度**钳制：底部最多留到「卡片完整可见」的位置。
+           * 卡片比视口还高时退化为「至少露出标题栏」（留 56px）。
+           */
+          /**
+           * 取卡片高度。首次渲染时可能还没挂载（高度 0），此时用一个
+           * 保守估计（展开态约 400px）—— 宁可位置偏上一点，也不能让
+           * 标题栏跑到视口外。
+           */
+          const measured = rootRef.current?.getBoundingClientRect?.().height ?? 0
+          const cardHeight = measured > 0 ? measured : 400
+          const minVisible = 56
+          const maxBottom = cardHeight > 0
+            ? Math.max(8, window.innerHeight - cardHeight - 8)
+            : Math.max(8, window.innerHeight - minVisible)
+          // 卡片高到放不下时（小窗口 + 展开态），至少保住标题栏位置
+          const safeBottom = cardHeight >= window.innerHeight - minVisible - 8
+            ? 8
+            : maxBottom
           commitGeometry({
             right: clampNumber(settings.right, 8, Math.max(8, window.innerWidth - WIDGET_MIN_WIDTH - 8)),
-            bottom: clampNumber(settings.bottom, 8, Math.max(8, window.innerHeight - 120)),
+            bottom: clampNumber(settings.bottom, 8, Math.max(8, safeBottom)),
             width: WIDGET_WIDTH,
             overlap: false,
           })
@@ -6402,41 +6410,30 @@ function formatMoneyText(value) {
 
       const onHeadPointerDown = (event) => {
         if (event.button !== 0) return
-        // 已有一个拖拽会话在进行：直接忽略，避免重复挂监听器
-        if (draggingRef.current) return
         const button = event.target?.closest?.('button')
         if (button !== null && button !== undefined) return
         const root = rootRef.current
-        if (root === null || root === undefined) return
+        const overlay = root?.closest?.('[data-shell-overlay]') ?? root?.parentElement
+        if (root === null || root === undefined || overlay === null || overlay === undefined) return
+        const overlayRect = overlay.getBoundingClientRect()
         /**
-         * 找用来算边界与坐标系的容器。
+         * 记录卡片**真实高度**参与边界钳制。
          *
-         * 早先只试 `[data-shell-overlay]` 与 `parentElement`，两者都拿不到
-         * 就直接 return —— 表现是「完全拖不动」，且没有任何提示。现在补上
-         * 两个更稳的兜底：直接用 root 自身尺寸，再不行退回视口。
-         * 边界算得宽一点好过完全不能拖。
+         * 早先只记 width，bottom 的上限是硬编码的 `height - 90` —— 那个
+         * 90 只够露出卡片底部一小截。卡片展开时高约 400px，一旦拖到
+         * 靠近下边界，整块卡片顶部（含标题栏）就被推出视口：既看不见
+         * 也拖不动，只能刷新页面。这是本次修复的核心。
          */
-        const overlay = root.closest?.('[data-shell-overlay]')
-          ?? root.parentElement
-          ?? root
-        let overlayRect = overlay?.getBoundingClientRect?.()
-        if (overlayRect === undefined || overlayRect === null
-          || !(overlayRect.width > 0) || !(overlayRect.height > 0)) {
-          // 容器尚未布局（或尺寸为 0）：退回视口尺寸，至少能拖动
-          overlayRect = {
-            width: typeof window !== 'undefined' ? window.innerWidth : 1024,
-            height: typeof window !== 'undefined' ? window.innerHeight : 768,
-          }
-        }
+        const cardHeight = root.getBoundingClientRect?.().height ?? 0
         const start = {
           x: event.clientX,
           y: event.clientY,
           right: geometry.right,
           bottom: geometry.bottom,
           width: geometry.width,
+          height: cardHeight,
           moved: false,
         }
-        draggingRef.current = true
         root.dataset.dragging = 'true'
         // 捕获指针：拖出浏览器窗口后松手，pointerup 仍会发到捕获元素，
         // 否则「dragging」态和三个监听器会一直残留。
@@ -6448,9 +6445,16 @@ function formatMoneyText(value) {
           const dy = moveEvent.clientY - start.y
           if (!start.moved && Math.abs(dx) + Math.abs(dy) < 4) return
           start.moved = true
-          dragMovedRef.current = true
+          /**
+           * 边界的四条边都要保证「看得见、抓得到」。
+           *
+           * 上下钳制要留出卡片自身高度：bottom 最大 = 容器高 - 卡片高 - 边距，
+           * 否则卡片顶部会顶出视口，标题栏（唯一的拖拽入口）随之消失。
+           * 卡片比容器还高时（小窗口 + 展开态），退化为「至少露出标题栏」。
+           */
+          const maxBottom = Math.max(8, overlayRect.height - start.height - 8)
           const right = clampNumber(start.right - dx, 8, Math.max(8, overlayRect.width - start.width - 8))
-          const bottom = clampNumber(start.bottom - dy, 8, Math.max(8, overlayRect.height - 90))
+          const bottom = clampNumber(start.bottom - dy, 8, maxBottom)
           geometryRef.current = { ...geometryRef.current, right, bottom }
           setGeometry((previous) => ({ ...previous, right, bottom }))
         }
@@ -6461,7 +6465,6 @@ function formatMoneyText(value) {
           window.removeEventListener('pointermove', onMove)
           window.removeEventListener('pointerup', onUp)
           window.removeEventListener('pointercancel', onUp)
-          draggingRef.current = false
           delete root.dataset.dragging
           if (start.moved) {
             persistGeometry(geometryRef.current)
@@ -6474,22 +6477,6 @@ function formatMoneyText(value) {
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
         window.addEventListener('pointercancel', onUp)
-        /**
-         * 兜底清理：pointerup 可能收不到（指针在窗口外松开、浏览器丢事件、
-         * 或 setPointerCapture 在该元素上没生效）。
-         *
-         * 一旦收不到，window 上的监听器就永久残留 —— 之后每次移动鼠标都会
-         * 触发 onMove 改 geometry，表现为面板卡死或跟着鼠标乱动。
-         *
-         * 这里再挂一个 window 级的 pointerup（捕获阶段），确保任何情况下
-         * 松手都能清理掉。onUp 自身是幂等的（removeEventListener 重复调用
-         * 无害），所以两条路径都走到也没问题。
-         */
-        const safetyUp = () => {
-          window.removeEventListener('pointerup', safetyUp, true)
-          onUp({ pointerId: event.pointerId })
-        }
-        window.addEventListener('pointerup', safetyUp, true)
       }
 
       const resetPosition = () => {
@@ -6497,6 +6484,34 @@ function formatMoneyText(value) {
         saveWidgetSettings(next)
         setSettings(next)
       }
+
+      /**
+       * 救命快捷键：把悬浮窗拉回可见位置。
+       *
+       * 为什么需要：一旦卡片被拖/存到标题栏跑出视口的位置，用户既看不到
+       * 标题栏（无法拖回），也点不到设置里的「复位」——只能清 localStorage
+       * 或刷新页面。实测有用户卡在这个状态。
+       *
+       * 用 Cmd/Ctrl + Shift + Backspace：与浏览器常用快捷键不冲突，
+       * 且不依赖鼠标位置（标题栏不可见时也能按）。
+       */
+      useEffect(() => {
+        const onRescue = (event) => {
+          const combo = (event?.metaKey === true || event?.ctrlKey === true)
+            && event?.shiftKey === true
+          if (!combo) return
+          if (event?.key !== 'Backspace' && event?.key !== 'Delete') return
+          event.preventDefault?.()
+          resetPosition()
+        }
+        const canListen = typeof document !== 'undefined'
+          && typeof document.addEventListener === 'function'
+        if (canListen) document.addEventListener('keydown', onRescue)
+        return () => {
+          if (canListen) document.removeEventListener('keydown', onRescue)
+        }
+      }, [])
+
 
       const toggleCollapsed = () => updateSettings({ collapsed: !settings.collapsed })
       const openSite = () => openPanel('suppliers')
@@ -6526,7 +6541,7 @@ function formatMoneyText(value) {
         className: 'tu-float-head',
         onPointerDown: onHeadPointerDown,
         onDoubleClick: resetPosition,
-        title: t('widget.expand'),
+        title: t('widget.dragHint'),
       },
       h('span', { className: 'tu-float-pulse', 'aria-hidden': true }),
       h('span', { className: 'tu-float-title' }, t('widget.title')),
@@ -6625,23 +6640,108 @@ function formatMoneyText(value) {
         rows,
         foot)
 
+      /**
+       * 折叠态（药丸）的拖拽处理。
+       *
+       * 为什么不复用 onHeadPointerDown：
+       *  · 那个函数有 `closest('button')` 早退判断，药丸内部含设置/刷新按钮，
+       *    点在按钮上会误判；
+       *  · 药丸的 onClick 是「展开」，与拖拽共用一套状态容易互相干扰。
+       *
+       * 这里单独实现，只做三件事：记录起点、移动时更新几何、松手时落盘。
+       * 移动量小于阈值就视为点击（交给 onClick 展开），否则吞掉这次 click。
+       */
+      const pillDraggingRef = useRef(false)
+      /**
+       * 「刚刚拖动过」标记。
+       *
+       * pointerup 之后浏览器才派发 click，而那时 pillDraggingRef 已经复位成
+       * false 了 —— 只看它会误判成点击而展开。这个标记在 onUp 里置位、
+       * 在 click 里消费，专门吃掉「拖完那一下」的 click。
+       */
+      const dragJustEndedRef = useRef(false)
+      const onPillPointerDown = (event) => {
+        if (event.button !== 0) return
+        // 点在药丸内部的按钮上时不拖拽
+        const hitButton = event.target?.closest?.('button')
+        if (hitButton !== null && hitButton !== undefined) return
+        const root = rootRef.current
+        if (root === null || root === undefined) return
+        // 防重入：上一次拖拽会话若未正常结束，直接忽略
+        if (pillDraggingRef.current) return
+        const overlay = root.closest?.('[data-shell-overlay]') ?? root.parentElement ?? root
+        let overlayRect = overlay?.getBoundingClientRect?.()
+        if (overlayRect === undefined || overlayRect === null
+          || !(overlayRect.width > 0) || !(overlayRect.height > 0)) {
+          overlayRect = {
+            width: typeof window !== 'undefined' ? window.innerWidth : 1024,
+            height: typeof window !== 'undefined' ? window.innerHeight : 768,
+          }
+        }
+        const rect = root.getBoundingClientRect?.() ?? { width: 0, height: 0 }
+        const start = {
+          x: event.clientX,
+          y: event.clientY,
+          right: geometry.right,
+          bottom: geometry.bottom,
+          width: rect.width || geometry.width,
+          height: rect.height || 0,
+          moved: false,
+        }
+        pillDraggingRef.current = true
+        root.dataset.dragging = 'true'
+        const onMove = (moveEvent) => {
+          const dx = moveEvent.clientX - start.x
+          const dy = moveEvent.clientY - start.y
+          if (!start.moved && Math.abs(dx) + Math.abs(dy) < 4) return
+          start.moved = true
+          // 四条边都按药丸**自身尺寸**钳制，保证始终完整可见
+          const maxRight = Math.max(8, overlayRect.width - start.width - 8)
+          const maxBottom = Math.max(8, overlayRect.height - start.height - 8)
+          const right = clampNumber(start.right - dx, 8, maxRight)
+          const bottom = clampNumber(start.bottom - dy, 8, maxBottom)
+          geometryRef.current = { ...geometryRef.current, right, bottom }
+          setGeometry((previous) => ({ ...previous, right, bottom }))
+        }
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          window.removeEventListener('pointercancel', onUp)
+          pillDraggingRef.current = false
+          if (start.moved) dragJustEndedRef.current = true
+          delete root.dataset.dragging
+          if (start.moved) {
+            persistGeometry(geometryRef.current)
+            const latest = geometryRef.current
+            const stored = { ...settings, pinned: true, right: latest.right, bottom: latest.bottom }
+            saveWidgetSettings(stored)
+            setSettings(stored)
+          }
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        window.addEventListener('pointercancel', onUp)
+      }
+
       const pill = h('div', {
         className: 'tu-float-pill',
         role: 'button',
         tabIndex: 0,
         /**
-         * 折叠态暂不绑定拖拽。
+         * 折叠态可拖拽（用独立的 onPillPointerDown，不复用标题栏那套）。
          *
-         * 曾尝试让 pill 复用 onHeadPointerDown，但有用户反馈「面板完全卡住
-         * 也不响应拖动」。虽然未能复现，pill 上挂指针拖拽确实多一层风险：
-         * 折叠态尺寸小、点击与拖动意图难区分，且它的 onClick 是「展开」，
-         * 与拖拽天然冲突。
-         *
-         * 先回到「折叠态点击展开」这个稳定行为。想换位置：展开后拖标题栏，
-         * 位置会自动保存，再折叠时就停在新位置了 —— 功能不受影响，
-         * 只是多一步。
+         * 点一下展开、按住拖动换位置 —— 两者靠移动距离区分：松手时若几乎
+         * 没移动，当点击处理（展开）；移动过则不展开，只更新位置。
          */
-        onClick: () => updateSettings({ collapsed: false }),
+        onPointerDown: onPillPointerDown,
+        onClick: (event) => {
+          // 拖动结束后的 click 不该触发展开
+          if (pillDraggingRef.current || dragJustEndedRef.current) {
+            dragJustEndedRef.current = false
+            return
+          }
+          updateSettings({ collapsed: false })
+        },
         onKeyDown: (event) => {
           if (event?.key === 'Enter' || event?.key === ' ') updateSettings({ collapsed: false })
         },
