@@ -546,6 +546,15 @@ export class BalanceBook {
     site.lastCheckedAt = this.now()
     if (result?.ok === true) {
       site.lastBalance = {
+        /**
+         * 显式记下「这次探测成功」。
+         *
+         * 早先没有这个字段，读回来永远是 undefined —— 页面/告警若用
+         * `lastBalance.ok` 判断成功与否会误判（把有余额的站点当成状态未知）。
+         * 虽然 `site.error === ''` 也能隐含成功，但那是间接推断，
+         * 调用方更该有一个直接字段可用。
+         */
+        ok: true,
         usd: result.usd,
         // 非美元余额（例如只有 CNY 的 DeepSeek 账号）只给 raw + currency，
         // 不硬换算成 USD。丢掉 raw 的话页面就只剩「查不到余额」。

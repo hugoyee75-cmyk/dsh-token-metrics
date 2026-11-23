@@ -364,6 +364,7 @@ check('非字符串安全', normalizeBaseUrl(null), '')
     })
     const saved = book.sites.find((x) => x.id === 'cny-site').lastBalance
 
+    check('探测成功时 ok 为 true', saved.ok, true)
     check('CNY 余额的 raw 被保存', saved.raw, 20.5)
     check('CNY 余额的 currency 被保存', saved.currency, 'CNY')
     check('CNY 余额没有 usd', saved.usd, undefined)

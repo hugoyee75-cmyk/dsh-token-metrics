@@ -2285,7 +2285,10 @@ const discoveredEntry = () => ({
     onClick()
     check('再次点击能正常展开', collapsed, true)
   }
-  check('药丸拖拽按自身尺寸钳制', /overlayRect\.height - start\.height - 8/.test(src), true)
+  // 拖拽钳制要考虑：view overlay 与视口取小、扣卡片高、扣顶部安全边距
+  check('拖拽按自身尺寸与安全边距钳制',
+    /viewportHeight - start\.height - WIDGET_TOP_SAFE/.test(src), true)
+  check('顶部安全边距已定义', /const WIDGET_TOP_SAFE = 56/.test(src), true)
 
   // 拖拽保持 0.4.0 的简单实现：不加额外监听器，避免残留导致卡死
   check('拖拽用 window 监听并成对移除',

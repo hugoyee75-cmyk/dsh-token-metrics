@@ -80,6 +80,16 @@ window.__ModuleLoader__.load({
     const WIDGET_MIN_WIDTH = 250
     /** 卡片与正文之间至少留出的呼吸距离。 */
     const WIDGET_GAP = 16
+    /**
+     * 顶部安全边距：卡片顶边与窗口顶边之间至少留这么多。
+     *
+     * 为什么需要：DSH 桌面端是**自绘标题栏**（约 36px），最小化/最大化/关闭
+     * 三个按钮画在那一带。若卡片顶边压上去，按钮会被遮挡、用户点不到。
+     * 56 = 36（标题栏）+ 20（余量），与 issue #11 的实测值一致。
+     *
+     * 浏览器里没有自绘标题栏，但这道边距同样合理 —— 顶部留白本来就更舒服。
+     */
+    const WIDGET_TOP_SAFE = 56
     /** 订阅制平台：这些站点的「今日花费」按 0 计，行内显示「订阅内」。 */
     const WIDGET_QUOTA_PLATFORMS = new Set(['kimi', 'glm', 'minimax', 'codex', 'mimo', 'opencode-go'])
     /** 打开统计页 / 模型接入页的跨组件事件。 */
@@ -6227,22 +6237,19 @@ function formatMoneyText(value) {
            */
           const measured = rootRef.current?.getBoundingClientRect?.().height ?? 0
           const cardHeight = measured > 0 ? measured : 400
-          const minVisible = 56
-          const maxBottom = cardHeight > 0
-            ? Math.max(8, window.innerHeight - cardHeight - 8)
-            : Math.max(8, window.innerHeight - minVisible)
-          // 卡片高到放不下时（小窗口 + 展开态），至少保住标题栏位置
           /**
-           * 卡片比视口还高时（小窗口 + 展开态），无法让整块可见。
-           * 此时 bottom 取最小值 8 —— 让卡片**顶部对齐视口顶部**，
-           * 保证标题栏（唯一拖拽入口）始终可及。底部超出部分看不到，
-           * 但用户可以折叠或拖到位置合适后再展开。
+           * 底部最大偏移 = 视口高 − 卡片高 − 顶部安全边距。
            *
-           * 取 8 而不是 0：留一点边距，避免贴边时阴影被裁掉。
+           * 顶部安全边距（WIDGET_TOP_SAFE）是 issue #11 的核心：DSH 桌面端
+           * 自绘标题栏约 36px，卡片顶边必须留在它下面，否则会盖住
+           * 最小化/最大化/关闭三个按钮。
+           *
+           * 卡片比可用高度还大时（小窗口 + 展开态）没法整块可见，此时
+           * 退化为「顶部贴住安全线、底部溢出视口」—— 保证标题栏可及。
            */
-          const safeBottom = cardHeight >= window.innerHeight - minVisible - 8
-            ? 8
-            : maxBottom
+          const usableHeight = window.innerHeight - WIDGET_TOP_SAFE
+          const maxBottom = Math.max(8, usableHeight - cardHeight)
+          const safeBottom = cardHeight >= usableHeight ? 8 : maxBottom
           commitGeometry({
             right: clampNumber(settings.right, 8, Math.max(8, window.innerWidth - WIDGET_MIN_WIDTH - 8)),
             bottom: clampNumber(settings.bottom, 8, Math.max(8, safeBottom)),
@@ -6355,8 +6362,19 @@ function formatMoneyText(value) {
           const toastHost = document.querySelector('.tu-toasts')
           const toastHeight = toastHost === null ? 0 : toastHost.getBoundingClientRect().height
           const cardHeight = root.getBoundingClientRect().height || 272
+          /**
+           * 首屏定位也要扣掉顶部安全边距。
+           *
+           * 早先直接用 `overlayRect.height - 96 - cardHeight`：overlay 容器
+           * 可能比视口高（不一定是视口尺寸），且 96 是拍脑袋的余量，既没算
+           * 标题栏也没考虑底部留白。改成「视口高 − 底部余量 − 卡片高」，
+           * 并保证顶部不越过 WIDGET_TOP_SAFE。
+           */
+          const viewportHeight = Math.min(overlayRect.height, window.innerHeight)
+          const desiredBottom = viewportHeight - 96 - cardHeight
           const bottom = heroPhase
-            ? Math.max(96, overlayRect.height - 96 - cardHeight)
+            // 顶边不低于安全线：bottom 的上限是「视口高 − 卡片高 − 安全边距」
+            ? clampNumber(desiredBottom, 96, Math.max(96, viewportHeight - cardHeight - WIDGET_TOP_SAFE))
             : Math.max(96, 18 + toastHeight + 12)
           commitGeometry({ right, bottom, width, overlap })
         }
@@ -6462,7 +6480,14 @@ function formatMoneyText(value) {
            * 否则卡片顶部会顶出视口，标题栏（唯一的拖拽入口）随之消失。
            * 卡片比容器还高时（小窗口 + 展开态），退化为「至少露出标题栏」。
            */
-          const maxBottom = Math.max(8, overlayRect.height - start.height - 8)
+          /**
+           * 拖拽边界同样要留顶部安全边距。
+           *
+           * overlayRect 可能比视口高（槽位容器不一定是视口尺寸），取两者
+           * 较小值才代表用户真正能看到的范围；再扣掉卡片高度与标题栏。
+           */
+          const viewportHeight = Math.min(overlayRect.height, window.innerHeight)
+          const maxBottom = Math.max(8, viewportHeight - start.height - WIDGET_TOP_SAFE)
           const right = clampNumber(start.right - dx, 8, Math.max(8, overlayRect.width - start.width - 8))
           const bottom = clampNumber(start.bottom - dy, 8, maxBottom)
           geometryRef.current = { ...geometryRef.current, right, bottom }
@@ -6707,7 +6732,14 @@ function formatMoneyText(value) {
           start.moved = true
           // 四条边都按药丸**自身尺寸**钳制，保证始终完整可见
           const maxRight = Math.max(8, overlayRect.width - start.width - 8)
-          const maxBottom = Math.max(8, overlayRect.height - start.height - 8)
+          /**
+           * 拖拽边界同样要留顶部安全边距。
+           *
+           * overlayRect 可能比视口高（槽位容器不一定是视口尺寸），取两者
+           * 较小值才代表用户真正能看到的范围；再扣掉卡片高度与标题栏。
+           */
+          const viewportHeight = Math.min(overlayRect.height, window.innerHeight)
+          const maxBottom = Math.max(8, viewportHeight - start.height - WIDGET_TOP_SAFE)
           const right = clampNumber(start.right - dx, 8, maxRight)
           const bottom = clampNumber(start.bottom - dy, 8, maxBottom)
           geometryRef.current = { ...geometryRef.current, right, bottom }
